@@ -27,6 +27,22 @@ type TransfersResponse = {
   };
 };
 
+type FlowsResponse = {
+  chain: string;
+  address: string;
+  summary: { tokenCount: number; transferCount: number };
+  flows: Array<{
+    asset: string;
+    contractAddress?: string;
+    inValue: number;
+    outValue: number;
+    netValue: number;
+    inCount: number;
+    outCount: number;
+    lastTimestamp?: string;
+  }>;
+};
+
 async function getJson<T>(url: string): Promise<T> {
   const res = await fetch(url, { cache: "no-store" });
   if (!res.ok) throw new Error(`Request failed: ${res.status} ${res.statusText}`);
@@ -41,8 +57,9 @@ export default async function BaseWalletPage({
   const { address } = await params;
   const base = process.env.NEXT_PUBLIC_BASE_URL ?? "http://127.0.0.1:3000";
 
-  const [portfolio, transfers] = await Promise.all([
+  const [portfolio, flows, transfers] = await Promise.all([
     getJson<PortfolioResponse>(`${base}/api/base/${address}/portfolio`),
+    getJson<FlowsResponse>(`${base}/api/base/${address}/flows?maxCount=0xC8`),
     getJson<TransfersResponse>(`${base}/api/base/${address}/transfers?maxCount=0x64`),
   ]);
 
@@ -93,6 +110,12 @@ export default async function BaseWalletPage({
             tokenMetadataByAddress={portfolio.tokenMetadataByAddress}
           />
         );
+      })()}
+
+      {(() => {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const FlowsTable = require("./FlowsTable").default;
+        return <FlowsTable flows={flows.flows} />;
       })()}
 
       <section className="mt-8">
