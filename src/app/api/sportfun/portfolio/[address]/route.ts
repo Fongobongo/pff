@@ -329,11 +329,60 @@ export async function GET(request: Request, context: { params: Promise<{ address
         })
         .filter((c) => c.deltaRaw !== "0");
 
+      const usdcDelta = usdcDeltaByHash.get(hash) ?? 0n;
+
+      // Best-effort trade inference.
+      // Works reliably only when exactly one player tokenId changes in the tx.
+      let inferred:
+        | {
+            kind: "buy" | "sell" | "unknown";
+            contractAddress?: string;
+            tokenIdDec?: string;
+            shareDeltaRaw?: string;
+            priceUsdcPerShareRaw?: string; // USDC base units (1e6)
+          }
+        | undefined;
+
+      if (erc1155Changes.length === 1) {
+        const c = erc1155Changes[0];
+        const shareDelta = BigInt(c.deltaRaw);
+        const kind =
+          shareDelta > 0n && usdcDelta < 0n
+            ? "buy"
+            : shareDelta < 0n && usdcDelta > 0n
+              ? "sell"
+              : "unknown";
+
+        // price = |USDC| / |shares|
+        // shares are 18-dec fixed point, USDC is 6 decimals.
+        // We return price in USDC base units (1e6) per 1.0 share.
+        let priceUsdcPerShareRaw: string | undefined;
+        const absShares = shareDelta < 0n ? -shareDelta : shareDelta;
+        const absUsdc = usdcDelta < 0n ? -usdcDelta : usdcDelta;
+        if (absShares > 0n && absUsdc > 0n) {
+          priceUsdcPerShareRaw = ((absUsdc * 10n ** 18n) / absShares).toString(10);
+        }
+
+        inferred = {
+          kind,
+          contractAddress: c.contractAddress,
+          tokenIdDec: c.tokenIdDec,
+          shareDeltaRaw: c.deltaRaw,
+          priceUsdcPerShareRaw,
+        };
+      } else {
+        // Multi-token tx: likely bundles/swaps/pack actions.
+        inferred = {
+          kind: "unknown",
+        };
+      }
+
       return {
         hash,
         timestamp: timestampByHash.get(hash),
-        usdcDeltaRaw: (usdcDeltaByHash.get(hash) ?? 0n).toString(10),
+        usdcDeltaRaw: usdcDelta.toString(10),
         erc1155Changes,
+        inferred,
       };
     })
     .sort((a, b) => String(b.timestamp ?? "").localeCompare(String(a.timestamp ?? "")));

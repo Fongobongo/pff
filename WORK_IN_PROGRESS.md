@@ -5,7 +5,7 @@
 
 ## Next
 - Map ERC-1155 `tokenId` → player/asset metadata (via `uri(uint256)` and its base mapping).
-- Correlate ERC-1155 transfers with USDC transfers to infer buys/sells + price per share.
+- Correlate ERC-1155 transfers with USDC transfers to infer buys/sells + price per share (now adds best-effort inference for single-token tx).
 - Add tx inspector to decode receipts/logs and discover contract/event model.
 - Expand `/api/sportfun/portfolio/[address]` to include trade history (tx-based).
 

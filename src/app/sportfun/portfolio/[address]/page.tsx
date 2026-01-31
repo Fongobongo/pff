@@ -44,6 +44,13 @@ type SportfunPortfolioResponse = {
       tokenIdDec: string;
       deltaRaw: string;
     }>;
+    inferred?: {
+      kind: "buy" | "sell" | "unknown";
+      contractAddress?: string;
+      tokenIdDec?: string;
+      shareDeltaRaw?: string;
+      priceUsdcPerShareRaw?: string;
+    };
   }>;
 };
 
@@ -177,6 +184,7 @@ export default async function SportfunPortfolioPage({
             <thead className="bg-white/5 text-left text-gray-300">
               <tr>
                 <th className="p-3">Time</th>
+                <th className="p-3">Inferred</th>
                 <th className="p-3">USDC delta</th>
                 <th className="p-3">ERC-1155 changes</th>
                 <th className="p-3">Tx</th>
@@ -186,6 +194,22 @@ export default async function SportfunPortfolioPage({
               {data.activity.slice(0, 50).map((a) => (
                 <tr key={a.hash} className="text-gray-200">
                   <td className="p-3 whitespace-nowrap text-gray-400">{a.timestamp ?? "—"}</td>
+                  <td className="p-3 whitespace-nowrap">
+                    {a.inferred?.kind && a.inferred.kind !== "unknown" ? (
+                      <div className="flex flex-col">
+                        <span className={a.inferred.kind === "buy" ? "text-green-400" : "text-red-400"}>
+                          {a.inferred.kind.toUpperCase()}
+                        </span>
+                        {a.inferred.priceUsdcPerShareRaw ? (
+                          <span className="text-xs text-gray-400">
+                            ~{formatFixed(a.inferred.priceUsdcPerShareRaw, data.assumptions.usdc.decimals)} USDC/share
+                          </span>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <span className="text-gray-500">—</span>
+                    )}
+                  </td>
                   <td className="p-3 whitespace-nowrap">
                     <span
                       className={
@@ -233,7 +257,7 @@ export default async function SportfunPortfolioPage({
               ))}
               {data.activity.length === 0 ? (
                 <tr>
-                  <td className="p-3 text-gray-400" colSpan={4}>
+                  <td className="p-3 text-gray-400" colSpan={5}>
                     No activity found (with current contract filter).
                   </td>
                 </tr>
