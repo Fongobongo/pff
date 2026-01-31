@@ -16,3 +16,4 @@ This file tracks key decisions and requirements from our chats.
   - Keep chat history and a project changelog in separate files, **English only**, committed to git.
   - The entire project must be in **English**, including code and comments.
   - Dev runs on a VPS (Debian 12) and production deploy is Vercel (or Netlify).
+  - All resources must be free-tier (hosting, DB, APIs). Prefer Supabase for the database.

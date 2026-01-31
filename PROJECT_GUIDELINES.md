@@ -9,6 +9,11 @@
   - commit messages (preferred)
   - issue/PR text (when applicable)
 
+## Resources / Cost
+
+- Use **free-tier resources only** (hosting, database, APIs, etc.).
+- Preferred database: **Supabase** (free tier).
+
 ## Sources & Data
 
 - Blockchain analytics target network: **Base** (Ethereum L2).

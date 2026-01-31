@@ -19,3 +19,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Base RPC client via viem
   - Postgres access via Drizzle + node-postgres
   - Placeholder API route for wallet portfolio history
+- Requirement: use free-tier resources only; prefer Supabase for the database
