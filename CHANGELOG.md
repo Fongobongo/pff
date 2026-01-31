@@ -26,4 +26,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added Etherscan v2 client + Base wallet summary API endpoint (explorer-backed, rate-limit friendly)
 - Sport.fun portfolio (WIP):
   - API: `GET /api/sportfun/portfolio/[address]` (holdings from ERC-1155 transfers + best-effort `uri(tokenId)`)
+  - Added tx-grouped `activity` with best-effort USDC delta correlation (by tx hash)
   - UI: `/sportfun/portfolio/[address]`

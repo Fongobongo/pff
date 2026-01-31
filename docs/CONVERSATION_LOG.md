@@ -35,3 +35,4 @@ This file tracks key decisions and requirements from our chats.
     - Computes net balances per (contract, tokenId)
     - Best-effort calls `uri(uint256)` for each held tokenId
   - Added UI page `/sportfun/portfolio/[address]` and linked it from the home page.
+  - Added tx-grouped activity with best-effort USDC delta correlation (joined by tx hash).

@@ -12,6 +12,7 @@
 - Last updated: 2026-01-31
 - Implemented initial WIP endpoint + UI page:
   - `GET /api/sportfun/portfolio/[address]` (holdings from ERC-1155 transfers + best-effort `uri(tokenId)`)
+  - `activity` (tx-grouped): best-effort USDC delta + ERC-1155 deltas by tx hash
   - `/sportfun/portfolio/[address]`
 - Currently filtering to two observed Sport.fun ERC-1155 contracts:
   - `0x71c8b0c5148edb0399d1edf9bf0c8c81dea16918`
