@@ -27,4 +27,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sport.fun portfolio (WIP):
   - API: `GET /api/sportfun/portfolio/[address]` (holdings from ERC-1155 transfers + best-effort `uri(tokenId)`)
   - Added tx-grouped `activity` with best-effort USDC delta correlation (by tx hash)
-  - UI: `/sportfun/portfolio/[address]`
+  - Added tx inspector endpoint: `GET /api/sportfun/tx/[hash]` (receipt/log decoding)
+  - UI: `/sportfun/portfolio/[address]`, `/sportfun/tx/[hash]`

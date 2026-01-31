@@ -212,14 +212,22 @@ export default async function SportfunPortfolioPage({
                     </div>
                   </td>
                   <td className="p-3 whitespace-nowrap">
-                    <a
-                      className="text-blue-400 hover:underline"
-                      href={`https://basescan.org/tx/${a.hash}`}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      {shortenAddress(a.hash)}
-                    </a>
+                    <div className="flex flex-col">
+                      <a
+                        className="text-blue-400 hover:underline"
+                        href={`/sportfun/tx/${a.hash}`}
+                      >
+                        Inspect
+                      </a>
+                      <a
+                        className="text-xs text-gray-500 hover:underline"
+                        href={`https://basescan.org/tx/${a.hash}`}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        Basescan
+                      </a>
+                    </div>
                   </td>
                 </tr>
               ))}

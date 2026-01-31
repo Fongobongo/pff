@@ -36,3 +36,4 @@ This file tracks key decisions and requirements from our chats.
     - Best-effort calls `uri(uint256)` for each held tokenId
   - Added UI page `/sportfun/portfolio/[address]` and linked it from the home page.
   - Added tx-grouped activity with best-effort USDC delta correlation (joined by tx hash).
+  - Added a tx inspector (`/sportfun/tx/[hash]`) + API (`/api/sportfun/tx/[hash]`) to decode receipts/logs and identify unknown contract events.
