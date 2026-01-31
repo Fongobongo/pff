@@ -15,7 +15,7 @@ export default function FlowsTable({ flows }: { flows: FlowRow[] }) {
       <h2 className="text-lg font-semibold text-white">Net flows (token transfers)</h2>
       <p className="mt-1 text-xs text-gray-500">
         Based on recent transfer history (Alchemy). Values are best-effort and may not include swaps
-        executed via contracts in the same way a "portfolio" UI would.
+        executed via contracts in the same way a &quot;portfolio&quot; UI would.
       </p>
 
       <div className="mt-3 overflow-x-auto rounded-xl border border-white/10">

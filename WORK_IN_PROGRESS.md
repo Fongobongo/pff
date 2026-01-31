@@ -1,11 +1,18 @@
 # Work in Progress
 
 ## Now
-- Start **Step 3**: determine Sport.fun on-chain contracts & data model for **in-game portfolio** (shares, trades, price history).
+- **Step 3 (Sport.fun portfolio)**: finalize the on-chain data model and confirm trade semantics.
 
 ## Next
-- Implement on-chain event indexing (Base) for the identified Sport.fun contracts.
-- Add `/api/sportfun/...` endpoints and the first UI page under `/sportfun/portfolio/[address]`.
+- Map ERC-1155 `tokenId` → player/asset metadata (via `uri(uint256)` and its base mapping).
+- Correlate ERC-1155 transfers with USDC transfers to infer buys/sells + price per share.
+- Expand `/api/sportfun/portfolio/[address]` to include trade history (tx-based).
 
 ## Status
 - Last updated: 2026-01-31
+- Implemented initial WIP endpoint + UI page:
+  - `GET /api/sportfun/portfolio/[address]` (holdings from ERC-1155 transfers + best-effort `uri(tokenId)`)
+  - `/sportfun/portfolio/[address]`
+- Currently filtering to two observed Sport.fun ERC-1155 contracts:
+  - `0x71c8b0c5148edb0399d1edf9bf0c8c81dea16918`
+  - `0x2eef466e802ab2835ab81be63eebc55167d35b56`

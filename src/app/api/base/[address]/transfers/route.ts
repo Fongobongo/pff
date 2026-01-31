@@ -52,10 +52,16 @@ export async function GET(
 
   const transfers = [...(incoming?.transfers ?? []), ...(outgoing?.transfers ?? [])];
 
+  type TransferSortKey = {
+    blockNum?: string | number;
+    uniqueId?: string;
+    hash?: string;
+  };
+
   // Best-effort sort: by blockNum desc, then uniqueId/txHash if present.
-  transfers.sort((a: any, b: any) => {
-    const ab = typeof a.blockNum === "string" ? parseInt(a.blockNum, 16) : a.blockNum ?? 0;
-    const bb = typeof b.blockNum === "string" ? parseInt(b.blockNum, 16) : b.blockNum ?? 0;
+  transfers.sort((a: TransferSortKey, b: TransferSortKey) => {
+    const ab = typeof a.blockNum === "string" ? parseInt(a.blockNum, 16) : (a.blockNum ?? 0);
+    const bb = typeof b.blockNum === "string" ? parseInt(b.blockNum, 16) : (b.blockNum ?? 0);
     if (bb !== ab) return bb - ab;
     return String(b.uniqueId ?? b.hash ?? "").localeCompare(String(a.uniqueId ?? a.hash ?? ""));
   });

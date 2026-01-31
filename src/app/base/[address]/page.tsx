@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { formatEthFromWeiHex, shortenAddress } from "@/lib/format";
-import { formatUnitsFromHex, type TokenMetadata } from "@/lib/token";
+import TokenBalances from "./TokenBalances";
+import FlowsTable from "./FlowsTable";
+import { type TokenMetadata } from "@/lib/token";
 
 type PortfolioResponse = {
   chain: string;
@@ -92,31 +94,12 @@ export default async function BaseWalletPage({
         </div>
       </section>
 
-      {/* Token balances */}
-      {/* eslint-disable-next-line @next/next/no-async-client-component */}
-      {/* TokenBalances is a server component import in this route folder. */}
+      <TokenBalances
+        tokenBalances={portfolio.tokenBalances}
+        tokenMetadataByAddress={portfolio.tokenMetadataByAddress}
+      />
 
-      {/** Token balances section **/}
-      {
-        // dynamic import to keep this file readable
-      }
-      {(() => {
-        // Server Component import within the route folder.
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const TokenBalances = require("./TokenBalances").default;
-        return (
-          <TokenBalances
-            tokenBalances={portfolio.tokenBalances}
-            tokenMetadataByAddress={portfolio.tokenMetadataByAddress}
-          />
-        );
-      })()}
-
-      {(() => {
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const FlowsTable = require("./FlowsTable").default;
-        return <FlowsTable flows={flows.flows} />;
-      })()}
+      <FlowsTable flows={flows.flows} />
 
       <section className="mt-8">
         <h2 className="text-lg font-semibold text-white">Recent transfers</h2>

@@ -24,3 +24,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added research notes and official scoring rules links (docs.sport.fun) for both NFL and Football
 - Drafted architecture notes for a minimal-deps / free-tier approach
 - Added Etherscan v2 client + Base wallet summary API endpoint (explorer-backed, rate-limit friendly)
+- Sport.fun portfolio (WIP):
+  - API: `GET /api/sportfun/portfolio/[address]` (holdings from ERC-1155 transfers + best-effort `uri(tokenId)`)
+  - UI: `/sportfun/portfolio/[address]`
