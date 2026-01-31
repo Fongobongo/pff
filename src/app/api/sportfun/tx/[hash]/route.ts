@@ -1,7 +1,15 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { alchemyRpc } from "@/lib/alchemy";
-import { decodeEventLog, type Abi, type Hex, hexToBigInt, isHex } from "viem";
+import {
+  decodeEventLog,
+  decodeFunctionData,
+  parseAbiItem,
+  type Abi,
+  type Hex,
+  hexToBigInt,
+  isHex,
+} from "viem";
 
 const paramsSchema = z.object({
   hash: z
@@ -24,6 +32,15 @@ type TxReceipt = {
   blockNumber?: string;
   gasUsed?: string;
   logs: ReceiptLog[];
+};
+
+type Tx = {
+  hash: string;
+  from: string;
+  to?: string;
+  input: string;
+  value?: string;
+  blockNumber?: string;
 };
 
 const ERC20_ABI: Abi = [
@@ -124,6 +141,57 @@ function safeToLower(s: string | undefined): string {
 
 function topic0(log: ReceiptLog): string {
   return (log.topics?.[0] ?? "").toLowerCase();
+}
+
+const EIP1967_IMPLEMENTATION_SLOT =
+  "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc";
+
+function slotToAddress(slotHex: string | null | undefined): string | undefined {
+  if (!slotHex || slotHex === "0x" || slotHex === "0x0") return undefined;
+  const hex = slotHex.toLowerCase().replace(/^0x/, "").padStart(64, "0");
+  const addr = `0x${hex.slice(24)}`;
+  if (addr === "0x0000000000000000000000000000000000000000") return undefined;
+  return addr;
+}
+
+async function getEip1967Implementation(address: string): Promise<string | undefined> {
+  try {
+    const slot = (await alchemyRpc("eth_getStorageAt", [
+      address,
+      EIP1967_IMPLEMENTATION_SLOT,
+      "latest",
+    ])) as string;
+
+    return slotToAddress(slot);
+  } catch {
+    return undefined;
+  }
+}
+
+async function lookupFunctionSignatures(selector: string): Promise<
+  Array<{ name: string; filtered: boolean; hasVerifiedContract: boolean }>
+> {
+  try {
+    const url = `https://api.openchain.xyz/signature-database/v1/lookup?function=${selector}`;
+    const res = await fetch(url, { cache: "no-store" });
+    if (!res.ok) return [];
+    const data = await res.json();
+    const rows = data?.result?.function?.[selector] ?? [];
+    return Array.isArray(rows) ? rows : [];
+  } catch {
+    return [];
+  }
+}
+
+function normalizeBigints(value: unknown): unknown {
+  if (typeof value === "bigint") return value.toString(10);
+  if (Array.isArray(value)) return value.map(normalizeBigints);
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) out[k] = normalizeBigints(v);
+    return out;
+  }
+  return value;
 }
 
 export async function GET(_request: Request, context: { params: Promise<{ hash: string }> }) {
@@ -253,9 +321,83 @@ export async function GET(_request: Request, context: { params: Promise<{ hash: 
 
   const gasUsed = receipt.gasUsed ? hexToBigInt(receipt.gasUsed as Hex).toString(10) : undefined;
 
+  const tx = (await alchemyRpc("eth_getTransactionByHash", [hash])) as Tx | null;
+
+  const txTo = tx?.to ? safeToLower(tx.to) : undefined;
+  const txToImplementation = txTo ? await getEip1967Implementation(txTo) : undefined;
+
+  const input = (tx?.input ?? "0x") as string;
+  const selector = input.length >= 10 ? input.slice(0, 10).toLowerCase() : undefined;
+
+  const signatureCandidates = selector ? await lookupFunctionSignatures(selector) : [];
+
+  let decodedCall:
+    | {
+        selector: string;
+        signature?: string;
+        args?: unknown;
+        candidates?: string[];
+        note?: string;
+      }
+    | undefined;
+
+  if (!selector) {
+    decodedCall = { selector: "", note: "No input selector (empty call data)." };
+  } else {
+    const candidates = signatureCandidates.map((c) => c.name);
+
+    // Prefer a verified candidate when possible.
+    const preferred =
+      signatureCandidates.find((c) => c.hasVerifiedContract)?.name ??
+      signatureCandidates.find((c) => !c.filtered)?.name ??
+      signatureCandidates[0]?.name;
+
+    if (!preferred) {
+      decodedCall = {
+        selector,
+        candidates,
+        note: "No signature candidates found in OpenChain DB.",
+      };
+    } else {
+      try {
+        const abiItem = parseAbiItem(`function ${preferred}`);
+        const out = decodeFunctionData({
+          abi: [abiItem],
+          data: input as Hex,
+        });
+
+        decodedCall = {
+          selector,
+          signature: preferred,
+          args: normalizeBigints(out.args),
+          candidates,
+        };
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        decodedCall = {
+          selector,
+          signature: preferred,
+          candidates,
+          note: `Signature lookup succeeded but decoding failed: ${msg}`,
+        };
+      }
+    }
+  }
+
   return NextResponse.json({
     chain: "base",
     txHash: receipt.transactionHash,
+    tx: tx
+      ? {
+          from: safeToLower(tx.from),
+          to: txTo,
+          toImplementation: txToImplementation,
+          value: tx.value,
+          blockNumber: tx.blockNumber,
+          inputLen: tx.input?.length ?? 0,
+        }
+      : undefined,
+    decodedCall,
     receipt: {
       status: receipt.status,
       blockNumber: receipt.blockNumber,

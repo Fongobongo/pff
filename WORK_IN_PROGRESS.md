@@ -27,3 +27,5 @@
     - `0xc21c2d586f1db92eedb67a2fc348f21ed7541965`
     - `0xc98bf3fc49a8a7ad162098ad0bb62268d46dacf9`
     )
+- Confirmed via receipt decoding that ids match tokenIds and values match the ERC-1155 transfer amounts (18-decimal fixed point).
+- Confirmed `baseURI()` currently returns empty string for both ERC-1155 player proxies.

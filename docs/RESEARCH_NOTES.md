@@ -79,4 +79,11 @@ Resolved via OpenChain signature DB:
 ### Notes
 
 - The recurring presence of `PlayerSharesPromoted` alongside ERC-1155 transfers suggests a market/router contract that updates share state.
-- Next: decode these events per tx and correlate with USDC deltas to infer buy/sell semantics and price per share.
+- `PlayerBatchTransfer` and `PlayerSharesPromoted` carry the same `(ids[], values[])` payload; values look like 18-decimal fixed point.
+- Both observed ERC-1155 proxies currently return an empty string for `baseURI()`.
+- These contracts are ERC-1967 proxies (implementation addresses via EIP-1967 slot):
+  - `0x71c8...` -> `0x7f17c01f8099c0816650d6d5c43ebd403ef1ac64`
+  - `0x2eef...` -> `0x1b30c1260828aeba87d7da1fd929f6e6bc25b7e0` (BaseScan-verified: `PlayerV2`)
+  - `0xc21c...` -> `0x48d29efe75e7e1403184e07005170bf72e1185a5` (BaseScan-verified: `DevelopmentPlayersV2`)
+  - `0xc98b...` -> `0x216491d59b200873829084b7b16419445e8464f1`
+- Next: decode tx call data (function selectors) + correlate with USDC deltas to infer buy/sell semantics and price per share.

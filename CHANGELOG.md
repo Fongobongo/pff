@@ -31,5 +31,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Tx inspector now also decodes Sport.fun events:
     - `PlayerBatchTransfer(address,address,uint256[],uint256[])`
     - `PlayerSharesPromoted(address,uint256[],uint256[])`
+  - Tx inspector now also attempts to decode tx call data (function selector -> OpenChain signature lookup)
   - Added `scripts/sportfun_discover.mjs` for contract/topic discovery
   - UI: `/sportfun/portfolio/[address]`, `/sportfun/tx/[hash]`
