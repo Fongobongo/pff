@@ -19,4 +19,5 @@ This file tracks key decisions and requirements from our chats.
   - All resources must be free-tier (hosting, DB, APIs).
   - Supabase is an option, but we prefer to depend on as few external services as possible.
 - Reference scope: the project must include at least the same features as https://nfl-fun.vercel.app/
+- Scope update: build both sports (NFL + Football/soccer).
 - Requirement: find scoring/stats rules in the game's wiki (we can use https://docs.sport.fun as the accessible official docs source).

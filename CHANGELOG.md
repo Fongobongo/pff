@@ -21,4 +21,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Placeholder API route for wallet portfolio history
 - Requirement: use free-tier resources only; aim to minimize external service dependencies (Supabase is an option)
 - Requirement: match (at minimum) the feature surface of https://nfl-fun.vercel.app/
-- Added research notes and official scoring rules link (docs.sport.fun)
+- Added research notes and official scoring rules links (docs.sport.fun) for both NFL and Football
+- Drafted architecture notes for a minimal-deps / free-tier approach

@@ -26,6 +26,7 @@ These represent the minimum feature surface we should match.
 
 - Start page: https://docs.sport.fun/
 - NFL scoring matrix: https://docs.sport.fun/nfl/scoring-system/scoring-matrix
+- Football (soccer) scoring matrix: https://docs.sport.fun/football/scoring-system/scoring-matrix
 
 ### NFL scoring matrix (high level)
 
