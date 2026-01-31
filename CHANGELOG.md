@@ -8,8 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Repository initialized (README, .gitignore) and pushed to GitHub.
+- Repository initialized and pushed to GitHub.
 - Initial product requirements captured (Next.js/React fan site for pro.football.fun).
 - Notes: blockchain analytics on Base (Ethereum L2) by wallet address; player stats sourced from the web.
 - Project language policy: English for project docs, code, and comments.
 - Process docs: conversation log + changelog.
+- Next.js app scaffold (App Router + TypeScript + Tailwind + ESLint).
+- Initial backend scaffolding:
+  - Env validation via Zod
+  - Base RPC client via viem
+  - Postgres access via Drizzle + node-postgres
+  - Placeholder API route for wallet portfolio history

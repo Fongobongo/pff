@@ -15,3 +15,4 @@ This file tracks key decisions and requirements from our chats.
 - Policies:
   - Keep chat history and a project changelog in separate files, **English only**, committed to git.
   - The entire project must be in **English**, including code and comments.
+  - Dev runs on a VPS (Debian 12) and production deploy is Vercel (or Netlify).
