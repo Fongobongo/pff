@@ -23,4 +23,5 @@ This file tracks key decisions and requirements from our chats.
 - Provided a test wallet address (Pro user): 0x82c117A68fD47A2d53b997049F4BE44714D57455
 - Confirmed requirements: in-game user portfolio by wallet + athlete stats with history.
 - User created an Etherscan API v2 key and set ETHERSCAN_API_KEY (rate limit: 3 req/s) for Base explorer-backed history.
+- User added an Alchemy API key (rate limit: 25 req/s) to enable Base wallet history via Alchemy Enhanced APIs.
 - Requirement: find scoring/stats rules in the game's wiki (we can use https://docs.sport.fun as the accessible official docs source).
