@@ -1,19 +1,13 @@
 import Link from "next/link";
 import { formatEthFromWeiHex, shortenAddress } from "@/lib/format";
+import { formatUnitsFromHex, type TokenMetadata } from "@/lib/token";
 
-type TokenBalancesResponse = {
+type PortfolioResponse = {
   chain: string;
   address: string;
-  result: {
-    address: string;
-    tokenBalances: Array<{ contractAddress: string; tokenBalance: string }>;
-  };
-};
-
-type NativeBalanceResponse = {
-  chain: string;
-  address: string;
-  balanceWeiHex: string;
+  nativeBalanceWeiHex: string;
+  tokenBalances: Array<{ contractAddress: string; tokenBalance: string }>;
+  tokenMetadataByAddress: Record<string, TokenMetadata>;
 };
 
 type TransfersResponse = {
@@ -47,9 +41,8 @@ export default async function BaseWalletPage({
   const { address } = await params;
   const base = process.env.NEXT_PUBLIC_BASE_URL ?? "http://127.0.0.1:3000";
 
-  const [native, tokenBalances, transfers] = await Promise.all([
-    getJson<NativeBalanceResponse>(`${base}/api/base/${address}/native-balance`),
-    getJson<TokenBalancesResponse>(`${base}/api/base/${address}/token-balances`),
+  const [portfolio, transfers] = await Promise.all([
+    getJson<PortfolioResponse>(`${base}/api/base/${address}/portfolio`),
     getJson<TransfersResponse>(`${base}/api/base/${address}/transfers?maxCount=0x64`),
   ]);
 
@@ -68,17 +61,39 @@ export default async function BaseWalletPage({
       <section className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-3">
         <div className="rounded-xl border border-white/10 bg-white/5 p-4">
           <div className="text-sm text-gray-400">Native balance (ETH)</div>
-          <div className="mt-2 text-xl text-white">{formatEthFromWeiHex(native.balanceWeiHex)}</div>
+          <div className="mt-2 text-xl text-white">
+            {formatEthFromWeiHex(portfolio.nativeBalanceWeiHex)}
+          </div>
         </div>
 
         <div className="rounded-xl border border-white/10 bg-white/5 p-4 md:col-span-2">
-          <div className="text-sm text-gray-400">Token balances (count)</div>
-          <div className="mt-2 text-xl text-white">{tokenBalances.result.tokenBalances.length}</div>
+          <div className="text-sm text-gray-400">Token balances</div>
+          <div className="mt-2 text-xl text-white">{portfolio.tokenBalances.length}</div>
           <p className="mt-1 text-xs text-gray-500">
-            Note: balances are raw. We will enrich with token metadata and formatting.
+            Includes token metadata (symbol/decimals) when available.
           </p>
         </div>
       </section>
+
+      {/* Token balances */}
+      {/* eslint-disable-next-line @next/next/no-async-client-component */}
+      {/* TokenBalances is a server component import in this route folder. */}
+
+      {/** Token balances section **/}
+      {
+        // dynamic import to keep this file readable
+      }
+      {(() => {
+        // Server Component import within the route folder.
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const TokenBalances = require("./TokenBalances").default;
+        return (
+          <TokenBalances
+            tokenBalances={portfolio.tokenBalances}
+            tokenMetadataByAddress={portfolio.tokenMetadataByAddress}
+          />
+        );
+      })()}
 
       <section className="mt-8">
         <h2 className="text-lg font-semibold text-white">Recent transfers</h2>
