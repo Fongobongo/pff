@@ -37,3 +37,6 @@ This file tracks key decisions and requirements from our chats.
   - Added UI page `/sportfun/portfolio/[address]` and linked it from the home page.
   - Added tx-grouped activity with best-effort USDC delta correlation (joined by tx hash).
   - Added a tx inspector (`/sportfun/tx/[hash]`) + API (`/api/sportfun/tx/[hash]`) to decode receipts/logs and identify unknown contract events.
+  - Resolved two recurring unknown topic0 values via OpenChain signature DB:
+    - `0xb9d06178...` => `PlayerBatchTransfer(address,address,uint256[],uint256[])`
+    - `0xdf85ea72...` => `PlayerSharesPromoted(address,uint256[],uint256[])`

@@ -79,12 +79,44 @@ const ERC721_ABI: Abi = [
   },
 ];
 
+const SPORTFUN_ABI: Abi = [
+  {
+    type: "event",
+    name: "PlayerBatchTransfer",
+    inputs: [
+      // topics length observed: 3 => 2 indexed fields
+      { name: "from", type: "address", indexed: true },
+      { name: "to", type: "address", indexed: true },
+      { name: "ids", type: "uint256[]", indexed: false },
+      { name: "values", type: "uint256[]", indexed: false },
+    ],
+    anonymous: false,
+  },
+  {
+    type: "event",
+    name: "PlayerSharesPromoted",
+    inputs: [
+      // topics length observed: 2 => 1 indexed field
+      { name: "account", type: "address", indexed: true },
+      { name: "ids", type: "uint256[]", indexed: false },
+      { name: "values", type: "uint256[]", indexed: false },
+    ],
+    anonymous: false,
+  },
+];
+
 // Known topic0 values (keccak256 of canonical event signature)
 const TOPIC_TRANSFER = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
 const TOPIC_ERC1155_TRANSFER_SINGLE =
   "0xc3d58168c5ae7397731d063d5bbf3d657854427343f4c083240f7aacaa2d0f62";
 const TOPIC_ERC1155_TRANSFER_BATCH =
   "0x4a39dc06d4c0dbc64b70af90fd698a233a518aa5d07e595d983b8c0526c8f7fb";
+
+// Sport.fun events (resolved via OpenChain signature DB)
+const TOPIC_SPORTFUN_PLAYER_BATCH_TRANSFER =
+  "0xb9d061782f0a4256a6d43a73bc77d6489af234b94515a1cdacaddc9b8b2196aa";
+const TOPIC_SPORTFUN_PLAYER_SHARES_PROMOTED =
+  "0xdf85ea724d07d95f8a2eee7dd82e4878a451bd282e57e84f96996918b441a6c2";
 
 function safeToLower(s: string | undefined): string {
   return (s ?? "").toLowerCase();
@@ -163,6 +195,12 @@ export async function GET(_request: Request, context: { params: Promise<{ hash: 
     } else if (t0 === TOPIC_ERC1155_TRANSFER_BATCH) {
       label = "erc1155";
       abi = ERC1155_ABI;
+    } else if (t0 === TOPIC_SPORTFUN_PLAYER_BATCH_TRANSFER) {
+      label = "sportfun";
+      abi = SPORTFUN_ABI;
+    } else if (t0 === TOPIC_SPORTFUN_PLAYER_SHARES_PROMOTED) {
+      label = "sportfun";
+      abi = SPORTFUN_ABI;
     }
 
     if (!label || !abi) {

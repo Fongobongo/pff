@@ -52,3 +52,31 @@ These represent the minimum feature surface we should match.
 
 - `pro.football.fun` itself is protected by Cloudflare and is blocked from this execution environment.
 - We can still use `docs.sport.fun` for rules + terminology.
+
+## Sport.fun on-chain discovery (Base)
+
+### ERC-1155 contracts (observed in test wallet history)
+
+- `0x71c8b0c5148edb0399d1edf9bf0c8c81dea16918`
+- `0x2eef466e802ab2835ab81be63eebc55167d35b56`
+
+### Custom event signatures (topic0)
+
+Resolved via OpenChain signature DB:
+
+- `0xb9d061782f0a4256a6d43a73bc77d6489af234b94515a1cdacaddc9b8b2196aa`
+  - `PlayerBatchTransfer(address,address,uint256[],uint256[])`
+  - Observed topics length: 3 (likely `from` + `to` indexed)
+  - Observed emitting addresses: the ERC-1155 contracts above
+
+- `0xdf85ea724d07d95f8a2eee7dd82e4878a451bd282e57e84f96996918b441a6c2`
+  - `PlayerSharesPromoted(address,uint256[],uint256[])`
+  - Observed topics length: 2 (likely `account` indexed)
+  - Observed emitting addresses:
+    - `0xc21c2d586f1db92eedb67a2fc348f21ed7541965`
+    - `0xc98bf3fc49a8a7ad162098ad0bb62268d46dacf9`
+
+### Notes
+
+- The recurring presence of `PlayerSharesPromoted` alongside ERC-1155 transfers suggests a market/router contract that updates share state.
+- Next: decode these events per tx and correlate with USDC deltas to infer buy/sell semantics and price per share.

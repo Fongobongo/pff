@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint .",
     "db:generate": "drizzle-kit generate:pg",
-    "db:migrate": "drizzle-kit up:pg"
+    "db:migrate": "drizzle-kit up:pg",
+    "sportfun:discover": "node scripts/sportfun_discover.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.90.20",
