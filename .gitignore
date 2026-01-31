@@ -1,11 +1,14 @@
 # Node
 node_modules/
+.next/
+out/
 
 # Logs
 *.log
 
 # Env
 .env
+.env.*
 
 # OS
 .DS_Store

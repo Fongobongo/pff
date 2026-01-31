@@ -1,0 +1,15 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+### Added
+- Repository initialized (README, .gitignore) and pushed to GitHub.
+- Initial product requirements captured (Next.js/React fan site for pro.football.fun).
+- Notes: blockchain analytics on Base (Ethereum L2) by wallet address; player stats sourced from the web.
+- Project language policy: English for project docs, code, and comments.
+- Process docs: conversation log + changelog.
