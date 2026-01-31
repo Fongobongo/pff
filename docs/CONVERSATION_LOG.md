@@ -20,4 +20,6 @@ This file tracks key decisions and requirements from our chats.
   - Supabase is an option, but we prefer to depend on as few external services as possible.
 - Reference scope: the project must include at least the same features as https://nfl-fun.vercel.app/
 - Scope update: build both sports (NFL + Football/soccer).
+- Provided a test wallet address (Pro user): 0x82c117A68fD47A2d53b997049F4BE44714D57455
+- Confirmed requirements: in-game user portfolio by wallet + athlete stats with history.
 - Requirement: find scoring/stats rules in the game's wiki (we can use https://docs.sport.fun as the accessible official docs source).
