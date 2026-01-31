@@ -23,3 +23,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Requirement: match (at minimum) the feature surface of https://nfl-fun.vercel.app/
 - Added research notes and official scoring rules links (docs.sport.fun) for both NFL and Football
 - Drafted architecture notes for a minimal-deps / free-tier approach
+- Added Etherscan v2 client + Base wallet summary API endpoint (explorer-backed, rate-limit friendly)
