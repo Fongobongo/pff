@@ -129,7 +129,7 @@ export default async function SportfunPortfolioPage({
   const { address } = paramsSchema.parse(await params);
 
   const data = await getJson<SportfunPortfolioResponse>(
-    `/api/sportfun/portfolio/${address}?maxPages=3&maxCount=0x3e8&maxActivity=40&includeTrades=1&includePrices=1&includeUri=0`
+    `/api/sportfun/portfolio/${address}?maxPages=3&maxCount=0x3e8&maxActivity=500&includeTrades=1&includePrices=1&includeUri=0`
   );
 
   return (
@@ -268,6 +268,7 @@ export default async function SportfunPortfolioPage({
 
       <section className="mt-8">
         <h2 className="text-lg font-semibold text-white">Activity (tx grouped)</h2>
+        <p className="mt-1 text-xs text-gray-500">Showing latest {Math.min(80, data.activity.length)} rows.</p>
         <p className="mt-1 text-sm text-gray-400">{data.assumptions.usdc.note}</p>
 
         <div className="mt-3 overflow-x-auto rounded-xl border border-white/10">
@@ -282,7 +283,7 @@ export default async function SportfunPortfolioPage({
               </tr>
             </thead>
             <tbody className="divide-y divide-white/10">
-              {data.activity.map((a) => (
+              {data.activity.slice(0, 80).map((a) => (
                 <tr key={a.hash} className="text-gray-200">
                   <td className="p-3 whitespace-nowrap text-gray-400">{a.timestamp ?? "—"}</td>
                   <td className="p-3 whitespace-nowrap">
