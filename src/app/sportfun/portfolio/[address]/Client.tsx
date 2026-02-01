@@ -4,6 +4,9 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { shortenAddress } from "@/lib/format";
 
+type SortKey = "value" | "pnl" | "spent" | "shares";
+
+
 type SportfunPortfolioResponse = {
   chain: string;
   protocol: string;
@@ -153,14 +156,16 @@ export default function SportfunPortfolioClient({ address }: { address: string }
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [attemptPages, setAttemptPages] = useState<number[]>([]);
+  const [sortKey, setSortKey] = useState<SortKey>("value");
+  const [sortDir, setSortDir] = useState<"desc" | "asc">("desc");
+  const [contractFilter, setContractFilter] = useState<string>("all");
 
   const decimals = data?.assumptions.usdc.decimals ?? 6;
 
   const requestUrl = useMemo(() => {
     // Start modest, then the effect will auto-increase until complete.
-    // Full history on this wallet should be well under these caps.
     return (maxPages: number) =>
-      `/api/sportfun/portfolio/${address}?scanMode=full&maxPages=${maxPages}&maxCount=0x3e8&maxActivity=20000&includeTrades=1&includePrices=1&includeUri=0`;
+      `/api/sportfun/portfolio/${address}?scanMode=full&maxPages=${maxPages}&maxCount=0x3e8&maxActivity=100000&includeTrades=1&includePrices=1&includeUri=0`;
   }, [address]);
 
   useEffect(() => {
@@ -173,7 +178,7 @@ export default function SportfunPortfolioClient({ address }: { address: string }
 
       // Auto-expand until we stop seeing pageKeys / truncation.
       // With caching enabled on the API, re-runs mostly fetch only new pages.
-      const caps = [50, 100, 150, 200];
+      const caps = [50, 100, 200, 400, 800, 1000];
 
       for (const pages of caps) {
         if (cancelled) return;
@@ -226,6 +231,87 @@ export default function SportfunPortfolioClient({ address }: { address: string }
       </main>
     );
   }
+
+  const positions = data.analytics?.positionsByToken ?? [];
+
+  const filteredPositions = positions.filter((p) => {
+    if (contractFilter === "all") return true;
+    return p.playerToken.toLowerCase() === contractFilter.toLowerCase();
+  });
+
+  const sortedPositions = [...filteredPositions].sort((a, b) => {
+    const av = (s: string | undefined) => BigInt(s ?? "0");
+
+    const keyToValue = (p: (typeof positions)[number]) => {
+      switch (sortKey) {
+        case "spent":
+          return av(p.totals?.spentUsdcRaw);
+        case "pnl":
+          return av(p.unrealizedPnlTrackedUsdcRaw);
+        case "shares":
+          return av(p.holdingSharesRaw);
+        case "value":
+        default:
+          return av(p.currentValueHoldingUsdcRaw);
+      }
+    };
+
+    const left = keyToValue(a);
+    const right = keyToValue(b);
+
+    if (left === right) return 0;
+    const cmp = right > left ? 1 : -1;
+    return sortDir === "desc" ? cmp : -cmp;
+  });
+
+  function exportPositionsCsv() {
+    const header = [
+      "playerToken",
+      "tokenIdDec",
+      "holdingShares",
+      "spentUsdc",
+      "avgCostUsdcPerShare",
+      "currentPriceUsdcPerShare",
+      "currentValueHoldingUsdc",
+      "unrealizedPnlTrackedUsdc",
+      "trackedShares",
+      "freeSharesIn",
+      "freeEvents",
+    ];
+
+    const rows = sortedPositions.map((p) => [
+      p.playerToken,
+      p.tokenIdDec,
+      p.holdingSharesRaw,
+      p.totals?.spentUsdcRaw ?? "0",
+      p.avgCostUsdcPerShareRaw ?? "",
+      p.currentPriceUsdcPerShareRaw ?? "",
+      p.currentValueHoldingUsdcRaw ?? "",
+      p.unrealizedPnlTrackedUsdcRaw ?? "",
+      p.trackedSharesRaw,
+      p.totals?.freeSharesInRaw ?? "0",
+      String(p.totals?.freeEvents ?? 0),
+    ]);
+
+    const csv = [header, ...rows]
+      .map((r) => r.map((x) => `"${String(x).replaceAll('"', '""')}"`).join(","))
+      .join("\n");
+
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `sportfun-positions-${address}.csv`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  const contractOptions = [
+    { value: "all", label: "All" },
+    ...Array.from(new Set(positions.map((p) => p.playerToken.toLowerCase())))
+      .sort()
+      .map((c) => ({ value: c, label: shortenAddress(c) })),
+  ];
 
   return (
     <main className="mx-auto max-w-6xl p-6">
@@ -311,9 +397,66 @@ export default function SportfunPortfolioClient({ address }: { address: string }
         </section>
       ) : null}
 
-      {data.analytics?.positionsByToken && data.analytics.positionsByToken.length ? (
+      {positions.length ? (
         <section className="mt-8">
-          <h2 className="text-lg font-semibold text-white">Per-athlete breakdown (on-chain)</h2>
+          <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+            <div>
+              <h2 className="text-lg font-semibold text-white">Per-athlete breakdown (on-chain)</h2>
+              <p className="mt-1 text-sm text-gray-400">
+                Sort/filter and export CSV. If you see <span className="text-gray-300">(partial)</span> under tracked shares, increase scan pages.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3">
+              <label className="text-xs text-gray-400">
+                Contract
+                <select
+                  className="ml-2 rounded-md border border-white/10 bg-black/30 px-2 py-1 text-sm text-gray-200"
+                  value={contractFilter}
+                  onChange={(e) => setContractFilter(e.target.value)}
+                >
+                  {contractOptions.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="text-xs text-gray-400">
+                Sort
+                <select
+                  className="ml-2 rounded-md border border-white/10 bg-black/30 px-2 py-1 text-sm text-gray-200"
+                  value={sortKey}
+                  onChange={(e) => setSortKey(e.target.value as SortKey)}
+                >
+                  <option value="value">Value</option>
+                  <option value="pnl">Unrealized PnL</option>
+                  <option value="spent">Spent</option>
+                  <option value="shares">Holding shares</option>
+                </select>
+              </label>
+
+              <label className="text-xs text-gray-400">
+                Dir
+                <select
+                  className="ml-2 rounded-md border border-white/10 bg-black/30 px-2 py-1 text-sm text-gray-200"
+                  value={sortDir}
+                  onChange={(e) => setSortDir(e.target.value as "asc" | "desc")}
+                >
+                  <option value="desc">Desc</option>
+                  <option value="asc">Asc</option>
+                </select>
+              </label>
+
+              <button
+                className="rounded-md border border-white/10 bg-white/10 px-3 py-1 text-sm text-white hover:bg-white/15"
+                onClick={exportPositionsCsv}
+              >
+                Export CSV
+              </button>
+            </div>
+          </div>
 
           <div className="mt-3 overflow-x-auto rounded-xl border border-white/10">
             <table className="w-full text-sm">
@@ -331,7 +474,7 @@ export default function SportfunPortfolioClient({ address }: { address: string }
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/10">
-                {data.analytics.positionsByToken.slice(0, 200).map((p) => {
+                {sortedPositions.slice(0, 400).map((p) => {
                   const pnl = p.unrealizedPnlTrackedUsdcRaw;
                   const pnlClass = pnl ? (BigInt(pnl) >= 0n ? "text-green-400" : "text-red-400") : "text-gray-500";
 
@@ -356,6 +499,20 @@ export default function SportfunPortfolioClient({ address }: { address: string }
                     </tr>
                   );
                 })}
+                {sortedPositions.length === 0 ? (
+                  <tr>
+                    <td className="p-3 text-gray-400" colSpan={9}>
+                      No positions.
+                    </td>
+                  </tr>
+                ) : null}
+                {sortedPositions.length > 400 ? (
+                  <tr>
+                    <td className="p-3 text-gray-400" colSpan={9}>
+                      Showing top 400. Use CSV for full export.
+                    </td>
+                  </tr>
+                ) : null}
               </tbody>
             </table>
           </div>
