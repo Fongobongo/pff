@@ -26,6 +26,7 @@ type SportfunPortfolioResponse = {
     holdingCount: number;
     activityCount: number;
     decodedTradeCount?: number;
+    decodedPromotionCount?: number;
     activityCountTotal?: number;
     activityCountReturned?: number;
     activityTruncated?: boolean;
@@ -44,6 +45,8 @@ type SportfunPortfolioResponse = {
     unrealizedPnlUsdcRaw: string;
     totalCostBasisUsdcRaw: string;
     currentValueUsdcRaw: string;
+    currentValueAllHoldingsUsdcRaw?: string;
+    holdingsPricedCount?: number;
     costBasisUnknownTradeCount: number;
     note: string;
   };
@@ -171,7 +174,9 @@ export default async function SportfunPortfolioPage({
         <div className="rounded-xl border border-white/10 bg-white/5 p-4">
           <div className="text-sm text-gray-400">Decoded trades</div>
           <div className="mt-2 text-xl text-white">{data.summary.decodedTradeCount ?? 0}</div>
-          <p className="mt-1 text-xs text-gray-500">FDFPairV2 events.</p>
+          <p className="mt-1 text-xs text-gray-500">
+            FDFPairV2 events{data.summary.decodedPromotionCount !== undefined ? ` · promotions ${data.summary.decodedPromotionCount}` : ""}.
+          </p>
         </div>
       </section>
 
@@ -180,9 +185,14 @@ export default async function SportfunPortfolioPage({
           <div className="rounded-xl border border-white/10 bg-white/5 p-4">
             <div className="text-sm text-gray-400">Current value</div>
             <div className="mt-2 text-xl text-white">
-              {formatFixed(data.analytics.currentValueUsdcRaw, data.assumptions.usdc.decimals)}
+              {formatFixed(
+                data.analytics.currentValueAllHoldingsUsdcRaw ?? data.analytics.currentValueUsdcRaw,
+                data.assumptions.usdc.decimals
+              )}
             </div>
-            <p className="mt-1 text-xs text-gray-500">USDC</p>
+            <p className="mt-1 text-xs text-gray-500">
+              USDC{data.analytics.holdingsPricedCount !== undefined ? ` · priced ${data.analytics.holdingsPricedCount}/${data.holdings.length}` : ""}
+            </p>
           </div>
           <div className="rounded-xl border border-white/10 bg-white/5 p-4">
             <div className="text-sm text-gray-400">Cost basis</div>

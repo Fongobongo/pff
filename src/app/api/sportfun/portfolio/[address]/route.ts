@@ -838,34 +838,67 @@ export async function GET(request: Request, context: { params: Promise<{ address
 
   // Portfolio analytics (moving average cost basis, per tokenId).
   // NOTE: This is wallet-centric and uses decoded trade flows when available.
-  const tradesForLedger: Array<DecodedTradeItem & { txHash: string; timestamp?: string }> = [];
+  type LedgerItem =
+    | ({ itemKind: "trade" } & DecodedTradeItem & { txHash: string; timestamp?: string })
+    | ({ itemKind: "promotion" } & DecodedPromotionItem & { txHash: string; timestamp?: string });
+
+  const ledger: LedgerItem[] = [];
+  let decodedTradeCount = 0;
+  let decodedPromotionCount = 0;
 
   for (const a of activityEnriched) {
     const decoded = a.decoded;
-    if (!decoded?.trades?.length) continue;
+    if (!decoded) continue;
 
-    for (const t of decoded.trades) {
-      tradesForLedger.push({ ...t, txHash: a.hash, timestamp: a.timestamp });
+    decodedTradeCount += decoded.trades?.length ?? 0;
+    decodedPromotionCount += decoded.promotions?.length ?? 0;
+
+    for (const t of decoded.trades ?? []) {
+      ledger.push({ itemKind: "trade", ...t, txHash: a.hash, timestamp: a.timestamp });
+    }
+
+    for (const p of decoded.promotions ?? []) {
+      ledger.push({ itemKind: "promotion", ...p, txHash: a.hash, timestamp: a.timestamp });
     }
   }
 
-  tradesForLedger.sort((a, b) => String(a.timestamp ?? "").localeCompare(String(b.timestamp ?? "")));
+  ledger.sort((a, b) => String(a.timestamp ?? "").localeCompare(String(b.timestamp ?? "")));
 
   const positionByKey = new Map<string, { shares: bigint; costUsdc: bigint }>();
   let realizedPnlUsdcRaw = 0n;
   let costBasisUnknownTradeCount = 0;
 
-  for (const t of tradesForLedger) {
-    const playerToken = t.playerToken;
+  for (const item of ledger) {
+    const playerToken = item.playerToken;
     if (!playerToken) continue;
 
-    const shareDelta = BigInt(t.walletShareDeltaRaw);
+    const shareDelta = BigInt(item.walletShareDeltaRaw);
     if (shareDelta === 0n) continue;
 
-    const currencyDelta = BigInt(t.walletCurrencyDeltaRaw);
-
-    const key = tokenKey(playerToken, t.tokenIdDec);
+    const key = tokenKey(playerToken, item.tokenIdDec);
     const pos = positionByKey.get(key) ?? { shares: 0n, costUsdc: 0n };
+
+    if (item.itemKind === "promotion") {
+      // Promotions are treated as free shares (cost = 0). This adjusts average cost per
+      // share and improves unrealized PnL accuracy when promotions occurred.
+      if (shareDelta > 0n) {
+        pos.shares += shareDelta;
+      } else {
+        // Defensive: handle negative deltas (should be rare/unexpected for promotions).
+        const removed = -shareDelta;
+        if (pos.shares > 0n) {
+          const avgCostPerShare = (pos.costUsdc * 10n ** 18n) / pos.shares;
+          const costBasisRemoved = (avgCostPerShare * removed) / 10n ** 18n;
+          pos.shares -= removed;
+          pos.costUsdc -= costBasisRemoved;
+        }
+      }
+
+      positionByKey.set(key, pos);
+      continue;
+    }
+
+    const currencyDelta = BigInt(item.walletCurrencyDeltaRaw);
 
     if (shareDelta > 0n) {
       // Buy.
@@ -895,6 +928,18 @@ export async function GET(request: Request, context: { params: Promise<{ address
     positionByKey.set(key, pos);
   }
 
+  // Total portfolio value (priced holdings).
+  let currentValueAllHoldingsUsdcRaw = 0n;
+  let holdingsPricedCount = 0;
+  for (const h of holdings) {
+    const priceMeta = priceByHoldingKey.get(tokenKey(h.contractAddress, h.tokenIdDec));
+    if (!priceMeta) continue;
+    holdingsPricedCount++;
+    currentValueAllHoldingsUsdcRaw += priceMeta.valueUsdcRaw;
+  }
+
+  // Tracked positions: cost basis and unrealized PnL are only computed for tokenIds
+  // that appear in decoded trades/promotions.
   let currentValueUsdcRaw = 0n;
   let unrealizedPnlUsdcRaw = 0n;
   let totalCostBasisUsdcRaw = 0n;
@@ -947,7 +992,8 @@ export async function GET(request: Request, context: { params: Promise<{ address
       activityCountTotal: activityAll.length,
       activityCountReturned: activityEnriched.length,
       activityTruncated,
-      decodedTradeCount: tradesForLedger.length,
+      decodedTradeCount,
+      decodedPromotionCount,
     },
     holdings: holdingsEnriched,
     activity: activityEnriched,
@@ -955,9 +1001,13 @@ export async function GET(request: Request, context: { params: Promise<{ address
       realizedPnlUsdcRaw: realizedPnlUsdcRaw.toString(10),
       unrealizedPnlUsdcRaw: unrealizedPnlUsdcRaw.toString(10),
       totalCostBasisUsdcRaw: totalCostBasisUsdcRaw.toString(10),
+      // Value of positions that have a computed cost basis (decoded trades/promotions).
       currentValueUsdcRaw: currentValueUsdcRaw.toString(10),
+      // Value of all priced holdings (independent of cost basis tracking).
+      currentValueAllHoldingsUsdcRaw: currentValueAllHoldingsUsdcRaw.toString(10),
+      holdingsPricedCount,
       costBasisUnknownTradeCount,
-      note: "PnL is a WIP: uses moving-average cost basis per (playerToken, tokenId) and only decoded trades. Promotions are not yet reflected in cost basis.",
+      note: "PnL is a WIP: cost basis is tracked only from decoded FDFPair trades (moving average). Promotions add free shares (zero cost). currentValueAllHoldingsUsdcRaw sums priced holdings; missing historical trades may still skew cost basis.",
     },
     debug: {
       contracts: [...contractSet].map((c) => ({ address: c, label: shortenAddress(c) })),
