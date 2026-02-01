@@ -35,3 +35,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Tx inspector now also attempts to decode tx call data (function selector -> OpenChain signature lookup)
   - Added `scripts/sportfun_discover.mjs` for contract/topic discovery
   - UI: `/sportfun/portfolio/[address]`, `/sportfun/tx/[hash]`
+
+### Changed
+- Sport.fun portfolio:
+  - Pricing/valuation: added `currentValueAllHoldingsUsdcRaw` and `holdingsPricedCount`.
+  - Analytics: promotions are treated as free shares (zero cost) in the moving-average cost basis ledger.
+  - Trade decoding is now wallet-centric (only keeps decoded items that affect the target wallet's share balance).
+  - USDC delta is computed from receipt `Transfer` logs when receipts are available (more reliable than transfer correlation by tx hash).
+  - Added debug/sanity checks for decoded share deltas vs ERC-1155 deltas (mismatch counters + samples).
+  - Added basic counters for edge cases (gift buys, sells where proceeds go to another recipient).
+

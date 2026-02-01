@@ -1,31 +1,24 @@
 # Work in Progress
 
 ## Now
-- **Step 3 (Sport.fun portfolio)**: finalize the on-chain data model and confirm trade semantics.
+- **Step 3 (Sport.fun portfolio):** harden trade semantics + performance.
 
 ## Next
-- Map ERC-1155 `tokenId` → player/asset metadata (via `uri(uint256)` and its base mapping).
-- Correlate ERC-1155 transfers with USDC transfers to infer buys/sells + price per share (now adds best-effort inference for single-token tx).
-- Add tx inspector to decode receipts/logs and discover contract/event model.
-- Expand `/api/sportfun/portfolio/[address]` to include trade history (tx-based).
+- Performance hardening:
+  - Add paging / cursors for `activity` (avoid fetching/decoding hundreds of receipts in one request).
+  - Add a lightweight cache for decoded receipts by tx hash (DB or file-based for dev).
+- Semantics hardening:
+  - Decide how to represent “economic” PnL vs wallet cashflow (e.g., sells where proceeds go to another recipient).
+  - Expand mismatch diagnostics (surface which tokenIds/contracts mismatch and why).
+- Metadata:
+  - Map ERC-1155 `tokenId` -> player metadata by fetching/parsing `uri(uint256)` JSON (IPFS/http) and display name/image.
 
 ## Status
-- Last updated: 2026-01-31
-- Implemented initial WIP endpoint + UI page:
-  - `GET /api/sportfun/portfolio/[address]` (holdings from ERC-1155 transfers + best-effort `uri(tokenId)`)
-  - `activity` (tx-grouped): best-effort USDC delta + ERC-1155 deltas by tx hash
-  - `/sportfun/portfolio/[address]`
-- Added tx inspector:
-  - `GET /api/sportfun/tx/[hash]`
-  - `/sportfun/tx/[hash]`
-- Currently filtering to two observed Sport.fun ERC-1155 contracts:
-  - `0x71c8b0c5148edb0399d1edf9bf0c8c81dea16918`
-  - `0x2eef466e802ab2835ab81be63eebc55167d35b56`
-- Discovered Sport.fun event signatures (topic0 → name):
-  - `0xb9d06178...` → `PlayerBatchTransfer(address,address,uint256[],uint256[])` (emitted by the ERC-1155 contracts; 2 indexed addresses)
-  - `0xdf85ea72...` → `PlayerSharesPromoted(address,uint256[],uint256[])` (emitted by:
-    - `0xc21c2d586f1db92eedb67a2fc348f21ed7541965`
-    - `0xc98bf3fc49a8a7ad162098ad0bb62268d46dacf9`
-    )
-- Confirmed via receipt decoding that ids match tokenIds and values match the ERC-1155 transfer amounts (18-decimal fixed point).
-- Confirmed `baseURI()` currently returns empty string for both ERC-1155 player proxies.
+- Last updated: 2026-02-01
+- Portfolio endpoint + UI exist and support:
+  - Holdings from ERC-1155 transfers (filtered to known Sport.fun ERC-1155 contracts).
+  - Tx-grouped activity.
+  - Authoritative trade decoding via FDFPairV2 events + promotions via DevelopmentPlayers.
+  - Pricing via `FDFPair.getPrices(tokenIds)`.
+  - WIP analytics (moving-average cost basis) with promotions treated as free shares.
+  - Sanity checks to compare decoded share deltas to ERC-1155 deltas.

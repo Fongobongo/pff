@@ -40,3 +40,12 @@ This file tracks key decisions and requirements from our chats.
   - Resolved two recurring unknown topic0 values via OpenChain signature DB:
     - `0xb9d06178...` => `PlayerBatchTransfer(address,address,uint256[],uint256[])`
     - `0xdf85ea72...` => `PlayerSharesPromoted(address,uint256[],uint256[])`
+- Sport.fun portfolio updates:
+  - Added pricing-based total value for all priced holdings (`currentValueAllHoldingsUsdcRaw`) and a priced-count metric.
+  - Improved cost basis tracking by incorporating promotions as free shares (zero cost).
+  - Refined trade semantics using authoritative FDFPairV2 events:
+    - Wallet-centric decoding (keeps only trades/promotions that affect the target wallet's share deltas).
+    - USDC delta derived from receipt `Transfer` logs when available.
+    - Added sanity checks to compare decoded share deltas against ERC-1155 deltas (mismatch counts + samples).
+    - Added counters for edge cases (gift buys; sells where proceeds are sent to a different recipient).
+
