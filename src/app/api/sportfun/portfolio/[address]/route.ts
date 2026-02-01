@@ -1037,6 +1037,21 @@ export async function GET(request: Request, context: { params: Promise<{ address
   ledger.sort((a, b) => String(a.timestamp ?? "").localeCompare(String(b.timestamp ?? "")));
 
   const positionByKey = new Map<string, { shares: bigint; costUsdc: bigint }>();
+
+  // Per-athlete aggregates from decoded on-chain flows.
+  // NOTE: These are computed from the same (possibly truncated) ledger as cost basis.
+  const flowByKey = new Map<
+    string,
+    {
+      boughtShares: bigint;
+      soldShares: bigint;
+      spentUsdc: bigint;
+      receivedUsdc: bigint;
+      freeSharesIn: bigint;
+      freeEvents: number;
+    }
+  >();
+
   let realizedPnlUsdcRaw = 0n;
   let costBasisUnknownTradeCount = 0;
   let giftBuyCount = 0;
@@ -1054,11 +1069,22 @@ export async function GET(request: Request, context: { params: Promise<{ address
     const key = tokenKey(playerToken, item.tokenIdDec);
     const pos = positionByKey.get(key) ?? { shares: 0n, costUsdc: 0n };
 
+    const flow = flowByKey.get(key) ?? {
+      boughtShares: 0n,
+      soldShares: 0n,
+      spentUsdc: 0n,
+      receivedUsdc: 0n,
+      freeSharesIn: 0n,
+      freeEvents: 0,
+    };
+
     if (item.itemKind === "promotion") {
       // Promotions are treated as free shares (cost = 0). This adjusts average cost per
       // share and improves unrealized PnL accuracy when promotions occurred.
       if (shareDelta > 0n) {
         pos.shares += shareDelta;
+        flow.freeSharesIn += shareDelta;
+        flow.freeEvents++;
       } else {
         // Defensive: handle negative deltas (should be rare/unexpected for promotions).
         const removed = -shareDelta;
@@ -1070,6 +1096,7 @@ export async function GET(request: Request, context: { params: Promise<{ address
         }
       }
 
+      flowByKey.set(key, flow);
       positionByKey.set(key, pos);
       continue;
     }
@@ -1079,6 +1106,8 @@ export async function GET(request: Request, context: { params: Promise<{ address
       // Treated as unknown provenance and zero cost.
       if (shareDelta > 0n) {
         pos.shares += shareDelta;
+        flow.freeSharesIn += shareDelta;
+        flow.freeEvents++;
         reconciledTransferInCount++;
       } else {
         const removed = -shareDelta;
@@ -1091,6 +1120,7 @@ export async function GET(request: Request, context: { params: Promise<{ address
         reconciledTransferOutCount++;
       }
 
+      flowByKey.set(key, flow);
       positionByKey.set(key, pos);
       continue;
     }
@@ -1100,10 +1130,12 @@ export async function GET(request: Request, context: { params: Promise<{ address
     if (shareDelta > 0n) {
       // Buy.
       pos.shares += shareDelta;
+      flow.boughtShares += shareDelta;
 
       if (currencyDelta < 0n) {
         // Wallet paid (including fee).
         pos.costUsdc += -currencyDelta;
+        flow.spentUsdc += -currencyDelta;
       } else {
         // Wallet received shares without paying (gift) OR we failed to map the cost.
         const initiator = item.counterparty?.initiator ?? "";
@@ -1119,6 +1151,7 @@ export async function GET(request: Request, context: { params: Promise<{ address
     } else {
       // Sell.
       const sold = -shareDelta;
+      flow.soldShares += sold;
 
       if (pos.shares > 0n) {
         const avgCostPerShare = (pos.costUsdc * 10n ** 18n) / pos.shares;
@@ -1129,6 +1162,7 @@ export async function GET(request: Request, context: { params: Promise<{ address
 
         if (currencyDelta > 0n) {
           realizedPnlUsdcRaw += currencyDelta - costBasisSold;
+          flow.receivedUsdc += currencyDelta;
         } else {
           // Proceeds may have been redirected to another recipient.
           sellNoProceedsCount++;
@@ -1136,6 +1170,7 @@ export async function GET(request: Request, context: { params: Promise<{ address
       }
     }
 
+    flowByKey.set(key, flow);
     positionByKey.set(key, pos);
   }
 
@@ -1166,6 +1201,64 @@ export async function GET(request: Request, context: { params: Promise<{ address
     unrealizedPnlUsdcRaw += value - pos.costUsdc;
   }
 
+  const positionsByToken = holdingsEnriched
+    .map((h) => {
+      const key = tokenKey(h.contractAddress, h.tokenIdDec);
+
+      const holdingShares = BigInt(h.balanceRaw);
+      const tracked = positionByKey.get(key);
+      const trackedShares = tracked?.shares ?? 0n;
+      const trackedCostUsdc = tracked?.costUsdc ?? 0n;
+
+      const priceMeta = priceByHoldingKey.get(key);
+      const currentPriceUsdcPerShare = priceMeta?.priceUsdcPerShareRaw;
+      const currentValueHoldingUsdc = priceMeta?.valueUsdcRaw;
+      const currentValueTrackedUsdc = currentPriceUsdcPerShare
+        ? (currentPriceUsdcPerShare * trackedShares) / 10n ** 18n
+        : null;
+
+      const avgCostUsdcPerShareRaw =
+        trackedShares > 0n ? (trackedCostUsdc * 10n ** 18n) / trackedShares : null;
+
+      const unrealizedPnlTrackedUsdcRaw =
+        currentValueTrackedUsdc !== null ? currentValueTrackedUsdc - trackedCostUsdc : null;
+
+      const flow = flowByKey.get(key);
+
+      return {
+        playerToken: h.contractAddress,
+        tokenIdDec: h.tokenIdDec,
+
+        holdingSharesRaw: holdingShares.toString(10),
+        trackedSharesRaw: trackedShares.toString(10),
+
+        costBasisUsdcRaw: trackedCostUsdc.toString(10),
+        avgCostUsdcPerShareRaw: avgCostUsdcPerShareRaw?.toString(10),
+
+        currentPriceUsdcPerShareRaw: currentPriceUsdcPerShare?.toString(10),
+        currentValueHoldingUsdcRaw: currentValueHoldingUsdc?.toString(10),
+        currentValueTrackedUsdcRaw: currentValueTrackedUsdc?.toString(10),
+
+        unrealizedPnlTrackedUsdcRaw: unrealizedPnlTrackedUsdcRaw?.toString(10),
+
+        totals: flow
+          ? {
+              boughtSharesRaw: flow.boughtShares.toString(10),
+              soldSharesRaw: flow.soldShares.toString(10),
+              spentUsdcRaw: flow.spentUsdc.toString(10),
+              receivedUsdcRaw: flow.receivedUsdc.toString(10),
+              freeSharesInRaw: flow.freeSharesIn.toString(10),
+              freeEvents: flow.freeEvents,
+            }
+          : undefined,
+      };
+    })
+    .sort((a, b) => {
+      const av = BigInt(a.currentValueHoldingUsdcRaw ?? "0");
+      const bv = BigInt(b.currentValueHoldingUsdcRaw ?? "0");
+      if (bv === av) return 0;
+      return bv > av ? 1 : -1;
+    });
 
   return NextResponse.json({
     chain: "base",
@@ -1229,7 +1322,8 @@ export async function GET(request: Request, context: { params: Promise<{ address
       sellNoProceedsCount,
       reconciledTransferInCount,
       reconciledTransferOutCount,
-      note: "PnL is a WIP: cost basis is tracked only from decoded FDFPair trades (moving average). Promotions and reconciled transfers add free shares (zero cost). currentValueAllHoldingsUsdcRaw sums priced holdings; missing historical trades may still skew cost basis.",
+      positionsByToken: positionsByToken,
+      note: "PnL is a WIP: cost basis is tracked only from decoded FDFPair trades (moving average). Promotions and reconciled transfers add free shares (zero cost). positionsByToken is computed from the same (possibly truncated) ledger. currentValueAllHoldingsUsdcRaw sums priced holdings; missing historical trades may still skew cost basis.",
     },
     debug: {
       contracts: [...contractSet].map((c) => ({ address: c, label: shortenAddress(c) })),
