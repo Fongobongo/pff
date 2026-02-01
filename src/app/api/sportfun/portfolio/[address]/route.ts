@@ -620,8 +620,9 @@ export async function GET(request: Request, context: { params: Promise<{ address
   const maxPages = Math.max(1, Math.min(maxPagesCeil, q.maxPages ? Number(q.maxPages) : scanMode === "full" ? 50 : 3));
   const maxActivity = Math.max(1, Math.min(maxActivityCeil, q.maxActivity ? Number(q.maxActivity) : scanMode === "full" ? 5000 : 100));
 
-  // Best-effort deadline (helps avoid serverless timeouts). VPS users can just raise maxPages.
-  const deadlineMs = Date.now() + (scanMode === "full" ? 25_000 : 7_000);
+  // Best-effort deadline (helps avoid serverless timeouts).
+  // In full mode we prefer correctness; use maxPages to bound work.
+  const deadlineMs = scanMode === "full" ? undefined : Date.now() + 7_000;
 
   const [erc1155IncomingRes, erc1155OutgoingRes] = await Promise.all([
     fetchTransfersForWallet({
