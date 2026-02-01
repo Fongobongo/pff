@@ -305,6 +305,15 @@ type Erc1155Change = {
   deltaRaw: string;
 };
 
+type ReconciledTransfer = {
+  kind: "transfer_in" | "transfer_out";
+  contractAddress: string;
+  tokenIdDec: string;
+  deltaRaw: string;
+  note: "unknown"; // zero cost / unknown provenance
+  reason: "erc1155_unexplained_delta";
+};
+
 type ActivityItem = {
   hash: string;
   timestamp?: string;
@@ -320,6 +329,9 @@ type ActivityEnrichedItem = ActivityItem & {
     promotions: DecodedPromotionItem[];
     unknownSportfunTopics: Array<{ address: string; topic0: string }>;
   };
+  // If decoded trades/promotions don't fully explain the ERC-1155 delta for the wallet,
+  // we add synthetic ledger ops to keep analytics/positions aligned with on-chain holdings.
+  reconciledTransfers?: ReconciledTransfer[];
   receipt?: TxReceipt;
 };
 
@@ -867,7 +879,7 @@ export async function GET(request: Request, context: { params: Promise<{ address
   });
 
   // Attach decoded trades/promotions to activity (optional).
-  const activityEnriched: ActivityEnrichedItem[] = activity.map((a) => {
+  let activityEnriched: ActivityEnrichedItem[] = activity.map((a) => {
     const decoded = decodedByHash.get(a.hash);
 
     const usdcDeltaReceipt = usdcDeltaReceiptByHash.get(a.hash);
@@ -897,11 +909,96 @@ export async function GET(request: Request, context: { params: Promise<{ address
     };
   });
 
+  // Reconcile: if decoded trades/promotions don't fully explain the ERC-1155 delta,
+  // add synthetic transfer_in/transfer_out ops (zero cost / unknown provenance).
+  let shareDeltaMismatchCount = 0;
+  let shareDeltaMismatchTxCount = 0;
+  const shareDeltaMismatchSamples: Array<{
+    hash: string;
+    contractAddress: string;
+    tokenIdDec: string;
+    expectedDeltaRaw: string;
+    decodedDeltaRaw: string;
+  }> = [];
+
+  activityEnriched = activityEnriched.map((a) => {
+    const decoded = a.decoded;
+
+    const expectedByKey = new Map<string, bigint>();
+    for (const c of a.erc1155Changes) {
+      expectedByKey.set(tokenKey(c.contractAddress, c.tokenIdDec), BigInt(c.deltaRaw));
+    }
+
+    const decodedByKey = new Map<string, bigint>();
+    for (const t of decoded?.trades ?? []) {
+      if (!t.playerToken) continue;
+      const key = tokenKey(t.playerToken, t.tokenIdDec);
+      decodedByKey.set(key, (decodedByKey.get(key) ?? 0n) + BigInt(t.walletShareDeltaRaw));
+    }
+    for (const p of decoded?.promotions ?? []) {
+      if (!p.playerToken) continue;
+      const key = tokenKey(p.playerToken, p.tokenIdDec);
+      decodedByKey.set(key, (decodedByKey.get(key) ?? 0n) + BigInt(p.walletShareDeltaRaw));
+    }
+
+    const reconciledTransfers: ReconciledTransfer[] = [];
+
+    // We treat ERC-1155 deltas as the source of truth for holdings.
+    for (const [key, expectedDelta] of expectedByKey.entries()) {
+      const decodedDelta = decodedByKey.get(key) ?? 0n;
+      if (decodedDelta === expectedDelta) continue;
+
+      const residual = expectedDelta - decodedDelta;
+      if (residual === 0n) continue;
+
+      const [contractAddress, tokenIdDec] = key.split(":");
+      reconciledTransfers.push({
+        kind: residual > 0n ? "transfer_in" : "transfer_out",
+        contractAddress,
+        tokenIdDec,
+        deltaRaw: residual.toString(10),
+        note: "unknown",
+        reason: "erc1155_unexplained_delta",
+      });
+
+      shareDeltaMismatchCount++;
+      if (shareDeltaMismatchSamples.length < 8) {
+        shareDeltaMismatchSamples.push({
+          hash: a.hash,
+          contractAddress,
+          tokenIdDec,
+          expectedDeltaRaw: expectedDelta.toString(10),
+          decodedDeltaRaw: decodedDelta.toString(10),
+        });
+      }
+    }
+
+    if (reconciledTransfers.length) shareDeltaMismatchTxCount++;
+
+    return {
+      ...a,
+      reconciledTransfers: reconciledTransfers.length ? reconciledTransfers : undefined,
+    };
+  });
+
   // Portfolio analytics (moving average cost basis, per tokenId).
   // NOTE: This is wallet-centric and uses decoded trade flows when available.
+  // If decoding is incomplete, we reconcile to on-chain ERC-1155 deltas via synthetic transfers.
   type LedgerItem =
     | ({ itemKind: "trade" } & DecodedTradeItem & { txHash: string; timestamp?: string })
-    | ({ itemKind: "promotion" } & DecodedPromotionItem & { txHash: string; timestamp?: string });
+    | ({ itemKind: "promotion" } & DecodedPromotionItem & { txHash: string; timestamp?: string })
+    | {
+        itemKind: "transfer";
+        transferKind: "transfer_in" | "transfer_out";
+        reason: "erc1155_unexplained_delta";
+        note: "unknown";
+        playerToken: string;
+        tokenIdDec: string;
+        walletShareDeltaRaw: string;
+        walletCurrencyDeltaRaw: "0";
+        txHash: string;
+        timestamp?: string;
+      };
 
   const ledger: LedgerItem[] = [];
   let decodedTradeCount = 0;
@@ -909,17 +1006,31 @@ export async function GET(request: Request, context: { params: Promise<{ address
 
   for (const a of activityEnriched) {
     const decoded = a.decoded;
-    if (!decoded) continue;
 
-    decodedTradeCount += decoded.trades?.length ?? 0;
-    decodedPromotionCount += decoded.promotions?.length ?? 0;
+    decodedTradeCount += decoded?.trades?.length ?? 0;
+    decodedPromotionCount += decoded?.promotions?.length ?? 0;
 
-    for (const t of decoded.trades ?? []) {
+    for (const t of decoded?.trades ?? []) {
       ledger.push({ itemKind: "trade", ...t, txHash: a.hash, timestamp: a.timestamp });
     }
 
-    for (const p of decoded.promotions ?? []) {
+    for (const p of decoded?.promotions ?? []) {
       ledger.push({ itemKind: "promotion", ...p, txHash: a.hash, timestamp: a.timestamp });
+    }
+
+    for (const r of a.reconciledTransfers ?? []) {
+      ledger.push({
+        itemKind: "transfer",
+        transferKind: r.kind,
+        reason: r.reason,
+        note: r.note,
+        playerToken: r.contractAddress,
+        tokenIdDec: r.tokenIdDec,
+        walletShareDeltaRaw: r.deltaRaw,
+        walletCurrencyDeltaRaw: "0",
+        txHash: a.hash,
+        timestamp: a.timestamp,
+      });
     }
   }
 
@@ -930,6 +1041,8 @@ export async function GET(request: Request, context: { params: Promise<{ address
   let costBasisUnknownTradeCount = 0;
   let giftBuyCount = 0;
   let sellNoProceedsCount = 0;
+  let reconciledTransferInCount = 0;
+  let reconciledTransferOutCount = 0;
 
   for (const item of ledger) {
     const playerToken = item.playerToken;
@@ -955,6 +1068,27 @@ export async function GET(request: Request, context: { params: Promise<{ address
           pos.shares -= removed;
           pos.costUsdc -= costBasisRemoved;
         }
+      }
+
+      positionByKey.set(key, pos);
+      continue;
+    }
+
+    if (item.itemKind === "transfer") {
+      // Synthetic transfer used to reconcile decoded flows to on-chain ERC-1155 deltas.
+      // Treated as unknown provenance and zero cost.
+      if (shareDelta > 0n) {
+        pos.shares += shareDelta;
+        reconciledTransferInCount++;
+      } else {
+        const removed = -shareDelta;
+        if (pos.shares > 0n) {
+          const avgCostPerShare = (pos.costUsdc * 10n ** 18n) / pos.shares;
+          const costBasisRemoved = (avgCostPerShare * removed) / 10n ** 18n;
+          pos.shares -= removed;
+          pos.costUsdc -= costBasisRemoved;
+        }
+        reconciledTransferOutCount++;
       }
 
       positionByKey.set(key, pos);
@@ -1015,8 +1149,8 @@ export async function GET(request: Request, context: { params: Promise<{ address
     currentValueAllHoldingsUsdcRaw += priceMeta.valueUsdcRaw;
   }
 
-  // Tracked positions: cost basis and unrealized PnL are only computed for tokenIds
-  // that appear in decoded trades/promotions.
+  // Tracked positions: cost basis and unrealized PnL are computed from the ledger
+  // (decoded trades/promotions + synthetic transfers used to reconcile ERC-1155 deltas).
   let currentValueUsdcRaw = 0n;
   let unrealizedPnlUsdcRaw = 0n;
   let totalCostBasisUsdcRaw = 0n;
@@ -1032,60 +1166,6 @@ export async function GET(request: Request, context: { params: Promise<{ address
     unrealizedPnlUsdcRaw += value - pos.costUsdc;
   }
 
-  // Sanity-check: decoded share deltas (trades/promotions) should match ERC-1155 deltas for the wallet.
-  let shareDeltaMismatchCount = 0;
-  let shareDeltaMismatchTxCount = 0;
-  const shareDeltaMismatchSamples: Array<{
-    hash: string;
-    contractAddress: string;
-    tokenIdDec: string;
-    expectedDeltaRaw: string;
-    decodedDeltaRaw: string;
-  }> = [];
-
-  for (const a of activityEnriched) {
-    const decoded = a.decoded;
-    if (!decoded) continue;
-
-    const expectedByKey = new Map<string, bigint>();
-    for (const c of a.erc1155Changes) {
-      expectedByKey.set(tokenKey(c.contractAddress, c.tokenIdDec), BigInt(c.deltaRaw));
-    }
-
-    const decodedByKey = new Map<string, bigint>();
-    for (const t of decoded.trades ?? []) {
-      if (!t.playerToken) continue;
-      const key = tokenKey(t.playerToken, t.tokenIdDec);
-      decodedByKey.set(key, (decodedByKey.get(key) ?? 0n) + BigInt(t.walletShareDeltaRaw));
-    }
-    for (const p of decoded.promotions ?? []) {
-      if (!p.playerToken) continue;
-      const key = tokenKey(p.playerToken, p.tokenIdDec);
-      decodedByKey.set(key, (decodedByKey.get(key) ?? 0n) + BigInt(p.walletShareDeltaRaw));
-    }
-
-    let txMismatch = false;
-    for (const [key, decodedDelta] of decodedByKey.entries()) {
-      const expectedDelta = expectedByKey.get(key) ?? 0n;
-      if (expectedDelta !== decodedDelta) {
-        shareDeltaMismatchCount++;
-        txMismatch = true;
-
-        if (shareDeltaMismatchSamples.length < 8) {
-          const [contractAddress, tokenIdDec] = key.split(":");
-          shareDeltaMismatchSamples.push({
-            hash: a.hash,
-            contractAddress,
-            tokenIdDec,
-            expectedDeltaRaw: expectedDelta.toString(10),
-            decodedDeltaRaw: decodedDelta.toString(10),
-          });
-        }
-      }
-    }
-
-    if (txMismatch) shareDeltaMismatchTxCount++;
-  }
 
   return NextResponse.json({
     chain: "base",
@@ -1126,8 +1206,12 @@ export async function GET(request: Request, context: { params: Promise<{ address
       activityTruncated,
       decodedTradeCount,
       decodedPromotionCount,
+      // Count of (contract, tokenId) deltas where decoded trades/promotions didn't match ERC-1155 deltas.
+      // These are reconciled via synthetic transfer_in/transfer_out ledger ops.
       shareDeltaMismatchCount,
       shareDeltaMismatchTxCount,
+      reconciledTransferInCount,
+      reconciledTransferOutCount,
     },
     holdings: holdingsEnriched,
     activity: activityEnriched,
@@ -1143,7 +1227,9 @@ export async function GET(request: Request, context: { params: Promise<{ address
       costBasisUnknownTradeCount,
       giftBuyCount,
       sellNoProceedsCount,
-      note: "PnL is a WIP: cost basis is tracked only from decoded FDFPair trades (moving average). Promotions and gifts add free shares (zero cost). currentValueAllHoldingsUsdcRaw sums priced holdings; missing historical trades may still skew cost basis.",
+      reconciledTransferInCount,
+      reconciledTransferOutCount,
+      note: "PnL is a WIP: cost basis is tracked only from decoded FDFPair trades (moving average). Promotions and reconciled transfers add free shares (zero cost). currentValueAllHoldingsUsdcRaw sums priced holdings; missing historical trades may still skew cost basis.",
     },
     debug: {
       contracts: [...contractSet].map((c) => ({ address: c, label: shortenAddress(c) })),

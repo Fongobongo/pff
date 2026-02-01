@@ -179,7 +179,7 @@ export default async function SportfunPortfolioPage({
           <p className="mt-1 text-xs text-gray-500">
             FDFPairV2 events
             {data.summary.decodedPromotionCount !== undefined ? ` · promotions ${data.summary.decodedPromotionCount}` : ""}
-            {data.summary.shareDeltaMismatchTxCount ? ` · mismatches ${data.summary.shareDeltaMismatchTxCount} tx` : ""}.
+            {data.summary.shareDeltaMismatchTxCount ? ` · reconciled ${data.summary.shareDeltaMismatchTxCount} tx` : ""}.
           </p>
         </div>
       </section>
