@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { shortenAddress } from "@/lib/format";
 
 type SortKey = "value" | "pnl" | "spent" | "shares";
@@ -158,6 +158,10 @@ export default function SportfunPortfolioClient({ address }: { address: string }
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [attemptPages, setAttemptPages] = useState<number[]>([]);
+  const [activityCursor, setActivityCursor] = useState<number | null>(null);
+  const [activityLoading, setActivityLoading] = useState(false);
+  const [activityDone, setActivityDone] = useState(false);
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>("value");
   const [sortDir, setSortDir] = useState<"desc" | "asc">("desc");
   const [contractFilter, setContractFilter] = useState<string>("all");
@@ -170,6 +174,11 @@ export default function SportfunPortfolioClient({ address }: { address: string }
       `/api/sportfun/portfolio/${address}?scanMode=full&maxPages=${maxPages}&maxCount=0x3e8&maxActivity=300&includeTrades=1&includePrices=1&includeUri=0`;
   }, [address]);
 
+  const requestActivityPageUrl = useMemo(() => {
+    return (cursor: number) =>
+      `/api/sportfun/portfolio/${address}?scanMode=full&maxPages=200&maxCount=0x3e8&maxActivity=300&activityCursor=${cursor}&includeTrades=1&includePrices=1&includeUri=0`;
+  }, [address]);
+
   useEffect(() => {
     let cancelled = false;
 
@@ -177,6 +186,8 @@ export default function SportfunPortfolioClient({ address }: { address: string }
       setLoading(true);
       setError(null);
       setAttemptPages([]);
+      setActivityCursor(null);
+      setActivityDone(false);
 
       // Auto-expand until we stop seeing pageKeys / truncation.
       // With caching enabled on the API, re-runs mostly fetch only new pages.
@@ -192,7 +203,12 @@ export default function SportfunPortfolioClient({ address }: { address: string }
         setData(next);
 
         const done = !next.summary.scanIncomplete && !next.summary.activityTruncated;
-        if (done) break;
+        if (done) {
+          const cursor = next.summary.nextActivityCursor;
+          setActivityCursor(cursor ?? null);
+          setActivityDone(!cursor);
+          break;
+        }
       }
 
       setLoading(false);
@@ -208,6 +224,59 @@ export default function SportfunPortfolioClient({ address }: { address: string }
       cancelled = true;
     };
   }, [requestUrl]);
+
+  useEffect(() => {
+    if (!data) return;
+    if (activityDone) return;
+    if (activityLoading) return;
+
+    const sentinel = sentinelRef.current;
+    if (!sentinel) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0];
+        if (!entry?.isIntersecting) return;
+        if (!activityCursor || activityLoading || activityDone) return;
+
+        setActivityLoading(true);
+        getJson<SportfunPortfolioResponse>(requestActivityPageUrl(activityCursor))
+          .then((next) => {
+            setData((prev) => {
+              if (!prev) return next;
+              const merged = {
+                ...next,
+                holdings: prev.holdings,
+                analytics: prev.analytics,
+                assumptions: prev.assumptions,
+                query: prev.query,
+                summary: {
+                  ...prev.summary,
+                  ...next.summary,
+                  activityCountReturned: (prev.summary.activityCountReturned ?? prev.activity.length) + next.activity.length,
+                },
+                activity: [...prev.activity, ...next.activity],
+              } satisfies SportfunPortfolioResponse;
+              return merged;
+            });
+
+            const cursor = next.summary.nextActivityCursor;
+            setActivityCursor(cursor ?? null);
+            setActivityDone(!cursor);
+          })
+          .catch((e: unknown) => {
+            setError(e instanceof Error ? e.message : String(e));
+          })
+          .finally(() => {
+            setActivityLoading(false);
+          });
+      },
+      { rootMargin: "200px" }
+    );
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [activityCursor, activityDone, activityLoading, data, requestActivityPageUrl]);
 
   if (loading && !data) {
     return (
@@ -353,6 +422,7 @@ export default function SportfunPortfolioClient({ address }: { address: string }
           <p className="mt-1 text-xs text-gray-500">
             Showing {data.summary.activityCountReturned ?? data.activity.length}
             {data.summary.activityTruncated ? "/" + (data.summary.activityCountTotal ?? data.summary.activityCount) : ""}.
+            {activityLoading ? " Loading more…" : activityDone ? " End of activity." : " Scroll for more."}
           </p>
         </div>
         <div className="rounded-xl border border-white/10 bg-white/5 p-4">
@@ -562,7 +632,7 @@ export default function SportfunPortfolioClient({ address }: { address: string }
 
       <section className="mt-8">
         <h2 className="text-lg font-semibold text-white">Activity (tx grouped)</h2>
-        <p className="mt-1 text-xs text-gray-500">Showing latest {Math.min(80, data.activity.length)} rows.</p>
+        <p className="mt-1 text-xs text-gray-500">Showing {data.activity.length} rows (auto-load on scroll).</p>
         <p className="mt-1 text-sm text-gray-400">{data.assumptions.usdc.note}</p>
 
         <div className="mt-3 overflow-x-auto rounded-xl border border-white/10">
@@ -577,7 +647,7 @@ export default function SportfunPortfolioClient({ address }: { address: string }
               </tr>
             </thead>
             <tbody className="divide-y divide-white/10">
-              {data.activity.slice(0, 80).map((a) => (
+              {data.activity.map((a) => (
                 <tr key={a.hash} className="text-gray-200">
                   <td className="p-3 whitespace-nowrap text-gray-400">{a.timestamp ?? "—"}</td>
                   <td className="p-3 whitespace-nowrap">
@@ -633,6 +703,8 @@ export default function SportfunPortfolioClient({ address }: { address: string }
           <p className="mt-2 text-sm text-gray-400">{data.analytics.note}</p>
         </section>
       ) : null}
+
+      <div ref={sentinelRef} className="h-8" />
     </main>
   );
 }
