@@ -11,6 +11,7 @@ type SportfunPortfolioResponse = {
   protocol: string;
   address: string;
   query?: {
+    scanMode?: "default" | "full";
     maxPages?: number;
     maxCount?: string;
     maxActivity?: number;
@@ -32,6 +33,8 @@ type SportfunPortfolioResponse = {
     activityCountTotal?: number;
     activityCountReturned?: number;
     activityTruncated?: boolean;
+    scanIncomplete?: boolean;
+    scan?: unknown;
   };
   assumptions: {
     shareUnits: string;
@@ -50,6 +53,31 @@ type SportfunPortfolioResponse = {
     currentValueAllHoldingsUsdcRaw?: string;
     holdingsPricedCount?: number;
     costBasisUnknownTradeCount: number;
+    positionsByToken?: Array<{
+      playerToken: string;
+      tokenIdDec: string;
+
+      holdingSharesRaw: string;
+      trackedSharesRaw: string;
+
+      costBasisUsdcRaw: string;
+      avgCostUsdcPerShareRaw?: string;
+
+      currentPriceUsdcPerShareRaw?: string;
+      currentValueHoldingUsdcRaw?: string;
+      currentValueTrackedUsdcRaw?: string;
+
+      unrealizedPnlTrackedUsdcRaw?: string;
+
+      totals?: {
+        boughtSharesRaw: string;
+        soldSharesRaw: string;
+        spentUsdcRaw: string;
+        receivedUsdcRaw: string;
+        freeSharesInRaw: string;
+        freeEvents: number;
+      };
+    }>;
     note: string;
   };
   holdings: Array<{
@@ -126,6 +154,10 @@ function formatShares(raw: string): string {
   return formatFixed(raw, 18);
 }
 
+function formatUsdc(raw: string, decimals: number): string {
+  return formatFixed(raw, decimals);
+}
+
 export default async function SportfunPortfolioPage({
   params,
 }: {
@@ -189,7 +221,7 @@ export default async function SportfunPortfolioPage({
           <div className="rounded-xl border border-white/10 bg-white/5 p-4">
             <div className="text-sm text-gray-400">Current value</div>
             <div className="mt-2 text-xl text-white">
-              {formatFixed(
+              {formatUsdc(
                 data.analytics.currentValueAllHoldingsUsdcRaw ?? data.analytics.currentValueUsdcRaw,
                 data.assumptions.usdc.decimals
               )}
@@ -200,30 +232,20 @@ export default async function SportfunPortfolioPage({
           </div>
           <div className="rounded-xl border border-white/10 bg-white/5 p-4">
             <div className="text-sm text-gray-400">Cost basis</div>
-            <div className="mt-2 text-xl text-white">
-              {formatFixed(data.analytics.totalCostBasisUsdcRaw, data.assumptions.usdc.decimals)}
-            </div>
+            <div className="mt-2 text-xl text-white">{formatUsdc(data.analytics.totalCostBasisUsdcRaw, data.assumptions.usdc.decimals)}</div>
             <p className="mt-1 text-xs text-gray-500">USDC</p>
           </div>
           <div className="rounded-xl border border-white/10 bg-white/5 p-4">
             <div className="text-sm text-gray-400">Unrealized PnL</div>
-            <div
-              className={
-                BigInt(data.analytics.unrealizedPnlUsdcRaw) >= 0n ? "mt-2 text-xl text-green-400" : "mt-2 text-xl text-red-400"
-              }
-            >
-              {formatFixed(data.analytics.unrealizedPnlUsdcRaw, data.assumptions.usdc.decimals)}
+            <div className={BigInt(data.analytics.unrealizedPnlUsdcRaw) >= 0n ? "mt-2 text-xl text-green-400" : "mt-2 text-xl text-red-400"}>
+              {formatUsdc(data.analytics.unrealizedPnlUsdcRaw, data.assumptions.usdc.decimals)}
             </div>
             <p className="mt-1 text-xs text-gray-500">USDC</p>
           </div>
           <div className="rounded-xl border border-white/10 bg-white/5 p-4">
             <div className="text-sm text-gray-400">Realized PnL</div>
-            <div
-              className={
-                BigInt(data.analytics.realizedPnlUsdcRaw) >= 0n ? "mt-2 text-xl text-green-400" : "mt-2 text-xl text-red-400"
-              }
-            >
-              {formatFixed(data.analytics.realizedPnlUsdcRaw, data.assumptions.usdc.decimals)}
+            <div className={BigInt(data.analytics.realizedPnlUsdcRaw) >= 0n ? "mt-2 text-xl text-green-400" : "mt-2 text-xl text-red-400"}>
+              {formatUsdc(data.analytics.realizedPnlUsdcRaw, data.assumptions.usdc.decimals)}
             </div>
             <p className="mt-1 text-xs text-gray-500">USDC</p>
           </div>
@@ -233,6 +255,11 @@ export default async function SportfunPortfolioPage({
       <section className="mt-8">
         <h2 className="text-lg font-semibold text-white">Holdings</h2>
         <p className="mt-1 text-sm text-gray-400">{data.assumptions.shareUnits}</p>
+        {data.summary.scanIncomplete ? (
+          <p className="mt-2 text-sm text-amber-300">
+            Scan incomplete (Alchemy returned more pages). Increase <code className="text-amber-200">maxPages</code>.
+          </p>
+        ) : null}
 
         <div className="mt-3 overflow-x-auto rounded-xl border border-white/10">
           <table className="w-full text-sm">
@@ -279,6 +306,86 @@ export default async function SportfunPortfolioPage({
           </table>
         </div>
       </section>
+
+      {data.analytics?.positionsByToken && data.analytics.positionsByToken.length ? (
+        <section className="mt-8">
+          <h2 className="text-lg font-semibold text-white">Per-athlete breakdown (on-chain)</h2>
+          <p className="mt-1 text-sm text-gray-400">
+            Cost basis is derived from on-chain buys/sells (FDFPairV2). Free shares (promotions / bulk mints) are treated as zero cost.
+          </p>
+
+          <div className="mt-3 overflow-x-auto rounded-xl border border-white/10">
+            <table className="w-full text-sm">
+              <thead className="bg-white/5 text-left text-gray-300">
+                <tr>
+                  <th className="p-3">Contract</th>
+                  <th className="p-3">TokenId</th>
+                  <th className="p-3">Holding shares</th>
+                  <th className="p-3">Spent</th>
+                  <th className="p-3">Avg cost/share</th>
+                  <th className="p-3">Current price/share</th>
+                  <th className="p-3">Value</th>
+                  <th className="p-3">Unrealized PnL</th>
+                  <th className="p-3">Tracked shares</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/10">
+                {data.analytics.positionsByToken.slice(0, 200).map((p) => {
+                  const pnl = p.unrealizedPnlTrackedUsdcRaw;
+                  const pnlClass = pnl
+                    ? BigInt(pnl) >= 0n
+                      ? "text-green-400"
+                      : "text-red-400"
+                    : "text-gray-500";
+
+                  return (
+                    <tr key={`${p.playerToken}:${p.tokenIdDec}`} className="text-gray-200">
+                      <td className="p-3 whitespace-nowrap">
+                        <a
+                          className="text-blue-400 hover:underline"
+                          href={`https://basescan.org/address/${p.playerToken}`}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          {shortenAddress(p.playerToken)}
+                        </a>
+                      </td>
+                      <td className="p-3 whitespace-nowrap">{p.tokenIdDec}</td>
+                      <td className="p-3 whitespace-nowrap">{formatShares(p.holdingSharesRaw)}</td>
+                      <td className="p-3 whitespace-nowrap">
+                        {p.totals ? formatUsdc(p.totals.spentUsdcRaw, data.assumptions.usdc.decimals) : "—"}
+                      </td>
+                      <td className="p-3 whitespace-nowrap">
+                        {p.avgCostUsdcPerShareRaw ? formatUsdc(p.avgCostUsdcPerShareRaw, data.assumptions.usdc.decimals) : "—"}
+                      </td>
+                      <td className="p-3 whitespace-nowrap">
+                        {p.currentPriceUsdcPerShareRaw ? formatUsdc(p.currentPriceUsdcPerShareRaw, data.assumptions.usdc.decimals) : "—"}
+                      </td>
+                      <td className="p-3 whitespace-nowrap">
+                        {p.currentValueHoldingUsdcRaw ? formatUsdc(p.currentValueHoldingUsdcRaw, data.assumptions.usdc.decimals) : "—"}
+                      </td>
+                      <td className={`p-3 whitespace-nowrap ${pnlClass}`}>
+                        {pnl ? formatUsdc(pnl, data.assumptions.usdc.decimals) : "—"}
+                      </td>
+                      <td className="p-3 whitespace-nowrap text-gray-400">
+                        {formatShares(p.trackedSharesRaw)}
+                        {BigInt(p.trackedSharesRaw) !== BigInt(p.holdingSharesRaw) ? " (partial)" : ""}
+                      </td>
+                    </tr>
+                  );
+                })}
+                {data.analytics.positionsByToken.length > 200 ? (
+                  <tr>
+                    <td className="p-3 text-gray-400" colSpan={9}>
+                      Showing top 200 by current value. Increase the UI limit if needed.
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : null}
 
       <section className="mt-8">
         <h2 className="text-lg font-semibold text-white">Activity (tx grouped)</h2>
