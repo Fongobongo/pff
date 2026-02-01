@@ -134,7 +134,7 @@ export default async function SportfunPortfolioPage({
   const { address } = paramsSchema.parse(await params);
 
   const data = await getJson<SportfunPortfolioResponse>(
-    `/api/sportfun/portfolio/${address}?maxPages=3&maxCount=0x3e8&maxActivity=120&includeTrades=1&includePrices=1&includeUri=0`
+    `/api/sportfun/portfolio/${address}?scanMode=full&maxPages=50&maxCount=0x3e8&maxActivity=5000&includeTrades=1&includePrices=1&includeUri=0`
   );
 
   return (

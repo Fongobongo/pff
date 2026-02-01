@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import fs from "node:fs";
+import path from "node:path";
 import { alchemyRpc } from "@/lib/alchemy";
 import { shortenAddress } from "@/lib/format";
 import {
@@ -38,6 +40,8 @@ const querySchema = z.object({
   includePrices: z.string().optional(),
   includeReceipts: z.string().optional(),
   includeUri: z.string().optional(),
+  // Higher caps + best-effort full history scan (may still truncate if it risks timeouts).
+  scanMode: z.enum(["default", "full"]).optional(),
 });
 
 type AlchemyTransfer = {
@@ -180,6 +184,13 @@ async function withRetry<T>(fn: () => Promise<T>, opts?: { retries?: number; bas
   throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
 }
 
+type TransfersPageResult = {
+  transfers: AlchemyTransfer[];
+  nextPageKey?: string;
+  pagesFetched: number;
+  truncatedByBudget: boolean;
+};
+
 async function fetchTransfersForWallet(params: {
   address: string;
   direction: "incoming" | "outgoing";
@@ -187,7 +198,8 @@ async function fetchTransfersForWallet(params: {
   contractAddresses?: string[];
   maxCount: string;
   maxPages: number;
-}): Promise<AlchemyTransfer[]> {
+  deadlineMs?: number;
+}): Promise<TransfersPageResult> {
   const baseParams: {
     fromBlock: string;
     toBlock: "latest";
@@ -208,8 +220,15 @@ async function fetchTransfersForWallet(params: {
 
   let pageKey: string | undefined;
   const all: AlchemyTransfer[] = [];
+  let pagesFetched = 0;
+  let truncatedByBudget = false;
 
   for (let page = 0; page < params.maxPages; page++) {
+    if (params.deadlineMs !== undefined && Date.now() > params.deadlineMs) {
+      truncatedByBudget = true;
+      break;
+    }
+
     const result = (await withRetry(
       () =>
         alchemyRpc("alchemy_getAssetTransfers", [
@@ -226,12 +245,18 @@ async function fetchTransfersForWallet(params: {
 
     const transfers = result.transfers ?? [];
     all.push(...transfers);
+    pagesFetched++;
 
     pageKey = result.pageKey;
     if (!pageKey) break;
   }
 
-  return all;
+  return {
+    transfers: all,
+    nextPageKey: pageKey,
+    pagesFetched,
+    truncatedByBudget,
+  };
 }
 
 function dedupeTransfers(transfers: AlchemyTransfer[]): AlchemyTransfer[] {
@@ -243,14 +268,63 @@ function dedupeTransfers(transfers: AlchemyTransfer[]): AlchemyTransfer[] {
   return [...byId.values()];
 }
 
+const RECEIPT_CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 14; // 14 days
+
+function getReceiptCacheMap(): Map<string, { value: TxReceipt | null; expiresAt: number }> {
+  const g = globalThis as unknown as {
+    __pff_sportfun_receiptCache?: Map<string, { value: TxReceipt | null; expiresAt: number }>;
+  };
+  if (!g.__pff_sportfun_receiptCache) g.__pff_sportfun_receiptCache = new Map();
+  return g.__pff_sportfun_receiptCache;
+}
+
+function receiptCachePath(txHash: string): string {
+  const safe = txHash.toLowerCase().replace(/^0x/, "");
+  return path.join(process.cwd(), ".cache", "sportfun", "receipts", `${safe}.json`);
+}
+
 async function fetchReceipt(txHash: string): Promise<TxReceipt | null> {
+  const key = txHash.toLowerCase();
+  const mem = getReceiptCacheMap();
+  const now = Date.now();
+
+  const cached = mem.get(key);
+  if (cached && cached.expiresAt > now) return cached.value;
+
+  // Best-effort disk cache (works great on a VPS; may be ephemeral on serverless).
+  try {
+    const p = receiptCachePath(key);
+    const st = fs.statSync(p);
+    const ageMs = now - st.mtimeMs;
+    if (ageMs < RECEIPT_CACHE_TTL_MS) {
+      const txt = fs.readFileSync(p, "utf8");
+      const parsed = JSON.parse(txt) as TxReceipt | null;
+      mem.set(key, { value: parsed, expiresAt: now + RECEIPT_CACHE_TTL_MS });
+      return parsed;
+    }
+  } catch {
+    // ignore
+  }
+
   try {
     const receipt = (await withRetry(
       () => alchemyRpc("eth_getTransactionReceipt", [txHash]),
       { retries: 3, baseDelayMs: 250 }
     )) as TxReceipt | null;
+
+    mem.set(key, { value: receipt, expiresAt: now + RECEIPT_CACHE_TTL_MS });
+
+    try {
+      const p = receiptCachePath(key);
+      fs.mkdirSync(path.dirname(p), { recursive: true });
+      fs.writeFileSync(p, JSON.stringify(receipt), "utf8");
+    } catch {
+      // ignore
+    }
+
     return receipt;
   } catch {
+    mem.set(key, { value: null, expiresAt: now + 1000 * 60 * 10 }); // negative cache 10m
     return null;
   }
 }
@@ -530,33 +604,48 @@ export async function GET(request: Request, context: { params: Promise<{ address
   const wallet = address;
   const walletLc = wallet.toLowerCase();
 
-  const maxCount = q.maxCount ?? "0x3e8"; // 1000 per page
-  const maxPages = Math.max(1, Math.min(10, q.maxPages ? Number(q.maxPages) : 3));
+  const scanMode = q.scanMode ?? "default";
 
-  const maxActivity = Math.max(1, Math.min(500, q.maxActivity ? Number(q.maxActivity) : 100));
   const includeTrades = parseBool(q.includeTrades, true);
   const includePrices = parseBool(q.includePrices, true);
   const includeReceipts = parseBool(q.includeReceipts, false);
   const includeUri = parseBool(q.includeUri, false);
 
-  const [erc1155Incoming, erc1155Outgoing] = await Promise.all([
+  const maxCount = q.maxCount ?? "0x3e8"; // 1000 per page
+
+  // Higher ceilings for "ideal" mode. Still capped to avoid runaway requests.
+  const maxPagesCeil = scanMode === "full" ? 200 : 10;
+  const maxActivityCeil = scanMode === "full" ? 20000 : 500;
+
+  const maxPages = Math.max(1, Math.min(maxPagesCeil, q.maxPages ? Number(q.maxPages) : scanMode === "full" ? 50 : 3));
+  const maxActivity = Math.max(1, Math.min(maxActivityCeil, q.maxActivity ? Number(q.maxActivity) : scanMode === "full" ? 5000 : 100));
+
+  // Best-effort deadline (helps avoid serverless timeouts). VPS users can just raise maxPages.
+  const deadlineMs = Date.now() + (scanMode === "full" ? 25_000 : 7_000);
+
+  const [erc1155IncomingRes, erc1155OutgoingRes] = await Promise.all([
     fetchTransfersForWallet({
       address: wallet,
       direction: "incoming",
       category: "erc1155",
+      // Restrict to known Sport.fun ERC-1155 contracts to reduce pages.
+      contractAddresses: [...SPORTFUN_ERC1155_CONTRACTS],
       maxCount,
       maxPages,
+      deadlineMs,
     }),
     fetchTransfersForWallet({
       address: wallet,
       direction: "outgoing",
       category: "erc1155",
+      contractAddresses: [...SPORTFUN_ERC1155_CONTRACTS],
       maxCount,
       maxPages,
+      deadlineMs,
     }),
   ]);
 
-  const erc1155Transfers = dedupeTransfers([...erc1155Incoming, ...erc1155Outgoing]);
+  const erc1155Transfers = dedupeTransfers([...erc1155IncomingRes.transfers, ...erc1155OutgoingRes.transfers]);
 
   // Aggregate balances per (contract, tokenId) and capture per-tx ERC-1155 deltas.
   const balances = new Map<string, bigint>();
@@ -632,7 +721,7 @@ export async function GET(request: Request, context: { params: Promise<{ address
     });
 
   // Fetch USDC transfers and compute per-tx delta by hash.
-  const [usdcIncoming, usdcOutgoing] = await Promise.all([
+  const [usdcIncomingRes, usdcOutgoingRes] = await Promise.all([
     fetchTransfersForWallet({
       address: wallet,
       direction: "incoming",
@@ -640,6 +729,7 @@ export async function GET(request: Request, context: { params: Promise<{ address
       contractAddresses: [BASE_USDC],
       maxCount,
       maxPages,
+      deadlineMs,
     }),
     fetchTransfersForWallet({
       address: wallet,
@@ -648,10 +738,47 @@ export async function GET(request: Request, context: { params: Promise<{ address
       contractAddresses: [BASE_USDC],
       maxCount,
       maxPages,
+      deadlineMs,
     }),
   ]);
 
-  const usdcTransfers = dedupeTransfers([...usdcIncoming, ...usdcOutgoing]);
+  const usdcTransfers = dedupeTransfers([...usdcIncomingRes.transfers, ...usdcOutgoingRes.transfers]);
+
+  const scan = {
+    mode: scanMode,
+    deadlineMs,
+    erc1155: {
+      incoming: {
+        pagesFetched: erc1155IncomingRes.pagesFetched,
+        hasMore: Boolean(erc1155IncomingRes.nextPageKey),
+        truncatedByBudget: erc1155IncomingRes.truncatedByBudget,
+      },
+      outgoing: {
+        pagesFetched: erc1155OutgoingRes.pagesFetched,
+        hasMore: Boolean(erc1155OutgoingRes.nextPageKey),
+        truncatedByBudget: erc1155OutgoingRes.truncatedByBudget,
+      },
+    },
+    usdc: {
+      incoming: {
+        pagesFetched: usdcIncomingRes.pagesFetched,
+        hasMore: Boolean(usdcIncomingRes.nextPageKey),
+        truncatedByBudget: usdcIncomingRes.truncatedByBudget,
+      },
+      outgoing: {
+        pagesFetched: usdcOutgoingRes.pagesFetched,
+        hasMore: Boolean(usdcOutgoingRes.nextPageKey),
+        truncatedByBudget: usdcOutgoingRes.truncatedByBudget,
+      },
+    },
+  };
+
+  const scanIncomplete =
+    scan.erc1155.incoming.hasMore ||
+    scan.erc1155.outgoing.hasMore ||
+    scan.usdc.incoming.hasMore ||
+    scan.usdc.outgoing.hasMore;
+
   const usdcDeltaByHash = new Map<string, bigint>();
 
   for (const t of usdcTransfers) {
@@ -1265,6 +1392,7 @@ export async function GET(request: Request, context: { params: Promise<{ address
     protocol: "sportfun",
     address: wallet,
     query: {
+      scanMode,
       maxPages,
       maxCount,
       maxActivity,
@@ -1305,6 +1433,8 @@ export async function GET(request: Request, context: { params: Promise<{ address
       shareDeltaMismatchTxCount,
       reconciledTransferInCount,
       reconciledTransferOutCount,
+      scanIncomplete,
+      scan,
     },
     holdings: holdingsEnriched,
     activity: activityEnriched,

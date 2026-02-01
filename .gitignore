@@ -6,6 +6,9 @@ out/
 # Logs
 *.log
 
+# Local cache (dev/VPS)
+.cache/
+
 # Env
 .env
 .env.*
