@@ -10,12 +10,25 @@ type SportfunPortfolioResponse = {
   chain: string;
   protocol: string;
   address: string;
+  query?: {
+    maxPages?: number;
+    maxCount?: string;
+    maxActivity?: number;
+    includeTrades?: boolean;
+    includePrices?: boolean;
+    includeReceipts?: boolean;
+    includeUri?: boolean;
+  };
   summary: {
     erc1155TransferCount: number;
     sportfunErc1155TransferCount: number;
     contractCount: number;
     holdingCount: number;
     activityCount: number;
+    decodedTradeCount?: number;
+    activityCountTotal?: number;
+    activityCountReturned?: number;
+    activityTruncated?: boolean;
   };
   assumptions: {
     shareUnits: string;
@@ -26,6 +39,14 @@ type SportfunPortfolioResponse = {
       note: string;
     };
   };
+  analytics?: {
+    realizedPnlUsdcRaw: string;
+    unrealizedPnlUsdcRaw: string;
+    totalCostBasisUsdcRaw: string;
+    currentValueUsdcRaw: string;
+    costBasisUnknownTradeCount: number;
+    note: string;
+  };
   holdings: Array<{
     contractAddress: string;
     tokenIdHex: string;
@@ -33,10 +54,13 @@ type SportfunPortfolioResponse = {
     balanceRaw: string;
     uri?: string;
     uriError?: string;
+    priceUsdcPerShareRaw?: string;
+    valueUsdcRaw?: string;
   }>;
   activity: Array<{
     hash: string;
     timestamp?: string;
+    kind?: "buy" | "sell" | "unknown";
     usdcDeltaRaw: string;
     erc1155Changes: Array<{
       contractAddress: string;
@@ -50,6 +74,27 @@ type SportfunPortfolioResponse = {
       tokenIdDec?: string;
       shareDeltaRaw?: string;
       priceUsdcPerShareRaw?: string;
+    };
+    decoded?: {
+      trades: Array<{
+        kind: "buy" | "sell";
+        playerToken?: string;
+        tokenIdDec: string;
+        shareAmountRaw: string;
+        currencyRaw: string;
+        feeRaw: string;
+        walletShareDeltaRaw: string;
+        walletCurrencyDeltaRaw: string;
+        priceUsdcPerShareRaw?: string;
+        priceUsdcPerShareIncFeeRaw?: string;
+      }>;
+      promotions: Array<{
+        kind: "promotion";
+        playerToken?: string;
+        tokenIdDec: string;
+        shareAmountRaw: string;
+        walletShareDeltaRaw: string;
+      }>;
     };
   }>;
 };
@@ -71,6 +116,11 @@ function formatFixed(raw: string, decimals: number): string {
   return `${neg ? "-" : ""}${whole.toString()}${fracStr ? "." + fracStr : ""}`;
 }
 
+function formatShares(raw: string): string {
+  // Sport.fun shares appear to be 18-dec fixed.
+  return formatFixed(raw, 18);
+}
+
 export default async function SportfunPortfolioPage({
   params,
 }: {
@@ -79,11 +129,11 @@ export default async function SportfunPortfolioPage({
   const { address } = paramsSchema.parse(await params);
 
   const data = await getJson<SportfunPortfolioResponse>(
-    `/api/sportfun/portfolio/${address}?maxPages=3&maxCount=0x3e8`
+    `/api/sportfun/portfolio/${address}?maxPages=3&maxCount=0x3e8&maxActivity=40&includeTrades=1&includePrices=1&includeUri=0`
   );
 
   return (
-    <main className="mx-auto max-w-5xl p-6">
+    <main className="mx-auto max-w-6xl p-6">
       <div className="flex items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold text-white">Sport.fun portfolio (WIP)</h1>
@@ -111,18 +161,63 @@ export default async function SportfunPortfolioPage({
           <p className="mt-1 text-xs text-gray-500">Known Sport.fun contracts.</p>
         </div>
         <div className="rounded-xl border border-white/10 bg-white/5 p-4">
-          <div className="text-sm text-gray-400">Contracts</div>
-          <div className="mt-2 text-xl text-white">{data.summary.contractCount}</div>
-        </div>
-        <div className="rounded-xl border border-white/10 bg-white/5 p-4">
           <div className="text-sm text-gray-400">Tx activity</div>
           <div className="mt-2 text-xl text-white">{data.summary.activityCount}</div>
-          <p className="mt-1 text-xs text-gray-500">ERC-1155 grouped by tx hash.</p>
+          <p className="mt-1 text-xs text-gray-500">
+            Showing {data.summary.activityCountReturned ?? data.activity.length}
+            {data.summary.activityTruncated ? "/" + (data.summary.activityCountTotal ?? data.summary.activityCount) : ""}.
+          </p>
+        </div>
+        <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+          <div className="text-sm text-gray-400">Decoded trades</div>
+          <div className="mt-2 text-xl text-white">{data.summary.decodedTradeCount ?? 0}</div>
+          <p className="mt-1 text-xs text-gray-500">FDFPairV2 events.</p>
         </div>
       </section>
 
+      {data.analytics ? (
+        <section className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-4">
+          <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+            <div className="text-sm text-gray-400">Current value</div>
+            <div className="mt-2 text-xl text-white">
+              {formatFixed(data.analytics.currentValueUsdcRaw, data.assumptions.usdc.decimals)}
+            </div>
+            <p className="mt-1 text-xs text-gray-500">USDC</p>
+          </div>
+          <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+            <div className="text-sm text-gray-400">Cost basis</div>
+            <div className="mt-2 text-xl text-white">
+              {formatFixed(data.analytics.totalCostBasisUsdcRaw, data.assumptions.usdc.decimals)}
+            </div>
+            <p className="mt-1 text-xs text-gray-500">USDC</p>
+          </div>
+          <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+            <div className="text-sm text-gray-400">Unrealized PnL</div>
+            <div
+              className={
+                BigInt(data.analytics.unrealizedPnlUsdcRaw) >= 0n ? "mt-2 text-xl text-green-400" : "mt-2 text-xl text-red-400"
+              }
+            >
+              {formatFixed(data.analytics.unrealizedPnlUsdcRaw, data.assumptions.usdc.decimals)}
+            </div>
+            <p className="mt-1 text-xs text-gray-500">USDC</p>
+          </div>
+          <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+            <div className="text-sm text-gray-400">Realized PnL</div>
+            <div
+              className={
+                BigInt(data.analytics.realizedPnlUsdcRaw) >= 0n ? "mt-2 text-xl text-green-400" : "mt-2 text-xl text-red-400"
+              }
+            >
+              {formatFixed(data.analytics.realizedPnlUsdcRaw, data.assumptions.usdc.decimals)}
+            </div>
+            <p className="mt-1 text-xs text-gray-500">USDC</p>
+          </div>
+        </section>
+      ) : null}
+
       <section className="mt-8">
-        <h2 className="text-lg font-semibold text-white">Holdings (raw)</h2>
+        <h2 className="text-lg font-semibold text-white">Holdings</h2>
         <p className="mt-1 text-sm text-gray-400">{data.assumptions.shareUnits}</p>
 
         <div className="mt-3 overflow-x-auto rounded-xl border border-white/10">
@@ -130,10 +225,10 @@ export default async function SportfunPortfolioPage({
             <thead className="bg-white/5 text-left text-gray-300">
               <tr>
                 <th className="p-3">Contract</th>
-                <th className="p-3">TokenId (dec)</th>
-                <th className="p-3">TokenId (hex)</th>
-                <th className="p-3">Balance (raw)</th>
-                <th className="p-3">URI (best-effort)</th>
+                <th className="p-3">TokenId</th>
+                <th className="p-3">Shares</th>
+                <th className="p-3">Price (USDC/share)</th>
+                <th className="p-3">Value (USDC)</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/10">
@@ -150,16 +245,12 @@ export default async function SportfunPortfolioPage({
                     </a>
                   </td>
                   <td className="p-3 whitespace-nowrap">{h.tokenIdDec}</td>
-                  <td className="p-3 whitespace-nowrap text-gray-400">{h.tokenIdHex}</td>
-                  <td className="p-3 whitespace-nowrap">{h.balanceRaw}</td>
-                  <td className="p-3">
-                    {h.uri ? (
-                      <span className="text-gray-200">{h.uri}</span>
-                    ) : h.uriError ? (
-                      <span className="text-xs text-amber-300">{h.uriError}</span>
-                    ) : (
-                      "—"
-                    )}
+                  <td className="p-3 whitespace-nowrap text-gray-200">{formatShares(h.balanceRaw)}</td>
+                  <td className="p-3 whitespace-nowrap text-gray-200">
+                    {h.priceUsdcPerShareRaw ? formatFixed(h.priceUsdcPerShareRaw, data.assumptions.usdc.decimals) : "—"}
+                  </td>
+                  <td className="p-3 whitespace-nowrap text-gray-200">
+                    {h.valueUsdcRaw ? formatFixed(h.valueUsdcRaw, data.assumptions.usdc.decimals) : "—"}
                   </td>
                 </tr>
               ))}
@@ -184,63 +275,53 @@ export default async function SportfunPortfolioPage({
             <thead className="bg-white/5 text-left text-gray-300">
               <tr>
                 <th className="p-3">Time</th>
-                <th className="p-3">Inferred</th>
+                <th className="p-3">Kind</th>
                 <th className="p-3">USDC delta</th>
-                <th className="p-3">ERC-1155 changes</th>
+                <th className="p-3">Decoded</th>
                 <th className="p-3">Tx</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/10">
-              {data.activity.slice(0, 50).map((a) => (
+              {data.activity.map((a) => (
                 <tr key={a.hash} className="text-gray-200">
                   <td className="p-3 whitespace-nowrap text-gray-400">{a.timestamp ?? "—"}</td>
                   <td className="p-3 whitespace-nowrap">
-                    {a.inferred?.kind && a.inferred.kind !== "unknown" ? (
-                      <div className="flex flex-col">
-                        <span className={a.inferred.kind === "buy" ? "text-green-400" : "text-red-400"}>
-                          {a.inferred.kind.toUpperCase()}
-                        </span>
-                        {a.inferred.priceUsdcPerShareRaw ? (
-                          <span className="text-xs text-gray-400">
-                            ~{formatFixed(a.inferred.priceUsdcPerShareRaw, data.assumptions.usdc.decimals)} USDC/share
-                          </span>
-                        ) : null}
-                      </div>
+                    {a.kind && a.kind !== "unknown" ? (
+                      <span className={a.kind === "buy" ? "text-green-400" : "text-red-400"}>
+                        {a.kind.toUpperCase()}
+                      </span>
                     ) : (
                       <span className="text-gray-500">—</span>
                     )}
                   </td>
                   <td className="p-3 whitespace-nowrap">
-                    <span
-                      className={
-                        BigInt(a.usdcDeltaRaw) >= 0n ? "text-green-400" : "text-red-400"
-                      }
-                    >
+                    <span className={BigInt(a.usdcDeltaRaw) >= 0n ? "text-green-400" : "text-red-400"}>
                       {formatFixed(a.usdcDeltaRaw, data.assumptions.usdc.decimals)}
                     </span>
                   </td>
                   <td className="p-3">
-                    <div className="flex flex-col gap-1">
-                      {a.erc1155Changes.slice(0, 6).map((c) => (
-                        <div key={`${c.contractAddress}:${c.tokenIdHex}`} className="text-xs">
-                          <span className="text-gray-400">{shortenAddress(c.contractAddress)}</span>{" "}
-                          <span className="text-gray-200">tokenId {c.tokenIdDec}</span>{" "}
-                          <span className={BigInt(c.deltaRaw) >= 0n ? "text-green-400" : "text-red-400"}>
-                            {c.deltaRaw}
-                          </span>
+                    <div className="flex flex-col gap-1 text-xs">
+                      {a.decoded?.trades?.slice(0, 3).map((t, idx) => (
+                        <div key={idx} className="text-gray-200">
+                          <span className={t.kind === "buy" ? "text-green-400" : "text-red-400"}>
+                            {t.kind.toUpperCase()}
+                          </span>{" "}
+                          tokenId {t.tokenIdDec} · shares {formatShares(t.shareAmountRaw)} · net {formatFixed(t.currencyRaw, data.assumptions.usdc.decimals)} · fee {formatFixed(t.feeRaw, data.assumptions.usdc.decimals)}
                         </div>
                       ))}
-                      {a.erc1155Changes.length > 6 ? (
-                        <div className="text-xs text-gray-500">+{a.erc1155Changes.length - 6} more…</div>
+                      {a.decoded?.promotions?.slice(0, 2).map((p, idx) => (
+                        <div key={`p-${idx}`} className="text-amber-300">
+                          PROMO tokenId {p.tokenIdDec} · shares {formatShares(p.shareAmountRaw)}
+                        </div>
+                      ))}
+                      {a.decoded?.trades && a.decoded.trades.length > 3 ? (
+                        <div className="text-gray-500">+{a.decoded.trades.length - 3} more trades…</div>
                       ) : null}
                     </div>
                   </td>
                   <td className="p-3 whitespace-nowrap">
                     <div className="flex flex-col">
-                      <a
-                        className="text-blue-400 hover:underline"
-                        href={`/sportfun/tx/${a.hash}`}
-                      >
+                      <a className="text-blue-400 hover:underline" href={`/sportfun/tx/${a.hash}`}>
                         Inspect
                       </a>
                       <a
@@ -267,14 +348,12 @@ export default async function SportfunPortfolioPage({
         </div>
       </section>
 
-      <section className="mt-8 rounded-xl border border-white/10 bg-white/5 p-4">
-        <div className="text-sm text-gray-300">Next</div>
-        <ul className="mt-2 list-disc pl-5 text-sm text-gray-400">
-          <li>Resolve tokenId → player/asset metadata (the `uri(tokenId)` return value needs interpretation).</li>
-          <li>Decode receipts/logs for representative tx hashes to confirm market/bonding-curve contracts.</li>
-          <li>Compute per-trade price per share + cost basis from USDC deltas.</li>
-        </ul>
-      </section>
+      {data.analytics?.note ? (
+        <section className="mt-8 rounded-xl border border-white/10 bg-white/5 p-4">
+          <div className="text-sm text-gray-300">PnL notes</div>
+          <p className="mt-2 text-sm text-gray-400">{data.analytics.note}</p>
+        </section>
+      ) : null}
     </main>
   );
 }
