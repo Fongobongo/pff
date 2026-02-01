@@ -49,3 +49,8 @@ This file tracks key decisions and requirements from our chats.
     - Added sanity checks to compare decoded share deltas against ERC-1155 deltas (mismatch counts + samples).
     - Added counters for edge cases (gift buys; sells where proceeds are sent to a different recipient).
 
+## 2026-02-01
+
+- Agreed to implement performance hardening first.
+- Added local decoded-receipt cache (memory + disk) for Sport.fun portfolio activity.
+- Added activity cursor support to page transaction activity results.

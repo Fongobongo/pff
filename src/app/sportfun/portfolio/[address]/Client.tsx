@@ -34,6 +34,8 @@ type SportfunPortfolioResponse = {
     activityCountTotal?: number;
     activityCountReturned?: number;
     activityTruncated?: boolean;
+    nextActivityCursor?: number;
+    activityCursor?: number;
     scanIncomplete?: boolean;
     scan?: unknown;
   };
@@ -165,7 +167,7 @@ export default function SportfunPortfolioClient({ address }: { address: string }
   const requestUrl = useMemo(() => {
     // Start modest, then the effect will auto-increase until complete.
     return (maxPages: number) =>
-      `/api/sportfun/portfolio/${address}?scanMode=full&maxPages=${maxPages}&maxCount=0x3e8&maxActivity=100000&includeTrades=1&includePrices=1&includeUri=0`;
+      `/api/sportfun/portfolio/${address}?scanMode=full&maxPages=${maxPages}&maxCount=0x3e8&maxActivity=300&includeTrades=1&includePrices=1&includeUri=0`;
   }, [address]);
 
   useEffect(() => {

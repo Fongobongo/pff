@@ -39,6 +39,7 @@ const querySchema = z.object({
   maxCount: z.string().optional(),
   maxPages: z.string().optional(),
   maxActivity: z.string().optional(),
+  activityCursor: z.string().optional(),
   includeTrades: z.string().optional(),
   includePrices: z.string().optional(),
   includeReceipts: z.string().optional(),
@@ -347,6 +348,68 @@ function getReceiptCacheMap(): Map<string, { value: TxReceipt | null; expiresAt:
 function receiptCachePath(txHash: string): string {
   const safe = txHash.toLowerCase().replace(/^0x/, "");
   return path.join(process.cwd(), ".cache", "sportfun", "receipts", `${safe}.json`);
+}
+
+type ReceiptDecodedCache = {
+  decoded: {
+    trades: DecodedTradeItem[];
+    promotions: DecodedPromotionItem[];
+    unknownSportfunTopics: Array<{ address: string; topic0: string }>;
+  };
+  usdcDeltaReceipt: string | null;
+};
+
+function getDecodedCacheMap(): Map<string, { value: ReceiptDecodedCache; expiresAt: number }> {
+  const g = globalThis as unknown as {
+    __pff_sportfun_decodedCache?: Map<string, { value: ReceiptDecodedCache; expiresAt: number }>;
+  };
+  if (!g.__pff_sportfun_decodedCache) g.__pff_sportfun_decodedCache = new Map();
+  return g.__pff_sportfun_decodedCache;
+}
+
+function decodedCachePath(txHash: string): string {
+  const safe = txHash.toLowerCase().replace(/^0x/, "");
+  return path.join(process.cwd(), ".cache", "sportfun", "decoded", `${safe}.json`);
+}
+
+function readDecodedCache(txHash: string): ReceiptDecodedCache | null {
+  const key = txHash.toLowerCase();
+  const mem = getDecodedCacheMap();
+  const now = Date.now();
+
+  const cached = mem.get(key);
+  if (cached && cached.expiresAt > now) return cached.value;
+
+  try {
+    const p = decodedCachePath(key);
+    const st = fs.statSync(p);
+    const ageMs = now - st.mtimeMs;
+    if (ageMs < RECEIPT_CACHE_TTL_MS) {
+      const txt = fs.readFileSync(p, "utf8");
+      const parsed = JSON.parse(txt) as ReceiptDecodedCache;
+      mem.set(key, { value: parsed, expiresAt: now + RECEIPT_CACHE_TTL_MS });
+      return parsed;
+    }
+  } catch {
+    // ignore
+  }
+
+  return null;
+}
+
+function writeDecodedCache(txHash: string, value: ReceiptDecodedCache): void {
+  const key = txHash.toLowerCase();
+  const mem = getDecodedCacheMap();
+  const now = Date.now();
+  mem.set(key, { value, expiresAt: now + RECEIPT_CACHE_TTL_MS });
+
+  try {
+    const p = decodedCachePath(key);
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    fs.writeFileSync(p, JSON.stringify(value), "utf8");
+  } catch {
+    // ignore
+  }
 }
 
 async function fetchReceipt(txHash: string): Promise<TxReceipt | null> {
@@ -685,6 +748,7 @@ export async function GET(request: Request, context: { params: Promise<{ address
 
   const maxPages = Math.max(1, Math.min(maxPagesCeil, q.maxPages ? Number(q.maxPages) : scanMode === "full" ? 50 : 3));
   const maxActivity = Math.max(1, Math.min(maxActivityCeil, q.maxActivity ? Number(q.maxActivity) : scanMode === "full" ? 5000 : 100));
+  const activityCursor = q.activityCursor ? Number(q.activityCursor) : 0;
 
   // Best-effort deadline (helps avoid serverless timeouts).
   // In full mode we prefer correctness; use maxPages to bound work.
@@ -939,8 +1003,10 @@ export async function GET(request: Request, context: { params: Promise<{ address
     })
     .sort((a, b) => String(b.timestamp ?? "").localeCompare(String(a.timestamp ?? "")));
 
-  const activity = activityAll.slice(0, maxActivity);
-  const activityTruncated = activityAll.length > activity.length;
+  const activityOffset = Math.max(0, activityCursor);
+  const activity = activityAll.slice(activityOffset, activityOffset + maxActivity);
+  const activityTruncated = activityAll.length > activityOffset + activity.length;
+  const nextActivityCursor = activityTruncated ? activityOffset + activity.length : undefined;
 
   // Fetch and decode receipts (authoritative trade semantics).
   const receiptByHash = new Map<string, TxReceipt>();
@@ -958,11 +1024,22 @@ export async function GET(request: Request, context: { params: Promise<{ address
     const hashes = activity.map((a) => a.hash);
 
     const receipts = await mapLimit(hashes, 4, async (h) => {
+      const cached = readDecodedCache(h);
+      if (cached) return { h, r: null, cached };
+
       const r = await fetchReceipt(h);
       return { h, r };
     });
 
-    for (const { h, r } of receipts) {
+    for (const { h, r, cached } of receipts) {
+      if (cached) {
+        decodedByHash.set(h, cached.decoded);
+        if (cached.usdcDeltaReceipt !== null) {
+          usdcDeltaReceiptByHash.set(h, BigInt(cached.usdcDeltaReceipt));
+        }
+        continue;
+      }
+
       if (!r) continue;
       receiptByHash.set(h, r);
 
@@ -975,6 +1052,11 @@ export async function GET(request: Request, context: { params: Promise<{ address
         walletLc,
       });
       if (usdcDeltaReceipt !== null) usdcDeltaReceiptByHash.set(h, usdcDeltaReceipt);
+
+      writeDecodedCache(h, {
+        decoded,
+        usdcDeltaReceipt: usdcDeltaReceipt !== null ? usdcDeltaReceipt.toString(10) : null,
+      });
     }
   }
 
@@ -1492,6 +1574,8 @@ export async function GET(request: Request, context: { params: Promise<{ address
       activityCountTotal: activityAll.length,
       activityCountReturned: activityEnriched.length,
       activityTruncated,
+      nextActivityCursor,
+      activityCursor: activityOffset,
       decodedTradeCount,
       decodedPromotionCount,
       // Count of (contract, tokenId) deltas where decoded trades/promotions didn't match ERC-1155 deltas.

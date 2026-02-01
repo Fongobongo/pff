@@ -44,4 +44,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - USDC delta is computed from receipt `Transfer` logs when receipts are available (more reliable than transfer correlation by tx hash).
   - Added debug/sanity checks for decoded share deltas vs ERC-1155 deltas (mismatch counters + samples).
   - Added basic counters for edge cases (gift buys, sells where proceeds go to another recipient).
-
+  - Added activity pagination via `activityCursor` and a local decoded-receipt cache (memory + disk) to reduce receipt decoding overhead.
