@@ -62,6 +62,47 @@ type TxReceiptLog = {
   data: Hex;
 };
 
+const ERC20_TRANSFER_TOPIC0 =
+  "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+
+function topicToAddressLc(topic: Hex | undefined): string {
+  const t = String(topic ?? "0x").toLowerCase().replace(/^0x/, "");
+  // topics encode indexed addresses as 32-byte values; take the last 20 bytes.
+  return `0x${t.slice(-40)}`;
+}
+
+function decodeErc20DeltaFromReceipt(params: {
+  receipt: TxReceipt;
+  tokenAddressLc: string;
+  walletLc: string;
+}): bigint | null {
+  const logs = params.receipt.logs ?? [];
+  let found = false;
+  let delta = 0n;
+
+  for (const log of logs) {
+    const addrLc = toLower(log.address);
+    if (addrLc !== params.tokenAddressLc) continue;
+
+    const topic0 = String(log.topics?.[0] ?? "").toLowerCase();
+    if (topic0 !== ERC20_TRANSFER_TOPIC0) continue;
+
+    // topic0 + from + to
+    if ((log.topics?.length ?? 0) < 3) continue;
+
+    found = true;
+    const fromLc = topicToAddressLc(log.topics[1]);
+    const toLc = topicToAddressLc(log.topics[2]);
+    const value = parseBigIntish(log.data);
+
+    if (toLc === params.walletLc) delta += value;
+    if (fromLc === params.walletLc) delta -= value;
+  }
+
+  return found ? delta : null;
+}
+
+
 type TxReceipt = {
   transactionHash: Hex;
   blockNumber?: Hex;
@@ -344,6 +385,9 @@ function decodeReceiptForSportfun(params: {
             const walletShareDelta = recipient === params.walletLc ? shareAmount : 0n;
             const walletCurrencyDelta = buyer === params.walletLc ? -(currency + fee) : 0n;
 
+            // Only keep wallet-relevant trades (those that change this wallet's shares).
+            if (walletShareDelta === 0n) continue;
+
             trades.push({
               kind: "buy",
               fdfPair: addrLc,
@@ -381,6 +425,9 @@ function decodeReceiptForSportfun(params: {
 
             const walletShareDelta = seller === params.walletLc ? -shareAmount : 0n;
             const walletCurrencyDelta = recipient === params.walletLc ? currency : 0n;
+
+            // Only keep wallet-relevant trades (those that change this wallet's shares).
+            if (walletShareDelta === 0n) continue;
 
             trades.push({
               kind: "sell",
@@ -429,6 +476,8 @@ function decodeReceiptForSportfun(params: {
           const tokenId = ids[i];
           const shareAmount = amounts[i] ?? 0n;
           const walletShareDelta = account === params.walletLc ? shareAmount : 0n;
+
+          if (walletShareDelta === 0n) continue;
 
           promotions.push({
             kind: "promotion",
@@ -697,6 +746,7 @@ export async function GET(request: Request, context: { params: Promise<{ address
       unknownSportfunTopics: Array<{ address: string; topic0: string }>;
     }
   >();
+  const usdcDeltaReceiptByHash = new Map<string, bigint>();
 
   if (includeTrades || includeReceipts) {
     const hashes = activity.map((a) => a.hash);
@@ -712,6 +762,13 @@ export async function GET(request: Request, context: { params: Promise<{ address
 
       const decoded = decodeReceiptForSportfun({ receipt: r, walletLc });
       decodedByHash.set(h, decoded);
+
+      const usdcDeltaReceipt = decodeErc20DeltaFromReceipt({
+        receipt: r,
+        tokenAddressLc: BASE_USDC,
+        walletLc,
+      });
+      if (usdcDeltaReceipt !== null) usdcDeltaReceiptByHash.set(h, usdcDeltaReceipt);
     }
   }
 
@@ -813,6 +870,9 @@ export async function GET(request: Request, context: { params: Promise<{ address
   const activityEnriched: ActivityEnrichedItem[] = activity.map((a) => {
     const decoded = decodedByHash.get(a.hash);
 
+    const usdcDeltaReceipt = usdcDeltaReceiptByHash.get(a.hash);
+    const effectiveUsdcDelta = usdcDeltaReceipt ?? BigInt(a.usdcDeltaRaw);
+
     // If we have decoded trades, we treat them as the primary classification.
     const primaryKind = decoded?.trades?.length
       ? decoded.trades.every((t) => t.kind === "buy")
@@ -824,6 +884,7 @@ export async function GET(request: Request, context: { params: Promise<{ address
 
     return {
       ...a,
+      usdcDeltaRaw: effectiveUsdcDelta.toString(10),
       kind: primaryKind,
       decoded: decoded
         ? {
@@ -867,6 +928,8 @@ export async function GET(request: Request, context: { params: Promise<{ address
   const positionByKey = new Map<string, { shares: bigint; costUsdc: bigint }>();
   let realizedPnlUsdcRaw = 0n;
   let costBasisUnknownTradeCount = 0;
+  let giftBuyCount = 0;
+  let sellNoProceedsCount = 0;
 
   for (const item of ledger) {
     const playerToken = item.playerToken;
@@ -903,10 +966,21 @@ export async function GET(request: Request, context: { params: Promise<{ address
     if (shareDelta > 0n) {
       // Buy.
       pos.shares += shareDelta;
+
       if (currencyDelta < 0n) {
+        // Wallet paid (including fee).
         pos.costUsdc += -currencyDelta;
       } else {
-        costBasisUnknownTradeCount++;
+        // Wallet received shares without paying (gift) OR we failed to map the cost.
+        const initiator = item.counterparty?.initiator ?? "";
+        const recipient = item.counterparty?.recipient ?? "";
+        const isGift = recipient === walletLc && initiator !== walletLc;
+
+        if (isGift) {
+          giftBuyCount++;
+        } else {
+          costBasisUnknownTradeCount++;
+        }
       }
     } else {
       // Sell.
@@ -921,6 +995,9 @@ export async function GET(request: Request, context: { params: Promise<{ address
 
         if (currencyDelta > 0n) {
           realizedPnlUsdcRaw += currencyDelta - costBasisSold;
+        } else {
+          // Proceeds may have been redirected to another recipient.
+          sellNoProceedsCount++;
         }
       }
     }
@@ -955,6 +1032,61 @@ export async function GET(request: Request, context: { params: Promise<{ address
     unrealizedPnlUsdcRaw += value - pos.costUsdc;
   }
 
+  // Sanity-check: decoded share deltas (trades/promotions) should match ERC-1155 deltas for the wallet.
+  let shareDeltaMismatchCount = 0;
+  let shareDeltaMismatchTxCount = 0;
+  const shareDeltaMismatchSamples: Array<{
+    hash: string;
+    contractAddress: string;
+    tokenIdDec: string;
+    expectedDeltaRaw: string;
+    decodedDeltaRaw: string;
+  }> = [];
+
+  for (const a of activityEnriched) {
+    const decoded = a.decoded;
+    if (!decoded) continue;
+
+    const expectedByKey = new Map<string, bigint>();
+    for (const c of a.erc1155Changes) {
+      expectedByKey.set(tokenKey(c.contractAddress, c.tokenIdDec), BigInt(c.deltaRaw));
+    }
+
+    const decodedByKey = new Map<string, bigint>();
+    for (const t of decoded.trades ?? []) {
+      if (!t.playerToken) continue;
+      const key = tokenKey(t.playerToken, t.tokenIdDec);
+      decodedByKey.set(key, (decodedByKey.get(key) ?? 0n) + BigInt(t.walletShareDeltaRaw));
+    }
+    for (const p of decoded.promotions ?? []) {
+      if (!p.playerToken) continue;
+      const key = tokenKey(p.playerToken, p.tokenIdDec);
+      decodedByKey.set(key, (decodedByKey.get(key) ?? 0n) + BigInt(p.walletShareDeltaRaw));
+    }
+
+    let txMismatch = false;
+    for (const [key, decodedDelta] of decodedByKey.entries()) {
+      const expectedDelta = expectedByKey.get(key) ?? 0n;
+      if (expectedDelta !== decodedDelta) {
+        shareDeltaMismatchCount++;
+        txMismatch = true;
+
+        if (shareDeltaMismatchSamples.length < 8) {
+          const [contractAddress, tokenIdDec] = key.split(":");
+          shareDeltaMismatchSamples.push({
+            hash: a.hash,
+            contractAddress,
+            tokenIdDec,
+            expectedDeltaRaw: expectedDelta.toString(10),
+            decodedDeltaRaw: decodedDelta.toString(10),
+          });
+        }
+      }
+    }
+
+    if (txMismatch) shareDeltaMismatchTxCount++;
+  }
+
   return NextResponse.json({
     chain: "base",
     protocol: "sportfun",
@@ -975,7 +1107,7 @@ export async function GET(request: Request, context: { params: Promise<{ address
       usdc: {
         contractAddress: BASE_USDC,
         decimals: BASE_USDC_DECIMALS,
-        note: "USDC correlation by tx hash is retained for debugging, but authoritative trades come from FDFPairV2 events.",
+        note: "USDC delta is computed from receipt Transfer logs when available; authoritative trades come from FDFPairV2 events.",
       },
     },
     summary: {
@@ -994,6 +1126,8 @@ export async function GET(request: Request, context: { params: Promise<{ address
       activityTruncated,
       decodedTradeCount,
       decodedPromotionCount,
+      shareDeltaMismatchCount,
+      shareDeltaMismatchTxCount,
     },
     holdings: holdingsEnriched,
     activity: activityEnriched,
@@ -1007,7 +1141,9 @@ export async function GET(request: Request, context: { params: Promise<{ address
       currentValueAllHoldingsUsdcRaw: currentValueAllHoldingsUsdcRaw.toString(10),
       holdingsPricedCount,
       costBasisUnknownTradeCount,
-      note: "PnL is a WIP: cost basis is tracked only from decoded FDFPair trades (moving average). Promotions add free shares (zero cost). currentValueAllHoldingsUsdcRaw sums priced holdings; missing historical trades may still skew cost basis.",
+      giftBuyCount,
+      sellNoProceedsCount,
+      note: "PnL is a WIP: cost basis is tracked only from decoded FDFPair trades (moving average). Promotions and gifts add free shares (zero cost). currentValueAllHoldingsUsdcRaw sums priced holdings; missing historical trades may still skew cost basis.",
     },
     debug: {
       contracts: [...contractSet].map((c) => ({ address: c, label: shortenAddress(c) })),
@@ -1016,6 +1152,7 @@ export async function GET(request: Request, context: { params: Promise<{ address
         fdfPair: getFdfPairForPlayerToken(pt),
         developmentPlayers: SPORTFUN_DEV_PLAYERS_CONTRACTS.find((d) => getPlayerTokenForDevPlayers(d) === pt),
       })),
+      shareDeltaMismatchSamples,
     },
   });
 }

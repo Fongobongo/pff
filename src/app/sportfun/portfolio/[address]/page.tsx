@@ -27,6 +27,8 @@ type SportfunPortfolioResponse = {
     activityCount: number;
     decodedTradeCount?: number;
     decodedPromotionCount?: number;
+    shareDeltaMismatchCount?: number;
+    shareDeltaMismatchTxCount?: number;
     activityCountTotal?: number;
     activityCountReturned?: number;
     activityTruncated?: boolean;
@@ -175,7 +177,9 @@ export default async function SportfunPortfolioPage({
           <div className="text-sm text-gray-400">Decoded trades</div>
           <div className="mt-2 text-xl text-white">{data.summary.decodedTradeCount ?? 0}</div>
           <p className="mt-1 text-xs text-gray-500">
-            FDFPairV2 events{data.summary.decodedPromotionCount !== undefined ? ` · promotions ${data.summary.decodedPromotionCount}` : ""}.
+            FDFPairV2 events
+            {data.summary.decodedPromotionCount !== undefined ? ` · promotions ${data.summary.decodedPromotionCount}` : ""}
+            {data.summary.shareDeltaMismatchTxCount ? ` · mismatches ${data.summary.shareDeltaMismatchTxCount} tx` : ""}.
           </p>
         </div>
       </section>
