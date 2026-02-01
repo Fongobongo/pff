@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import fs from "node:fs";
 import path from "node:path";
+import crypto from "node:crypto";
 import { alchemyRpc } from "@/lib/alchemy";
 import { shortenAddress } from "@/lib/format";
 import {
@@ -27,6 +28,8 @@ import {
   isOneOf,
   toLower,
 } from "@/lib/sportfun";
+
+export const runtime = "nodejs";
 
 const paramsSchema = z.object({
   address: z.string().min(1),
@@ -191,6 +194,38 @@ type TransfersPageResult = {
   truncatedByBudget: boolean;
 };
 
+const TRANSFERS_CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 14; // 14 days
+
+function sha1Hex(s: string): string {
+  return crypto.createHash("sha1").update(s).digest("hex");
+}
+
+function transfersCachePath(params: {
+  address: string;
+  direction: "incoming" | "outgoing";
+  category: "erc1155" | "erc20";
+  contractAddresses?: string[];
+  pageKey?: string;
+}): string {
+  const addr = params.address.toLowerCase();
+  const contractKey = params.contractAddresses?.length
+    ? sha1Hex([...params.contractAddresses].map((x) => x.toLowerCase()).sort().join(","))
+    : "all";
+  const pageKeyHash = sha1Hex(params.pageKey ?? "first");
+
+  return path.join(
+    process.cwd(),
+    ".cache",
+    "sportfun",
+    "transfers",
+    addr,
+    params.category,
+    params.direction,
+    contractKey,
+    `${pageKeyHash}.json`
+  );
+}
+
 async function fetchTransfersForWallet(params: {
   address: string;
   direction: "incoming" | "outgoing";
@@ -229,19 +264,50 @@ async function fetchTransfersForWallet(params: {
       break;
     }
 
-    const result = (await withRetry(
-      () =>
-        alchemyRpc("alchemy_getAssetTransfers", [
-          {
-            ...baseParams,
-            ...(params.direction === "incoming"
-              ? { toAddress: params.address }
-              : { fromAddress: params.address }),
-            ...(pageKey ? { pageKey } : {}),
-          },
-        ]),
-      { retries: 3 }
-    )) as { transfers?: AlchemyTransfer[]; pageKey?: string };
+    // Best-effort cache for transfer pages.
+    const cacheP = transfersCachePath({
+      address: params.address,
+      direction: params.direction,
+      category: params.category,
+      contractAddresses: params.contractAddresses,
+      pageKey,
+    });
+
+    let result: { transfers?: AlchemyTransfer[]; pageKey?: string } | null = null;
+
+    try {
+      const st = fs.statSync(cacheP);
+      const ageMs = Date.now() - st.mtimeMs;
+      if (ageMs < TRANSFERS_CACHE_TTL_MS) {
+        const txt = fs.readFileSync(cacheP, "utf8");
+        result = JSON.parse(txt) as { transfers?: AlchemyTransfer[]; pageKey?: string };
+      }
+    } catch {
+      // ignore
+    }
+
+    if (!result) {
+      result = (await withRetry(
+        () =>
+          alchemyRpc("alchemy_getAssetTransfers", [
+            {
+              ...baseParams,
+              ...(params.direction === "incoming"
+                ? { toAddress: params.address }
+                : { fromAddress: params.address }),
+              ...(pageKey ? { pageKey } : {}),
+            },
+          ]),
+        { retries: 3 }
+      )) as { transfers?: AlchemyTransfer[]; pageKey?: string };
+
+      try {
+        fs.mkdirSync(path.dirname(cacheP), { recursive: true });
+        fs.writeFileSync(cacheP, JSON.stringify(result), "utf8");
+      } catch {
+        // ignore
+      }
+    }
 
     const transfers = result.transfers ?? [];
     all.push(...transfers);
