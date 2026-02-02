@@ -61,6 +61,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added score-from-fixtures UI page with match status + unmatched highlighting.
 - Persisted tournament summary job status to Postgres when `DATABASE_URL` is set.
 - Improved fixture/team matching with aliases and similarity scoring.
+- Added match scoring fallback + tie-break rules for ambiguous fixtures.
 
 ### Changed
 - Fixed server-side API fetching to derive the deployment base URL (Vercel env/headers) instead of hardcoded localhost or relative URLs.

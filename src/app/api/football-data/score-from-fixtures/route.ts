@@ -67,9 +67,21 @@ function getCandidatesByDate(map: Map<string, StatsBombMatch[]>, date?: string):
 
 function findBestMatch(
   fixture: FixtureMatch,
-  candidates: StatsBombMatch[]
-): { match?: StatsBombMatch; swapped: boolean; score: number } {
-  return findBestStatsBombMatch(fixture.homeTeam?.name, fixture.awayTeam?.name, candidates);
+  candidates: StatsBombMatch[],
+  fixtureDate?: string
+): {
+  match?: StatsBombMatch;
+  swapped: boolean;
+  score: number;
+  confidence?: "strong" | "fallback";
+  reason?: string;
+} {
+  return findBestStatsBombMatch(
+    fixture.homeTeam?.name,
+    fixture.awayTeam?.name,
+    candidates,
+    fixtureDate
+  );
 }
 
 export async function GET(request: Request) {
@@ -113,7 +125,11 @@ export async function GET(request: Request) {
   const mapped = await mapWithConcurrency(limited, 2, async (fixture) => {
     const fixtureDate = fixture.utcDate?.slice(0, 10);
     const candidates = getCandidatesByDate(statsBombByDate, fixtureDate);
-    const { match, swapped, score } = findBestMatch(fixture, candidates);
+    const { match, swapped, score, confidence, reason } = findBestMatch(
+      fixture,
+      candidates,
+      fixtureDate
+    );
 
     let scored: any = undefined;
     if (query.include_scores && match) {
@@ -152,6 +168,8 @@ export async function GET(request: Request) {
       statsbombMatchDate: match?.match_date ?? null,
       matchSwapped: swapped,
       matchScore: score,
+      matchConfidence: confidence ?? null,
+      matchReason: reason ?? null,
       scoreFromMatchUrl: match
         ? `/api/stats/football/score-from-match?match_id=${match.match_id}&competition_id=${query.statsbomb_competition_id}&season_id=${query.statsbomb_season_id}`
         : null,

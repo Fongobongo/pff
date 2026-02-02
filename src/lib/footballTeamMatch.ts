@@ -1,5 +1,7 @@
 import type { StatsBombMatch } from "@/lib/stats/statsbomb";
 
+export type MatchConfidence = "strong" | "fallback";
+
 const STOP_TOKENS = new Set([
   "fc",
   "cf",
@@ -89,51 +91,130 @@ function jaccardSimilarity(a: string[], b: string[]): number {
   return intersection / union;
 }
 
-export function getTeamMatchScore(a?: string, b?: string): number {
+function getTeamMatchDetails(a?: string, b?: string) {
   const aNorm = normalizeTeamName(a);
   const bNorm = normalizeTeamName(b);
-  if (!aNorm.key || !bNorm.key) return 0;
+  if (!aNorm.key || !bNorm.key) {
+    return {
+      score: 0,
+      exact: false,
+      contains: false,
+      tokenScore: 0,
+    };
+  }
 
-  if (aNorm.key === bNorm.key) return 1;
-  if (aNorm.key.includes(bNorm.key) || bNorm.key.includes(aNorm.key)) return 0.9;
+  const exact = aNorm.key === bNorm.key;
+  const contains = !exact && (aNorm.key.includes(bNorm.key) || bNorm.key.includes(aNorm.key));
 
   const tokenScore = jaccardSimilarity(aNorm.tokens, bNorm.tokens);
-  return Math.min(0.85, tokenScore);
+  const score = exact ? 1 : contains ? 0.9 : Math.min(0.85, tokenScore);
+  return {
+    score,
+    exact,
+    contains,
+    tokenScore,
+  };
+}
+
+export function getTeamMatchScore(a?: string, b?: string): number {
+  return getTeamMatchDetails(a, b).score;
+}
+
+function getDateOffsetDays(a?: string, b?: string): number | null {
+  if (!a || !b) return null;
+  const aDate = new Date(`${a}T00:00:00Z`);
+  const bDate = new Date(`${b}T00:00:00Z`);
+  if (Number.isNaN(aDate.getTime()) || Number.isNaN(bDate.getTime())) return null;
+  const diffMs = Math.abs(aDate.getTime() - bDate.getTime());
+  return diffMs / (1000 * 60 * 60 * 24);
 }
 
 export function findBestStatsBombMatch(
   homeName?: string,
   awayName?: string,
-  candidates: StatsBombMatch[] = []
-): { match?: StatsBombMatch; swapped: boolean; score: number } {
-  let bestScore = 0;
-  let bestMatch: StatsBombMatch | undefined;
-  let bestSwapped = false;
+  candidates: StatsBombMatch[] = [],
+  fixtureDate?: string
+): { match?: StatsBombMatch; swapped: boolean; score: number; confidence?: MatchConfidence; reason?: string } {
+  type Candidate = {
+    match: StatsBombMatch;
+    swapped: boolean;
+    score: number;
+    exactCount: number;
+    containsCount: number;
+    minComponent: number;
+    dateOffset: number | null;
+  };
+
+  const evaluated: Candidate[] = [];
 
   for (const candidate of candidates) {
-    const directScore =
-      getTeamMatchScore(candidate.home_team?.home_team_name, homeName) +
-      getTeamMatchScore(candidate.away_team?.away_team_name, awayName);
-    if (directScore > bestScore) {
-      bestScore = directScore;
-      bestMatch = candidate;
-      bestSwapped = false;
-    }
+    const directHome = getTeamMatchDetails(candidate.home_team?.home_team_name, homeName);
+    const directAway = getTeamMatchDetails(candidate.away_team?.away_team_name, awayName);
+    const directScore = directHome.score + directAway.score;
+    evaluated.push({
+      match: candidate,
+      swapped: false,
+      score: directScore,
+      exactCount: Number(directHome.exact) + Number(directAway.exact),
+      containsCount: Number(directHome.contains) + Number(directAway.contains),
+      minComponent: Math.min(directHome.score, directAway.score),
+      dateOffset: getDateOffsetDays(fixtureDate, candidate.match_date),
+    });
 
-    const swapScore =
-      getTeamMatchScore(candidate.home_team?.home_team_name, awayName) +
-      getTeamMatchScore(candidate.away_team?.away_team_name, homeName);
-    if (swapScore > bestScore) {
-      bestScore = swapScore;
-      bestMatch = candidate;
-      bestSwapped = true;
-    }
+    const swapHome = getTeamMatchDetails(candidate.home_team?.home_team_name, awayName);
+    const swapAway = getTeamMatchDetails(candidate.away_team?.away_team_name, homeName);
+    const swapScore = swapHome.score + swapAway.score;
+    evaluated.push({
+      match: candidate,
+      swapped: true,
+      score: swapScore,
+      exactCount: Number(swapHome.exact) + Number(swapAway.exact),
+      containsCount: Number(swapHome.contains) + Number(swapAway.contains),
+      minComponent: Math.min(swapHome.score, swapAway.score),
+      dateOffset: getDateOffsetDays(fixtureDate, candidate.match_date),
+    });
   }
 
-  const minScore = 1.15;
-  if (bestScore < minScore) {
-    return { match: undefined, swapped: false, score: bestScore };
+  if (evaluated.length === 0) {
+    return { match: undefined, swapped: false, score: 0, reason: "no_candidates" };
   }
 
-  return { match: bestMatch, swapped: bestSwapped, score: bestScore };
+  evaluated.sort((a, b) => {
+    const scoreDiff = b.score - a.score;
+    if (Math.abs(scoreDiff) > 0.01) return scoreDiff;
+
+    const exactDiff = b.exactCount - a.exactCount;
+    if (exactDiff !== 0) return exactDiff;
+
+    const containsDiff = b.containsCount - a.containsCount;
+    if (containsDiff !== 0) return containsDiff;
+
+    const minDiff = b.minComponent - a.minComponent;
+    if (Math.abs(minDiff) > 0.01) return minDiff;
+
+    if (a.swapped !== b.swapped) return a.swapped ? 1 : -1;
+
+    const aOffset = a.dateOffset ?? 999;
+    const bOffset = b.dateOffset ?? 999;
+    if (aOffset !== bOffset) return aOffset - bOffset;
+
+    return (a.match.match_id ?? 0) - (b.match.match_id ?? 0);
+  });
+
+  const best = evaluated[0];
+  const strongScore = 1.15;
+  const fallbackScore = 0.95;
+
+  if (best.score < fallbackScore) {
+    return { match: undefined, swapped: false, score: best.score, reason: "low_score" };
+  }
+
+  const confidence: MatchConfidence = best.score >= strongScore ? "strong" : "fallback";
+
+  return {
+    match: best.match,
+    swapped: best.swapped,
+    score: best.score,
+    confidence,
+  };
 }

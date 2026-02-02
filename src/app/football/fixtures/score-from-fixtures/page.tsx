@@ -160,6 +160,7 @@ export default async function ScoreFromFixturesPage({
                   <th className="px-3 py-2">Fixture</th>
                   <th className="px-3 py-2">Status</th>
                   <th className="px-3 py-2">StatsBomb</th>
+                  <th className="px-3 py-2">Confidence</th>
                   <th className="px-3 py-2">Match score</th>
                   <th className="px-3 py-2">Score link</th>
                 </tr>
@@ -169,7 +170,11 @@ export default async function ScoreFromFixturesPage({
                   <tr
                     key={item.fixtureId}
                     className={`border-t border-black/10 dark:border-white/10 ${
-                      item.statsbombMatchId ? "" : "bg-red-50/70 dark:bg-red-500/10"
+                      item.statsbombMatchId
+                        ? item.matchConfidence === "fallback"
+                          ? "bg-amber-50/60 dark:bg-amber-500/10"
+                          : ""
+                        : "bg-red-50/70 dark:bg-red-500/10"
                     }`}
                   >
                     <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
@@ -182,6 +187,10 @@ export default async function ScoreFromFixturesPage({
                     <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
                       {item.statsbombMatchId ? `#${item.statsbombMatchId}` : "—"}
                       {item.matchSwapped ? " (swapped)" : ""}
+                    </td>
+                    <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
+                      {item.matchConfidence ?? (item.statsbombMatchId ? "strong" : "—")}
+                      {item.matchReason ? ` (${item.matchReason})` : ""}
                     </td>
                     <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
                       {item.matchScore ? Number(item.matchScore).toFixed(2) : "0.00"}

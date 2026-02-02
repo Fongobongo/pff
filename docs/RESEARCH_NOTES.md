@@ -86,6 +86,7 @@ See `docs/STATS_NORMALIZATION.md` for the full NFL + Football scoring matrices a
   - `GET /api/football-data/score-from-fixtures?competition=PL&statsbomb_competition_id=...&statsbomb_season_id=...`
 - UI: `/football/fixtures/score-from-fixtures` for mapping + unmatched review.
 - Pagination: add `page` and `page_size` to both endpoints for slicing results.
+- Team matching uses aliases + similarity scoring with fallback confidence when scores are borderline.
 - Competition tier mapping is inferred from the `competition` code (best-effort):
   - Tier A: `PL`, `CL`
   - Tier B: `PD`, `BL1`, `SA`, `EL`
