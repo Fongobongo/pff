@@ -4,6 +4,7 @@ import { footballDataFetch } from "@/lib/footballdata";
 import { resolveCompetitionTierFromFootballData } from "@/lib/footballTier";
 import { buildStatsBombMatchStats, getStatsBombMatches, type StatsBombMatch } from "@/lib/stats/statsbomb";
 import { scoreFootball } from "@/lib/stats/football";
+import { findBestStatsBombMatch } from "@/lib/footballTeamMatch";
 
 const querySchema = z.object({
   competition: z.string().min(1),
@@ -45,25 +46,6 @@ async function mapWithConcurrency<T, R>(
   return results;
 }
 
-function normalizeTeamName(name?: string): string {
-  if (!name) return "";
-  const cleaned = name
-    .toLowerCase()
-    .replace(/&/g, "and")
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
-  const tokens = cleaned
-    .split(" ")
-    .filter((token) => token && !["fc", "cf", "ac", "sc", "afc", "club", "cd", "ud", "sd"].includes(token));
-  return tokens.join("");
-}
-
-function isTeamNameMatch(a?: string, b?: string): boolean {
-  const aNorm = normalizeTeamName(a);
-  const bNorm = normalizeTeamName(b);
-  if (!aNorm || !bNorm) return false;
-  return aNorm === bNorm || aNorm.includes(bNorm) || bNorm.includes(aNorm);
-}
 
 function addDays(date: string, offset: number): string {
   const parsed = new Date(`${date}T00:00:00Z`);
@@ -86,29 +68,8 @@ function getCandidatesByDate(map: Map<string, StatsBombMatch[]>, date?: string):
 function findBestMatch(
   fixture: FixtureMatch,
   candidates: StatsBombMatch[]
-): { match?: StatsBombMatch; swapped: boolean } {
-  const home = fixture.homeTeam?.name;
-  const away = fixture.awayTeam?.name;
-
-  for (const candidate of candidates) {
-    if (
-      isTeamNameMatch(candidate.home_team?.home_team_name, home) &&
-      isTeamNameMatch(candidate.away_team?.away_team_name, away)
-    ) {
-      return { match: candidate, swapped: false };
-    }
-  }
-
-  for (const candidate of candidates) {
-    if (
-      isTeamNameMatch(candidate.home_team?.home_team_name, away) &&
-      isTeamNameMatch(candidate.away_team?.away_team_name, home)
-    ) {
-      return { match: candidate, swapped: true };
-    }
-  }
-
-  return { match: undefined, swapped: false };
+): { match?: StatsBombMatch; swapped: boolean; score: number } {
+  return findBestStatsBombMatch(fixture.homeTeam?.name, fixture.awayTeam?.name, candidates);
 }
 
 export async function GET(request: Request) {
@@ -152,7 +113,7 @@ export async function GET(request: Request) {
   const mapped = await mapWithConcurrency(limited, 2, async (fixture) => {
     const fixtureDate = fixture.utcDate?.slice(0, 10);
     const candidates = getCandidatesByDate(statsBombByDate, fixtureDate);
-    const { match, swapped } = findBestMatch(fixture, candidates);
+    const { match, swapped, score } = findBestMatch(fixture, candidates);
 
     let scored: any = undefined;
     if (query.include_scores && match) {
@@ -190,6 +151,7 @@ export async function GET(request: Request) {
       statsbombMatchId: match?.match_id ?? null,
       statsbombMatchDate: match?.match_date ?? null,
       matchSwapped: swapped,
+      matchScore: score,
       scoreFromMatchUrl: match
         ? `/api/stats/football/score-from-match?match_id=${match.match_id}&competition_id=${query.statsbomb_competition_id}&season_id=${query.statsbomb_season_id}`
         : null,

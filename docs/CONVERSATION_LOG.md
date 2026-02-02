@@ -86,3 +86,5 @@ This file tracks key decisions and requirements from our chats.
 - Added async football tournament summary jobs with status polling + CSV export.
 - Added NFL player history CSV export.
 - Added football-data.org fixtures → StatsBomb score bridge endpoint (`/api/football-data/score-from-fixtures`).
+- Added score-from-fixtures UI + improved team matching heuristics.
+- Persisted tournament summary job status to Postgres when `DATABASE_URL` is configured.

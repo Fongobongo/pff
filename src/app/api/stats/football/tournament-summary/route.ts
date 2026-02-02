@@ -192,7 +192,7 @@ async function runTournamentSummaryJob(options: {
   topCount: number;
 }) {
   const { jobId, cacheKey, competitionId, seasonId, matches, competitionTier, topCount } = options;
-  updateJob(jobId, { status: "running", total: matches.length, processed: 0 });
+  await updateJob(jobId, { status: "running", total: matches.length, processed: 0 });
   try {
     const summary = await buildTournamentSummary({
       competitionId,
@@ -201,14 +201,14 @@ async function runTournamentSummaryJob(options: {
       competitionTier,
       topCount,
       onProgress: (processed) => {
-        updateJob(jobId, { processed });
+        void updateJob(jobId, { processed });
       },
     });
     setCached(cacheKey, summary, 3600);
-    completeJob(jobId, summary);
+    await completeJob(jobId, summary);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
-    failJob(jobId, message);
+    await failJob(jobId, message);
   }
 }
 
@@ -249,7 +249,8 @@ export async function GET(request: Request) {
   if (wantsAsync && !query.limit) {
     const jobKeyBase = `statsbomb:tournament-summary-job:${query.competition_id}:${query.season_id}:${topCount}`;
     const jobKey = query.refresh ? `${jobKeyBase}:${Date.now()}` : jobKeyBase;
-    const job = getJobByKey<TournamentSummary>(jobKey) ?? createJob<TournamentSummary>(jobKey, limited.length);
+    const existingJob = await getJobByKey<TournamentSummary>(jobKey);
+    const job = existingJob ?? (await createJob<TournamentSummary>(jobKey, limited.length));
 
     if (job.status === "completed" && job.result) {
       setCached(cacheKey, job.result, 3600);

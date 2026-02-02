@@ -41,7 +41,7 @@ export async function GET(request: Request) {
     format: url.searchParams.get("format") ?? undefined,
   });
 
-  const job = getJob<any>(query.job_id);
+  const job = await getJob<any>(query.job_id);
   if (!job) {
     return NextResponse.json({ error: "Job not found." }, { status: 404 });
   }

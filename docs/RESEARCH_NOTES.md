@@ -74,6 +74,7 @@ See `docs/STATS_NORMALIZATION.md` for the full NFL + Football scoring matrices a
   - Defaults to all matches (async job). Use `mode=sync` or `limit` for synchronous summaries.
   - Status polling: `GET /api/stats/football/tournament-summary/status?job_id=...`
   - CSV export: add `format=csv` (returns `202` until the job completes).
+  - Job status persists to Postgres when `DATABASE_URL` is configured.
 - Current mapping coverage (event-derived): goals, shots on/off target, blocked shots, assists + penalty-assist heuristics, big chances (xG threshold heuristic), accurate passes by half, fouls, penalties won, cards, dribbles, duels/tackles (incl. last-man heuristic), recoveries, interceptions, clearances (incl. off-line heuristic), GK actions (inside/outside box + six-second violations if present), offsides, clean sheets + goals conceded based on time-on-pitch, and error-to-shot/goal heuristics.
 - Unmapped fields remain: a few niche GK/defensive actions not present in open data.
 
@@ -83,6 +84,7 @@ See `docs/STATS_NORMALIZATION.md` for the full NFL + Football scoring matrices a
   - `GET /api/football-data/matches?competition=PL&matchday=...`
   - `GET /api/football-data/standings?competition=PL`
   - `GET /api/football-data/score-from-fixtures?competition=PL&statsbomb_competition_id=...&statsbomb_season_id=...`
+- UI: `/football/fixtures/score-from-fixtures` for mapping + unmatched review.
 - Pagination: add `page` and `page_size` to both endpoints for slicing results.
 - Competition tier mapping is inferred from the `competition` code (best-effort):
   - Tier A: `PL`, `CL`

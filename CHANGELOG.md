@@ -58,6 +58,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added async football tournament summary jobs with status polling + CSV export.
 - Added NFL player history CSV export.
 - Added football-data.org fixtures → StatsBomb match bridge (`/api/football-data/score-from-fixtures`).
+- Added score-from-fixtures UI page with match status + unmatched highlighting.
+- Persisted tournament summary job status to Postgres when `DATABASE_URL` is set.
+- Improved fixture/team matching with aliases and similarity scoring.
 
 ### Changed
 - Fixed server-side API fetching to derive the deployment base URL (Vercel env/headers) instead of hardcoded localhost or relative URLs.

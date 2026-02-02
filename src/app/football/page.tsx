@@ -106,6 +106,13 @@ export default async function FootballPage() {
             >
               Configure competition tiers
             </Link>
+            <span className="mx-2 text-xs text-zinc-400">·</span>
+            <Link
+              className="text-sm text-black hover:underline dark:text-white"
+              href="/football/fixtures/score-from-fixtures"
+            >
+              Score-from-fixtures bridge
+            </Link>
           </div>
         </section>
       </main>
