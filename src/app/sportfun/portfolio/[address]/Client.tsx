@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { shortenAddress } from "@/lib/format";
-import { getSportfunNameOverride } from "@/lib/sportfunNames";
+import { getSportfunNameOverride, getSportfunSportLabel } from "@/lib/sportfunNames";
 
 type SortKey = "value" | "pnl" | "spent" | "shares";
 
@@ -154,15 +154,29 @@ async function getJson<T>(url: string): Promise<T> {
   return res.json();
 }
 
-function formatFixed(raw: string, decimals: number): string {
+const DISPLAY_DECIMALS = 5;
+
+function formatFixed(raw: string, decimals: number, fractionDigits = DISPLAY_DECIMALS): string {
   if (!raw) return "0";
   const neg = raw.startsWith("-");
   const abs = BigInt(neg ? raw.slice(1) : raw);
-  const base = 10n ** BigInt(decimals);
-  const whole = abs / base;
-  const frac = abs % base;
-  const fracStr = frac.toString().padStart(decimals, "0").replace(/0+$/, "");
-  return `${neg ? "-" : ""}${whole.toString()}${fracStr ? "." + fracStr : ""}`;
+  const safeDigits = Math.max(0, Math.min(fractionDigits, decimals));
+
+  if (decimals <= safeDigits) {
+    const base = 10n ** BigInt(decimals);
+    const whole = abs / base;
+    const frac = abs % base;
+    const fracStr = frac.toString().padStart(decimals, "0");
+    return `${neg ? "-" : ""}${whole.toString()}${decimals > 0 ? "." + fracStr : ""}`;
+  }
+
+  const scale = 10n ** BigInt(decimals - safeDigits);
+  const rounded = (abs + scale / 2n) / scale;
+  const base = 10n ** BigInt(safeDigits);
+  const whole = rounded / base;
+  const frac = rounded % base;
+  const fracStr = frac.toString().padStart(safeDigits, "0");
+  return `${neg ? "-" : ""}${whole.toString()}${safeDigits > 0 ? "." + fracStr : ""}`;
 }
 
 function formatShares(raw: string): string {
@@ -184,7 +198,7 @@ export default function SportfunPortfolioClient({ address }: { address: string }
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>("value");
   const [sortDir, setSortDir] = useState<"desc" | "asc">("desc");
-  const [contractFilter, setContractFilter] = useState<string>("all");
+  const [sportFilter, setSportFilter] = useState<string>("all");
 
   const decimals = data?.assumptions.usdc.decimals ?? 6;
   const tokenLabelMap = useMemo(() => {
@@ -368,8 +382,8 @@ export default function SportfunPortfolioClient({ address }: { address: string }
   const positions = data.analytics?.positionsByToken ?? [];
 
   const filteredPositions = positions.filter((p) => {
-    if (contractFilter === "all") return true;
-    return p.playerToken.toLowerCase() === contractFilter.toLowerCase();
+    if (sportFilter === "all") return true;
+    return getSportfunSportLabel(p.playerToken) === sportFilter;
   });
 
   const sortedPositions = [...filteredPositions].sort((a, b) => {
@@ -446,9 +460,9 @@ export default function SportfunPortfolioClient({ address }: { address: string }
 
   const contractOptions = [
     { value: "all", label: "All" },
-    ...Array.from(new Set(positions.map((p) => p.playerToken.toLowerCase())))
+    ...Array.from(new Set(positions.map((p) => getSportfunSportLabel(p.playerToken))))
       .sort()
-      .map((c) => ({ value: c, label: shortenAddress(c) })),
+      .map((sport) => ({ value: sport, label: sport.toUpperCase() })),
   ];
 
   return (
@@ -556,11 +570,11 @@ export default function SportfunPortfolioClient({ address }: { address: string }
 
             <div className="flex flex-wrap items-center gap-3">
               <label className="text-xs text-gray-400">
-                Contract
+                Sport
                 <select
                   className="ml-2 rounded-md border border-white/10 bg-black/30 px-2 py-1 text-sm text-gray-200"
-                  value={contractFilter}
-                  onChange={(e) => setContractFilter(e.target.value)}
+                  value={sportFilter}
+                  onChange={(e) => setSportFilter(e.target.value)}
                 >
                   {contractOptions.map((o) => (
                     <option key={o.value} value={o.value}>
@@ -609,7 +623,7 @@ export default function SportfunPortfolioClient({ address }: { address: string }
             <table className="w-full text-sm">
               <thead className="bg-white/5 text-left text-gray-300">
                 <tr>
-                  <th className="p-3">Contract</th>
+                  <th className="p-3">Sport</th>
                   <th className="p-3">Player</th>
                   <th className="p-3">Holding shares</th>
                   <th className="p-3">Spent</th>
@@ -627,10 +641,8 @@ export default function SportfunPortfolioClient({ address }: { address: string }
 
                   return (
                     <tr key={`${p.playerToken}:${p.tokenIdDec}`} className="text-gray-200">
-                      <td className="p-3 whitespace-nowrap">
-                        <a className="text-blue-400 hover:underline" href={`https://basescan.org/address/${p.playerToken}`} target="_blank" rel="noreferrer">
-                          {shortenAddress(p.playerToken)}
-                        </a>
+                      <td className="p-3 whitespace-nowrap" title={p.playerToken}>
+                        {getSportfunSportLabel(p.playerToken).toUpperCase()}
                       </td>
                       <td className="p-3 whitespace-nowrap">{renderTokenLabel(p.playerToken, p.tokenIdDec)}</td>
                       <td className="p-3 whitespace-nowrap">{formatShares(p.holdingSharesRaw)}</td>
@@ -678,7 +690,7 @@ export default function SportfunPortfolioClient({ address }: { address: string }
             <thead className="bg-white/5 text-left text-gray-300">
               <tr>
                 <th className="p-3">Player</th>
-                <th className="p-3">Contract</th>
+                <th className="p-3">Sport</th>
                 <th className="p-3">Shares</th>
                 <th className="p-3">Price (USDC/share)</th>
                 <th className="p-3">Value (USDC)</th>
@@ -712,10 +724,8 @@ export default function SportfunPortfolioClient({ address }: { address: string }
                       </div>
                     </div>
                   </td>
-                  <td className="p-3 whitespace-nowrap">
-                    <a className="text-blue-400 hover:underline" href={`https://basescan.org/address/${h.contractAddress}`} target="_blank" rel="noreferrer">
-                      {shortenAddress(h.contractAddress)}
-                    </a>
+                  <td className="p-3 whitespace-nowrap" title={h.contractAddress}>
+                    {getSportfunSportLabel(h.contractAddress).toUpperCase()}
                   </td>
                   <td className="p-3 whitespace-nowrap text-gray-200">{formatShares(h.balanceRaw)}</td>
                   <td className="p-3 whitespace-nowrap text-gray-200">
@@ -808,7 +818,7 @@ export default function SportfunPortfolioClient({ address }: { address: string }
               <thead className="bg-white/5 text-left text-gray-300">
                 <tr>
                   <th className="p-3">Tx</th>
-                  <th className="p-3">Contract</th>
+                  <th className="p-3">Sport</th>
                   <th className="p-3">Player</th>
                   <th className="p-3">Expected Δ</th>
                   <th className="p-3">Decoded Δ</th>
@@ -829,10 +839,8 @@ export default function SportfunPortfolioClient({ address }: { address: string }
                         </a>
                       </div>
                     </td>
-                    <td className="p-3 whitespace-nowrap">
-                      <a className="text-blue-400 hover:underline" href={`https://basescan.org/address/${s.contractAddress}`} target="_blank" rel="noreferrer">
-                        {shortenAddress(s.contractAddress)}
-                      </a>
+                    <td className="p-3 whitespace-nowrap" title={s.contractAddress}>
+                      {getSportfunSportLabel(s.contractAddress).toUpperCase()}
                     </td>
                     <td className="p-3 whitespace-nowrap">
                       {renderTokenLabel(s.contractAddress, s.tokenIdDec)}
