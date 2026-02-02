@@ -70,6 +70,7 @@ See `docs/STATS_NORMALIZATION.md` for the full NFL + Football scoring matrices a
   - `GET /api/stats/football/score-competition?competition_id=...&season_id=...&limit=...`
 - Tournament summary:
   - `GET /api/stats/football/tournament-summary?competition_id=...&season_id=...&limit=...&top=...`
+  - Cached for 1h; add `refresh=true` to force recompute.
 - Current mapping coverage (event-derived): goals, shots on/off target, blocked shots, assists + penalty-assist heuristics, big chances (xG threshold heuristic), accurate passes by half, fouls, penalties won, cards, dribbles, duels/tackles (incl. last-man heuristic), recoveries, interceptions, clearances (incl. off-line heuristic), GK actions (inside/outside box + six-second violations if present), offsides, clean sheets + goals conceded based on time-on-pitch, and error-to-shot/goal heuristics.
 - Unmapped fields remain: a few niche GK/defensive actions not present in open data.
 
@@ -83,6 +84,7 @@ See `docs/STATS_NORMALIZATION.md` for the full NFL + Football scoring matrices a
   - Tier A: `PL`, `CL`
   - Tier B: `PD`, `BL1`, `SA`, `EL`
   - Tier C: `FL1`, `UNL`, `ECL`, `DED`, `PPL`
+- Tier overrides can be supplied via `FOOTBALL_TIER_OVERRIDES` (JSON map of code -> tier).
 - Requires `FOOTBALL_DATA_API_KEY` for full access; without a token only limited endpoints/quotas are available.
 
 ## Access notes

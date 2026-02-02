@@ -99,6 +99,14 @@ export default async function FootballPage() {
           <p className="mt-3 text-xs text-zinc-500 dark:text-zinc-400">
             Requires football-data.org API token for full access.
           </p>
+          <div className="mt-3">
+            <Link
+              className="text-sm text-black hover:underline dark:text-white"
+              href="/football/tiers"
+            >
+              Configure competition tiers
+            </Link>
+          </div>
         </section>
       </main>
     </div>

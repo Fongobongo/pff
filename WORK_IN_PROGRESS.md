@@ -4,6 +4,7 @@
 - **Step 4 (Stats ingestion + scoring):** NFL + Football ingestion endpoints exist, plus match-to-score + competition scoring for football. Mapping coverage improved with heuristics; remaining gaps are mostly niche GK actions not present in open data.
   - NFL weekly + player detail pages live; football fixtures/standings (football-data.org) wired with caching + pagination.
   - Tournament summary endpoint added for football competitions; NFL player filters wired in UI.
+  - Tournament summary cached with optional refresh; tier mapping UI added.
 
 ## Next
 - Stats ingestion:

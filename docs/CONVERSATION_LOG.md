@@ -82,3 +82,4 @@ This file tracks key decisions and requirements from our chats.
 - Added an NFL weekly scores page (`/nfl`) and linked it from the home page.
 - Added NFL player history endpoint + UI, football-data.org pagination/tier mapping, and cached fixtures/standings.
 - Added NFL player filters (season/week/season_type), tournament summary endpoint + page, and expanded football-data tier mapping.
+- Added NFL player select-based filters + pagination, tournament summary caching, and a tier mapping settings page.
