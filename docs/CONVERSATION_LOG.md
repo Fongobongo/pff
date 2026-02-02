@@ -61,3 +61,4 @@ This file tracks key decisions and requirements from our chats.
 - Added a server-only base URL helper that derives the origin from Vercel env or request headers.
 - Updated `/base/[address]` and `/sportfun/tx/[hash]` pages to use the new base URL helper when fetching API data.
 - Removed the temporary `ALEMBIC_API_KEY` alias; require `ALCHEMY_API_KEY`.
+- Tweaked Sport.fun activity pagination to avoid redundant full scans and skip price fetching on paged activity requests.

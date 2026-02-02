@@ -176,7 +176,7 @@ export default function SportfunPortfolioClient({ address }: { address: string }
 
   const requestActivityPageUrl = useMemo(() => {
     return (cursor: number) =>
-      `/api/sportfun/portfolio/${address}?scanMode=full&maxPages=200&maxCount=0x3e8&maxActivity=300&activityCursor=${cursor}&includeTrades=1&includePrices=1&includeUri=0`;
+      `/api/sportfun/portfolio/${address}?scanMode=full&maxPages=200&maxCount=0x3e8&maxActivity=300&activityCursor=${cursor}&includeTrades=1&includePrices=0&includeUri=0`;
   }, [address]);
 
   useEffect(() => {
@@ -191,7 +191,8 @@ export default function SportfunPortfolioClient({ address }: { address: string }
 
       // Auto-expand until we stop seeing pageKeys / truncation.
       // With caching enabled on the API, re-runs mostly fetch only new pages.
-      const caps = [50, 100, 200, 400, 800, 1000];
+      const caps = [50, 100, 200];
+      let last: SportfunPortfolioResponse | null = null;
 
       for (const pages of caps) {
         if (cancelled) return;
@@ -200,15 +201,16 @@ export default function SportfunPortfolioClient({ address }: { address: string }
         const next = await getJson<SportfunPortfolioResponse>(requestUrl(pages));
         if (cancelled) return;
 
+        last = next;
         setData(next);
 
-        const done = !next.summary.scanIncomplete && !next.summary.activityTruncated;
-        if (done) {
-          const cursor = next.summary.nextActivityCursor;
-          setActivityCursor(cursor ?? null);
-          setActivityDone(!cursor);
-          break;
-        }
+        if (!next.summary.scanIncomplete) break;
+      }
+
+      if (last) {
+        const cursor = last.summary.nextActivityCursor;
+        setActivityCursor(cursor ?? null);
+        setActivityDone(!cursor);
       }
 
       setLoading(false);
