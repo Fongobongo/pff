@@ -76,3 +76,4 @@ This file tracks key decisions and requirements from our chats.
   - Football competitions/matches/match-stats: `/api/stats/football/competitions`, `/api/stats/football/matches`, `/api/stats/football/match-stats`.
 - Added basic scoring tests via `npm run test:stats` (tsx-based).
 - Expanded StatsBomb mapping coverage (big chances, clean sheets/goals conceded, error-to-shot/goal heuristics, GK inside/outside box) and added `GET /api/stats/football/score-from-match`.
+- Added penalty-assist heuristics, time-on-pitch goals conceded/clean sheet logic, and auto competition tier mapping for `score-from-match`.

@@ -1,5 +1,10 @@
 import { withCache } from "@/lib/stats/cache";
-import type { FootballMatchResult, FootballNormalizedStats, FootballPosition } from "@/lib/stats/types";
+import type {
+  FootballCompetitionTier,
+  FootballMatchResult,
+  FootballNormalizedStats,
+  FootballPosition,
+} from "@/lib/stats/types";
 import { toFiniteNumber } from "@/lib/stats/utils";
 
 const STATSBOMB_BASE_URL = "https://raw.githubusercontent.com/statsbomb/open-data/master/data";
@@ -64,6 +69,27 @@ export async function getStatsBombCompetitions(): Promise<StatsBombCompetition[]
   );
 }
 
+const TIER_A_COMPETITIONS = new Set(["premier league", "champions league", "english premier league"]);
+const TIER_B_COMPETITIONS = new Set(["la liga", "1. bundesliga", "serie a", "uefa europa league"]);
+const TIER_C_COMPETITIONS = new Set(["ligue 1", "uefa nations league"]);
+
+function resolveCompetitionTier(name?: string): FootballCompetitionTier | undefined {
+  if (!name) return undefined;
+  const key = name.toLowerCase();
+  if (TIER_A_COMPETITIONS.has(key)) return "A";
+  if (TIER_B_COMPETITIONS.has(key)) return "B";
+  if (TIER_C_COMPETITIONS.has(key)) return "C";
+  return undefined;
+}
+
+export async function getCompetitionTierById(
+  competitionId: number
+): Promise<FootballCompetitionTier | undefined> {
+  const competitions = await getStatsBombCompetitions();
+  const competition = competitions.find((item) => item.competition_id === competitionId);
+  return resolveCompetitionTier(competition?.competition_name);
+}
+
 export async function getStatsBombMatches(
   competitionId: number,
   seasonId: number
@@ -96,6 +122,21 @@ function parseMinutes(value?: string, fallbackMinutes = 90): number {
   const seconds = Number(parts[1]);
   if (!Number.isFinite(minutes) || !Number.isFinite(seconds)) return fallbackMinutes;
   return minutes + seconds / 60;
+}
+
+function getEventMinute(event: any): number {
+  const minute = toFiniteNumber(event?.minute);
+  const second = toFiniteNumber(event?.second);
+  return minute + second / 60;
+}
+
+function isOwnGoalOutcome(outcomeText: string): boolean {
+  return outcomeText.toLowerCase().includes("own");
+}
+
+function isGoalOutcome(outcomeText: string): boolean {
+  const value = outcomeText.toLowerCase();
+  return value === "goal" || value.includes("own");
 }
 
 function mapPosition(positionName?: string): FootballPosition {
@@ -199,6 +240,9 @@ export async function buildStatsBombMatchStats(options: {
   const players = new Map<number, StatsBombPlayerStats>();
   const eventsById = new Map<string, any>();
   const shotsById = new Map<string, any>();
+  const intervalsByPlayer = new Map<number, { start: number; end: number }[]>();
+  const pendingPenaltyWins = new Map<number, { playerId: number }[]>();
+  const teamIds = new Set<number>();
 
   for (const event of events ?? []) {
     if (event?.id) {
@@ -207,11 +251,20 @@ export async function buildStatsBombMatchStats(options: {
         shotsById.set(event.id, event);
       }
     }
+    if (event?.team?.id) {
+      teamIds.add(event.team.id);
+    }
+  }
+
+  let matchEndMinutes = 90;
+  for (const event of events ?? []) {
+    matchEndMinutes = Math.max(matchEndMinutes, getEventMinute(event));
   }
 
   for (const team of lineups ?? []) {
     const teamId = team.team_id ?? 0;
     const teamName = team.team_name ?? "Unknown";
+    if (teamId) teamIds.add(teamId);
     for (const player of team.lineup ?? []) {
       const playerId = player.player_id ?? 0;
       if (!playerId) continue;
@@ -228,17 +281,21 @@ export async function buildStatsBombMatchStats(options: {
         let minutes = 0;
         let started = false;
         let subbedOn = false;
+        const intervals: { start: number; end: number }[] = [];
         for (const pos of positions) {
           const startReason = String(pos?.start_reason ?? "");
           if (startReason === "Starting XI") started = true;
           if (startReason.toLowerCase().includes("sub")) subbedOn = true;
           const from = parseMinutes(pos?.from, 0);
-          const to = parseMinutes(pos?.to, 90);
-          minutes += Math.max(0, to - from);
+          const to = parseMinutes(pos?.to, matchEndMinutes);
+          const end = Math.max(from, to);
+          intervals.push({ start: from, end });
+          minutes += Math.max(0, end - from);
         }
         info.minutesPlayed = minutes;
         if (started) addStat(info, "appearance_start", 1);
         if (subbedOn) addStat(info, "appearance_subbed_on", 1);
+        intervalsByPlayer.set(playerId, intervals);
       }
     }
   }
@@ -270,6 +327,21 @@ export async function buildStatsBombMatchStats(options: {
       const xg = toFiniteNumber(event.shot?.statsbomb_xg);
       if (xg >= BIG_CHANCE_XG_THRESHOLD && outcomeText !== "Goal") {
         addStat(player, "big_chances_missed", 1);
+      }
+
+      const shotType = event.shot?.type?.name;
+      if (shotType === "Penalty") {
+        const teamId = event.team?.id ?? player.teamId;
+        const pending = pendingPenaltyWins.get(teamId);
+        if (pending && pending.length > 0) {
+          const winner = pending.shift();
+          if (pending.length === 0) pendingPenaltyWins.delete(teamId);
+          const isGoal = outcomeText === "Goal";
+          if (isGoal && winner?.playerId && winner.playerId !== player.playerId) {
+            const winnerPlayer = players.get(winner.playerId);
+            if (winnerPlayer) addStat(winnerPlayer, "assists_penalties_won", 1);
+          }
+        }
       }
     }
 
@@ -311,6 +383,10 @@ export async function buildStatsBombMatchStats(options: {
       addStat(player, "fouls_won", 1);
       if (event.foul_won?.penalty) {
         addStat(player, "penalties_won", 1);
+        const teamId = event.team?.id ?? player.teamId;
+        const pending = pendingPenaltyWins.get(teamId) ?? [];
+        pending.push({ playerId: player.playerId });
+        pendingPenaltyWins.set(teamId, pending);
       }
     }
 
@@ -447,17 +523,55 @@ export async function buildStatsBombMatchStats(options: {
   const match = matches?.find((item) => item.match_id === matchId);
   const teamSummary = applyMatchResults(playerArray, match);
 
-  if (teamSummary?.homeTeamId && teamSummary?.awayTeamId) {
-    const homeConceded = toFiniteNumber(teamSummary.awayScore);
-    const awayConceded = toFiniteNumber(teamSummary.homeScore);
-    for (const player of playerArray) {
-      const conceded = player.teamId === teamSummary.homeTeamId ? homeConceded : awayConceded;
-      if (player.minutesPlayed > 0) {
-        addStat(player, "goals_conceded", conceded);
+  for (const player of playerArray) {
+    if (!intervalsByPlayer.has(player.playerId) && player.minutesPlayed > 0) {
+      intervalsByPlayer.set(player.playerId, [{ start: 0, end: matchEndMinutes }]);
+    }
+  }
+
+  const goalsConcededByPlayer = new Map<number, number>();
+  const teamIdList = Array.from(teamIds.values());
+  const playersByTeam = new Map<number, StatsBombPlayerStats[]>();
+  for (const player of playerArray) {
+    const list = playersByTeam.get(player.teamId) ?? [];
+    list.push(player);
+    playersByTeam.set(player.teamId, list);
+  }
+
+  for (const event of events ?? []) {
+    if (event.type?.name !== "Shot") continue;
+    const outcomeText = String(event.shot?.outcome?.name ?? "");
+    if (!isGoalOutcome(outcomeText)) continue;
+
+    const rawTeamId = event.team?.id;
+    if (!rawTeamId) continue;
+    const isOwnGoal = isOwnGoalOutcome(outcomeText);
+    let scoringTeamId = rawTeamId;
+    if (isOwnGoal && teamIdList.length === 2) {
+      scoringTeamId = teamIdList.find((id) => id !== rawTeamId) ?? rawTeamId;
+    }
+
+    const goalMinute = getEventMinute(event);
+    for (const [teamId, teamPlayers] of playersByTeam) {
+      if (teamId === scoringTeamId) continue;
+      for (const player of teamPlayers) {
+        const intervals = intervalsByPlayer.get(player.playerId);
+        if (!intervals || intervals.length === 0) continue;
+        const onPitch = intervals.some(
+          (interval) => goalMinute >= interval.start && goalMinute <= interval.end
+        );
+        if (!onPitch) continue;
+        const prev = goalsConcededByPlayer.get(player.playerId) ?? 0;
+        goalsConcededByPlayer.set(player.playerId, prev + 1);
       }
-      if (player.minutesPlayed >= 45 && conceded === 0) {
-        addStat(player, "clean_sheet_45_plus", 1);
-      }
+    }
+  }
+
+  for (const player of playerArray) {
+    const conceded = goalsConcededByPlayer.get(player.playerId) ?? 0;
+    if (conceded > 0) addStat(player, "goals_conceded", conceded);
+    if (player.minutesPlayed >= 45 && conceded === 0) {
+      addStat(player, "clean_sheet_45_plus", 1);
     }
   }
 
@@ -471,6 +585,7 @@ export async function buildStatsBombMatchStats(options: {
     "big_chances_created",
     "big_chances_missed",
     "assists",
+    "assists_penalties_won",
     "assists_the_assister",
     "accurate_passes_opponents_half",
     "accurate_passes_own_half",
@@ -514,7 +629,6 @@ export async function buildStatsBombMatchStats(options: {
   ];
 
   const unmappedFields = [
-    "assists_penalties_won",
     "six_second_violations",
   ];
 

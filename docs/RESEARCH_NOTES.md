@@ -63,8 +63,9 @@ See `docs/STATS_NORMALIZATION.md` for the full NFL + Football scoring matrices a
   - `GET /api/stats/football/match-stats?match_id=...&competition_id=...&season_id=...`
 - Scoring endpoint:
   - `GET /api/stats/football/score-from-match?match_id=...&competition_id=...&season_id=...&competition_tier=A`
-- Current mapping coverage (event-derived): goals, shots on/off target, blocked shots, assists, big chances (xG threshold heuristic), accurate passes by half, fouls, penalties won, cards, dribbles, duels/tackles (incl. last-man heuristic), recoveries, interceptions, clearances (incl. off-line heuristic), GK actions (inside/outside box), offsides, clean sheets, goals conceded, and error-to-shot/goal heuristics.
-- Unmapped fields remain: assists on penalties won (ambiguous), six-second violations, and a few niche GK/defensive actions not present in open data.
+  - If `competition_tier` is omitted, it is auto-resolved from StatsBomb competition names (best-effort tiers for major leagues).
+- Current mapping coverage (event-derived): goals, shots on/off target, blocked shots, assists + penalty-assist heuristics, big chances (xG threshold heuristic), accurate passes by half, fouls, penalties won, cards, dribbles, duels/tackles (incl. last-man heuristic), recoveries, interceptions, clearances (incl. off-line heuristic), GK actions (inside/outside box), offsides, clean sheets + goals conceded based on time-on-pitch, and error-to-shot/goal heuristics.
+- Unmapped fields remain: six-second violations and a few niche GK/defensive actions not present in open data.
 
 ## Access notes
 

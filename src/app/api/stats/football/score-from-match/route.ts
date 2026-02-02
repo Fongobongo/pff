@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { buildStatsBombMatchStats } from "@/lib/stats/statsbomb";
+import { buildStatsBombMatchStats, getCompetitionTierById } from "@/lib/stats/statsbomb";
 import { scoreFootball } from "@/lib/stats/football";
 import { FOOTBALL_COMPETITION_TIERS } from "@/lib/stats/types";
 
@@ -28,10 +28,14 @@ export async function GET(request: Request) {
     seasonId: query.season_id,
   });
 
+  const resolvedTier =
+    query.competition_tier ??
+    (query.competition_id ? await getCompetitionTierById(query.competition_id) : undefined);
+
   const players = stats.players.map((player) => {
     const result = scoreFootball(player.stats, {
       position: player.position,
-      competitionTier: query.competition_tier,
+      competitionTier: resolvedTier,
       result: player.matchResult,
       minutesPlayed: player.minutesPlayed,
       bigMatchBonus: query.big_match_bonus,
@@ -49,7 +53,7 @@ export async function GET(request: Request) {
     matchId: query.match_id,
     competitionId: query.competition_id,
     seasonId: query.season_id,
-    competitionTier: query.competition_tier,
+    competitionTier: resolvedTier,
     bigMatchBonus: query.big_match_bonus,
     teams: stats.teams,
     coverage: stats.coverage,

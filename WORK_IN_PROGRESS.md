@@ -1,7 +1,7 @@
 # Work in Progress
 
 ## Now
-- **Step 4 (Stats ingestion + scoring):** NFL + Football ingestion endpoints exist, plus match-to-score endpoint for football. Mapping coverage improved with heuristics; remaining gaps are mostly niche GK/penalty assist fields.
+- **Step 4 (Stats ingestion + scoring):** NFL + Football ingestion endpoints exist, plus match-to-score endpoint for football. Mapping coverage improved with heuristics; remaining gaps are mostly niche GK violations + edge cases.
 
 ## Next
 - Stats ingestion:
