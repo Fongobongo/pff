@@ -6,7 +6,7 @@
   - Tournament summary endpoint added for football competitions; NFL player filters wired in UI.
   - Tournament summary defaults to all matches with async job tracking + CSV export (DB-backed when configured).
   - football-data.org tier mapping overrides exposed via config UI; fixtures can map to score-from-match.
-  - Added fixtures → score-from-match UI and improved team matching heuristics (score-based fallback + tie-breaks).
+  - Added fixtures → score-from-match UI and improved team matching heuristics (score-based fallback + tie-breaks + league aliases).
 
 ## Next
 - Stats ingestion:

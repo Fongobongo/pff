@@ -68,7 +68,8 @@ function getCandidatesByDate(map: Map<string, StatsBombMatch[]>, date?: string):
 function findBestMatch(
   fixture: FixtureMatch,
   candidates: StatsBombMatch[],
-  fixtureDate?: string
+  fixtureDate?: string,
+  competitionCode?: string
 ): {
   match?: StatsBombMatch;
   swapped: boolean;
@@ -80,7 +81,8 @@ function findBestMatch(
     fixture.homeTeam?.name,
     fixture.awayTeam?.name,
     candidates,
-    fixtureDate
+    fixtureDate,
+    competitionCode
   );
 }
 
@@ -128,7 +130,8 @@ export async function GET(request: Request) {
     const { match, swapped, score, confidence, reason } = findBestMatch(
       fixture,
       candidates,
-      fixtureDate
+      fixtureDate,
+      query.competition
     );
 
     let scored: any = undefined;

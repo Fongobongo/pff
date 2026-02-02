@@ -53,6 +53,78 @@ const NAME_ALIASES: Record<string, string> = {
   wolves: "wolverhamptonwanderers",
 };
 
+const COMPETITION_NAME_ALIASES: Record<string, Record<string, string>> = {
+  PL: {
+    brightonhovealbion: "brighton",
+    manchesterunitedfc: "manchesterunited",
+    manchestercityfc: "manchestercity",
+    westbromwichalbion: "westbrom",
+    westhamunited: "westham",
+    wolverhampton: "wolverhamptonwanderers",
+  },
+  PD: {
+    atleticodemadrid: "atleticomadrid",
+    athleticclubdebilbao: "athleticclub",
+    realbetisbalompie: "realbetis",
+    sevillafc: "sevilla",
+    valenciacf: "valencia",
+    villarealcf: "villarreal",
+    realclubcelta: "celta",
+    rcdmallorca: "mallorca",
+    rcdespanyol: "espanyol",
+  },
+  BL1: {
+    bayer04leverkusen: "bayerleverkusen",
+    borussiamonchengladbach: "monchengladbach",
+    borussiamgladbach: "monchengladbach",
+    tsghoffenheim: "hoffenheim",
+    vflwolfsburg: "wolfsburg",
+    rbleipzig: "rbleipzig",
+    rasenballsportleipzig: "rbleipzig",
+    fcunionberlin: "unionberlin",
+    fckoln: "koln",
+  },
+  SA: {
+    asroma: "roma",
+    ssclazio: "lazio",
+    sscnapoli: "napoli",
+    atalantabc: "atalanta",
+    hellasverona: "verona",
+    uslecce: "lecce",
+    cagliaricalcio: "cagliari",
+    usudinese: "udinese",
+    acmonza: "monza",
+    acfiorentina: "fiorentina",
+  },
+  FL1: {
+    olympiquedemarseille: "marseille",
+    olympiquelyonnais: "lyon",
+    asmonaco: "monaco",
+    losclille: "lille",
+    ogcnice: "nice",
+    staderennaisfc: "rennes",
+    rcstrasbourgalsace: "strasbourg",
+    rcstrasbourg: "strasbourg",
+    montpellierherault: "montpellier",
+    stadebrestois29: "brest",
+  },
+  DED: {
+    afcajax: "ajax",
+    azalkmaar: "az",
+    fcutrecht: "utrecht",
+    fctwente: "twente",
+    scheerenveen: "heerenveen",
+    spartarotterdam: "sparta",
+  },
+  PPL: {
+    slbenfica: "benfica",
+    sportingclubeportugal: "sportingcp",
+    sportingbraga: "braga",
+    vitoriasc: "vitoriaguimaraes",
+    fcporto: "fcporto",
+  },
+};
+
 function stripDiacritics(value: string): string {
   return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 }
@@ -65,7 +137,10 @@ function normalizeTokens(tokens: string[]): string[] {
   return normalized;
 }
 
-function normalizeTeamName(name?: string): { key: string; tokens: string[] } {
+function normalizeTeamName(
+  name?: string,
+  competitionCode?: string
+): { key: string; tokens: string[] } {
   if (!name) return { key: "", tokens: [] };
   const cleaned = stripDiacritics(name.toLowerCase())
     .replace(/&/g, "and")
@@ -74,7 +149,9 @@ function normalizeTeamName(name?: string): { key: string; tokens: string[] } {
   const rawTokens = cleaned.split(" ").filter(Boolean);
   const tokens = normalizeTokens(rawTokens);
   const key = (tokens.join("") || cleaned.replace(/\s+/g, "")) as string;
-  const aliased = NAME_ALIASES[key] ?? key;
+  const competitionKey = competitionCode?.toUpperCase();
+  const competitionAliases = competitionKey ? COMPETITION_NAME_ALIASES[competitionKey] : undefined;
+  const aliased = competitionAliases?.[key] ?? NAME_ALIASES[key] ?? key;
   return { key: aliased, tokens };
 }
 
@@ -91,9 +168,9 @@ function jaccardSimilarity(a: string[], b: string[]): number {
   return intersection / union;
 }
 
-function getTeamMatchDetails(a?: string, b?: string) {
-  const aNorm = normalizeTeamName(a);
-  const bNorm = normalizeTeamName(b);
+function getTeamMatchDetails(a?: string, b?: string, competitionCode?: string) {
+  const aNorm = normalizeTeamName(a, competitionCode);
+  const bNorm = normalizeTeamName(b, competitionCode);
   if (!aNorm.key || !bNorm.key) {
     return {
       score: 0,
@@ -116,8 +193,12 @@ function getTeamMatchDetails(a?: string, b?: string) {
   };
 }
 
-export function getTeamMatchScore(a?: string, b?: string): number {
-  return getTeamMatchDetails(a, b).score;
+export function getTeamMatchScore(
+  a?: string,
+  b?: string,
+  competitionCode?: string
+): number {
+  return getTeamMatchDetails(a, b, competitionCode).score;
 }
 
 function getDateOffsetDays(a?: string, b?: string): number | null {
@@ -133,7 +214,8 @@ export function findBestStatsBombMatch(
   homeName?: string,
   awayName?: string,
   candidates: StatsBombMatch[] = [],
-  fixtureDate?: string
+  fixtureDate?: string,
+  competitionCode?: string
 ): { match?: StatsBombMatch; swapped: boolean; score: number; confidence?: MatchConfidence; reason?: string } {
   type Candidate = {
     match: StatsBombMatch;
@@ -148,8 +230,16 @@ export function findBestStatsBombMatch(
   const evaluated: Candidate[] = [];
 
   for (const candidate of candidates) {
-    const directHome = getTeamMatchDetails(candidate.home_team?.home_team_name, homeName);
-    const directAway = getTeamMatchDetails(candidate.away_team?.away_team_name, awayName);
+    const directHome = getTeamMatchDetails(
+      candidate.home_team?.home_team_name,
+      homeName,
+      competitionCode
+    );
+    const directAway = getTeamMatchDetails(
+      candidate.away_team?.away_team_name,
+      awayName,
+      competitionCode
+    );
     const directScore = directHome.score + directAway.score;
     evaluated.push({
       match: candidate,
@@ -161,8 +251,16 @@ export function findBestStatsBombMatch(
       dateOffset: getDateOffsetDays(fixtureDate, candidate.match_date),
     });
 
-    const swapHome = getTeamMatchDetails(candidate.home_team?.home_team_name, awayName);
-    const swapAway = getTeamMatchDetails(candidate.away_team?.away_team_name, homeName);
+    const swapHome = getTeamMatchDetails(
+      candidate.home_team?.home_team_name,
+      awayName,
+      competitionCode
+    );
+    const swapAway = getTeamMatchDetails(
+      candidate.away_team?.away_team_name,
+      homeName,
+      competitionCode
+    );
     const swapScore = swapHome.score + swapAway.score;
     evaluated.push({
       match: candidate,

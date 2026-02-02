@@ -89,3 +89,4 @@ This file tracks key decisions and requirements from our chats.
 - Added score-from-fixtures UI + improved team matching heuristics.
 - Persisted tournament summary job status to Postgres when `DATABASE_URL` is configured.
 - Added score-based fallback + tie-break rules for fixture matching.
+- Expanded league-specific alias dictionaries for fixture matching.
