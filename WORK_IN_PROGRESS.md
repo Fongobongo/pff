@@ -1,7 +1,7 @@
 # Work in Progress
 
 ## Now
-- **Step 4 (Stats ingestion + scoring):** NFL + Football ingestion endpoints exist, plus match-to-score endpoint for football. Mapping coverage improved with heuristics; remaining gaps are mostly niche GK violations + edge cases.
+- **Step 4 (Stats ingestion + scoring):** NFL + Football ingestion endpoints exist, plus match-to-score + competition scoring for football. Mapping coverage improved with heuristics; remaining gaps are mostly niche GK violations + edge cases.
 
 ## Next
 - Stats ingestion:
@@ -18,6 +18,7 @@
   - Added ingestion endpoints for NFL weekly stats and StatsBomb open data.
   - Added basic scoring tests.
   - Added football match-to-score endpoint and expanded StatsBomb mapping coverage.
+  - Added NFL score-week endpoint and football competition scoring endpoint.
 - Step 3 (Sport.fun portfolio) completed:
   - Activity pagination + cursors to avoid large receipt decode bursts.
   - Decoded-receipt cache (memory + disk) for speed and rate-limit relief.

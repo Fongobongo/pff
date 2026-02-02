@@ -46,6 +46,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Expanded StatsBomb mapping coverage (big chances, clean sheets/goals conceded, GK inside/outside box, error-to-shot/goal heuristics).
 - Added football match-to-score endpoint: `GET /api/stats/football/score-from-match`.
 - Added time-on-pitch goals conceded/clean sheet logic, penalty-assist heuristics, and auto competition tier mapping for football scoring.
+- Added `GET /api/stats/nfl/score-week` and `GET /api/stats/football/score-competition` endpoints.
+- Added basic football stats pages (competitions, matches, match scores).
 
 ### Changed
 - Fixed server-side API fetching to derive the deployment base URL (Vercel env/headers) instead of hardcoded localhost or relative URLs.

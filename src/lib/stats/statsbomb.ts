@@ -480,6 +480,8 @@ export async function buildStatsBombMatchStats(options: {
       if (keeperType.toLowerCase().includes("claim")) addStat(player, "catches_cross", 1);
       if (keeperType.toLowerCase().includes("sweeper")) addStat(player, "successful_sweeper_keepers", 1);
       if (keeperType.toLowerCase().includes("pick")) addStat(player, "pick_ups", 1);
+      if (keeperType.toLowerCase().includes("six")) addStat(player, "six_second_violations", 1);
+      if (keeperType.toLowerCase().includes("violation")) addStat(player, "six_second_violations", 1);
 
       const keeperOutcome = String(event.goalkeeper?.outcome?.name ?? "");
       if (keeperOutcome === "Fail" || keeperOutcome === "In Play Danger") {
@@ -611,6 +613,7 @@ export async function buildStatsBombMatchStats(options: {
     "punches",
     "catches_cross",
     "pick_ups",
+    "six_second_violations",
     "own_goal",
     "penalty_given_away",
     "red_card",
@@ -629,7 +632,6 @@ export async function buildStatsBombMatchStats(options: {
   ];
 
   const unmappedFields = [
-    "six_second_violations",
   ];
 
   return {

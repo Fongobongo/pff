@@ -36,4 +36,27 @@ const footballScore = scoreFootball(
 
 nearlyEqual(footballScore.totalRounded, 50 - 2 + 15);
 
+const footballCleanSheet = scoreFootball(
+  {
+    clean_sheet_45_plus: 1,
+    goals_conceded: 2,
+  },
+  {
+    position: "GK",
+  }
+);
+
+nearlyEqual(footballCleanSheet.totalRounded, 40 - 10);
+
+const footballPenaltyAssist = scoreFootball(
+  {
+    assists_penalties_won: 1,
+  },
+  {
+    position: "MID",
+  }
+);
+
+nearlyEqual(footballPenaltyAssist.totalRounded, 30);
+
 console.log("stats tests passed");

@@ -31,6 +31,14 @@ export default function Home() {
             <div className="text-sm text-zinc-600 dark:text-zinc-400">Sport.fun portfolio (WIP)</div>
             <div className="mt-1 text-lg font-medium text-black dark:text-white">{SAMPLE_WALLET}</div>
           </Link>
+
+          <Link
+            className="rounded-xl border border-black/10 bg-white p-4 hover:bg-zinc-50 dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10"
+            href="/football"
+          >
+            <div className="text-sm text-zinc-600 dark:text-zinc-400">Football stats (StatsBomb)</div>
+            <div className="mt-1 text-lg font-medium text-black dark:text-white">Competitions</div>
+          </Link>
         </section>
 
         <section className="mt-10 rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-white/5">

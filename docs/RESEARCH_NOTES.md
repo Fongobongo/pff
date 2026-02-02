@@ -50,6 +50,7 @@ See `docs/STATS_NORMALIZATION.md` for the full NFL + Football scoring matrices a
 
 - Source file: `stats_player_week_{season}.csv` from the `player_stats` release.
 - API endpoint: `GET /api/stats/nfl/weekly?season=YYYY&week=WW&season_type=REG&player_id=...`
+- Scoring endpoint: `GET /api/stats/nfl/score-week?season=YYYY&week=WW&season_type=REG&player_id=...`
 - Current mapping coverage:
   - Mapped: passing/rushing/receiving yards + TDs, receptions, interceptions, special teams TDs, fumbles lost, 2pt conversions, fumble recovery TDs.
   - Bonus fields (300+ passing, 100+ rushing/receiving) are derived during scoring.
@@ -64,8 +65,10 @@ See `docs/STATS_NORMALIZATION.md` for the full NFL + Football scoring matrices a
 - Scoring endpoint:
   - `GET /api/stats/football/score-from-match?match_id=...&competition_id=...&season_id=...&competition_tier=A`
   - If `competition_tier` is omitted, it is auto-resolved from StatsBomb competition names (best-effort tiers for major leagues).
-- Current mapping coverage (event-derived): goals, shots on/off target, blocked shots, assists + penalty-assist heuristics, big chances (xG threshold heuristic), accurate passes by half, fouls, penalties won, cards, dribbles, duels/tackles (incl. last-man heuristic), recoveries, interceptions, clearances (incl. off-line heuristic), GK actions (inside/outside box), offsides, clean sheets + goals conceded based on time-on-pitch, and error-to-shot/goal heuristics.
-- Unmapped fields remain: six-second violations and a few niche GK/defensive actions not present in open data.
+- Competition batch scoring:
+  - `GET /api/stats/football/score-competition?competition_id=...&season_id=...&limit=...`
+- Current mapping coverage (event-derived): goals, shots on/off target, blocked shots, assists + penalty-assist heuristics, big chances (xG threshold heuristic), accurate passes by half, fouls, penalties won, cards, dribbles, duels/tackles (incl. last-man heuristic), recoveries, interceptions, clearances (incl. off-line heuristic), GK actions (inside/outside box + six-second violations if present), offsides, clean sheets + goals conceded based on time-on-pitch, and error-to-shot/goal heuristics.
+- Unmapped fields remain: a few niche GK/defensive actions not present in open data.
 
 ## Access notes
 
