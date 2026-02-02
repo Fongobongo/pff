@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { shortenAddress } from "@/lib/format";
+import { getSportfunNameOverride } from "@/lib/sportfunNames";
 
 type SortKey = "value" | "pnl" | "spent" | "shares";
 
@@ -190,7 +191,9 @@ export default function SportfunPortfolioClient({ address }: { address: string }
     const map = new Map<string, string>();
     if (!data?.holdings) return map;
     for (const holding of data.holdings) {
-      const name = holding.metadata?.name?.trim();
+      const name =
+        holding.metadata?.name?.trim() ??
+        getSportfunNameOverride(holding.contractAddress, holding.tokenIdDec);
       if (name) {
         map.set(`${holding.contractAddress.toLowerCase()}:${holding.tokenIdDec}`, name);
       }
@@ -202,7 +205,8 @@ export default function SportfunPortfolioClient({ address }: { address: string }
     if (!tokenIdDec) return "—";
     if (!contractAddress) return tokenIdDec;
     const key = `${contractAddress.toLowerCase()}:${tokenIdDec}`;
-    return tokenLabelMap.get(key) ?? tokenIdDec;
+    const override = getSportfunNameOverride(contractAddress, tokenIdDec);
+    return tokenLabelMap.get(key) ?? override ?? tokenIdDec;
   }
 
   function renderTokenLabel(contractAddress?: string, tokenIdDec?: string) {
@@ -395,6 +399,7 @@ export default function SportfunPortfolioClient({ address }: { address: string }
 
   function exportPositionsCsv() {
     const header = [
+      "playerName",
       "playerToken",
       "tokenIdDec",
       "holdingShares",
@@ -409,6 +414,10 @@ export default function SportfunPortfolioClient({ address }: { address: string }
     ];
 
     const rows = sortedPositions.map((p) => [
+      (() => {
+        const label = getTokenLabel(p.playerToken, p.tokenIdDec);
+        return label === p.tokenIdDec ? "" : label;
+      })(),
       p.playerToken,
       p.tokenIdDec,
       p.holdingSharesRaw,
@@ -670,7 +679,6 @@ export default function SportfunPortfolioClient({ address }: { address: string }
               <tr>
                 <th className="p-3">Player</th>
                 <th className="p-3">Contract</th>
-                <th className="p-3">TokenId</th>
                 <th className="p-3">Shares</th>
                 <th className="p-3">Price (USDC/share)</th>
                 <th className="p-3">Value (USDC)</th>
@@ -693,8 +701,11 @@ export default function SportfunPortfolioClient({ address }: { address: string }
                       )}
                       <div className="min-w-0">
                         <div className="truncate text-gray-100">
-                          {h.metadata?.name ?? "Unknown"}
+                          {h.metadata?.name ??
+                            getSportfunNameOverride(h.contractAddress, h.tokenIdDec) ??
+                            "Unknown"}
                         </div>
+                        <div className="text-xs text-gray-500">#{h.tokenIdDec}</div>
                         {h.metadataError ? (
                           <div className="text-xs text-amber-300">metadata error</div>
                         ) : null}
@@ -706,7 +717,6 @@ export default function SportfunPortfolioClient({ address }: { address: string }
                       {shortenAddress(h.contractAddress)}
                     </a>
                   </td>
-                  <td className="p-3 whitespace-nowrap">{h.tokenIdDec}</td>
                   <td className="p-3 whitespace-nowrap text-gray-200">{formatShares(h.balanceRaw)}</td>
                   <td className="p-3 whitespace-nowrap text-gray-200">
                     {h.priceUsdcPerShareRaw ? formatUsdc(h.priceUsdcPerShareRaw, decimals) : "—"}
