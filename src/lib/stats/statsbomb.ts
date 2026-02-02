@@ -691,8 +691,7 @@ export async function buildStatsBombMatchStats(options: {
     "errors_leading_to_shot",
   ];
 
-  const unmappedFields = [
-  ];
+  const unmappedFields: string[] = [];
 
   return {
     matchId,

@@ -16,9 +16,7 @@ export const FOOTBALL_DATA_BASE_TIER: Record<string, FootballCompetitionTier> = 
   PPL: "C", // Primeira Liga
 };
 
-export function parseTierOverrides(
-  value?: string
-): Partial<Record<string, FootballCompetitionTier>> {
+export function parseTierOverrides(value?: string): Record<string, FootballCompetitionTier> {
   if (!value) return {};
   try {
     const parsed = JSON.parse(value) as Record<string, FootballCompetitionTier>;
@@ -26,13 +24,13 @@ export function parseTierOverrides(
       ([key, tier]) =>
         typeof key === "string" && (tier === "A" || tier === "B" || tier === "C")
     );
-    return Object.fromEntries(entries);
+    return Object.fromEntries(entries) as Record<string, FootballCompetitionTier>;
   } catch {
     return {};
   }
 }
 
-export function getTierOverrides(): Partial<Record<string, FootballCompetitionTier>> {
+export function getTierOverrides(): Record<string, FootballCompetitionTier> {
   return parseTierOverrides(env.FOOTBALL_TIER_OVERRIDES);
 }
 

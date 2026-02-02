@@ -86,7 +86,7 @@ const FOOTBALL_TIER_BONUS = {
 function getWinDrawBonus(context: FootballMatchContext): number {
   if (!context.result || context.result === "loss" || !context.competitionTier) return 0;
 
-  let bonus = FOOTBALL_TIER_BONUS[context.competitionTier][context.result];
+  let bonus: number = FOOTBALL_TIER_BONUS[context.competitionTier][context.result];
   const extra = toFiniteNumber(context.bigMatchBonus);
   if (extra > 0) {
     bonus = Math.min(30, bonus + extra);

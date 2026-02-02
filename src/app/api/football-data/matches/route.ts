@@ -3,6 +3,19 @@ import { z } from "zod";
 import { footballDataFetch } from "@/lib/footballdata";
 import { resolveCompetitionTierFromFootballData } from "@/lib/footballTier";
 
+type FootballDataMatch = {
+  id: number;
+  utcDate?: string;
+  status?: string;
+  homeTeam?: { name?: string };
+  awayTeam?: { name?: string };
+  score?: { fullTime?: { home?: number | null; away?: number | null } };
+};
+
+type FootballDataMatchesResponse = {
+  matches?: FootballDataMatch[];
+};
+
 const querySchema = z.object({
   competition: z.string().min(1),
   season: z.coerce.number().int().min(1900).optional(),
@@ -31,7 +44,7 @@ export async function GET(request: Request) {
     page_size: url.searchParams.get("page_size") ?? undefined,
   });
 
-  const data = await footballDataFetch(
+  const data = await footballDataFetch<FootballDataMatchesResponse>(
     `/competitions/${query.competition}/matches`,
     {
       season: query.season,

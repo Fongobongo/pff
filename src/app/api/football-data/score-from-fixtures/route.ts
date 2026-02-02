@@ -25,6 +25,10 @@ type FixtureMatch = {
   score?: { fullTime?: { home?: number | null; away?: number | null } };
 };
 
+type FootballDataMatchesResponse = {
+  matches?: FixtureMatch[];
+};
+
 async function mapWithConcurrency<T, R>(
   items: T[],
   limit: number,
@@ -98,7 +102,7 @@ export async function GET(request: Request) {
     include_scores: url.searchParams.get("include_scores") ?? undefined,
   });
 
-  const data = await footballDataFetch(
+  const data = await footballDataFetch<FootballDataMatchesResponse>(
     `/competitions/${query.competition}/matches`,
     {
       season: query.season,

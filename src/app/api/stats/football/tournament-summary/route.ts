@@ -5,6 +5,7 @@ import { scoreFootball } from "@/lib/stats/football";
 import { getCached, setCached } from "@/lib/stats/cache";
 import { completeJob, createJob, failJob, getJobByKey, updateJob } from "@/lib/stats/jobs";
 import { toCsv } from "@/lib/stats/csv";
+import type { FootballCompetitionTier } from "@/lib/stats/types";
 
 const querySchema = z.object({
   competition_id: z.coerce.number().int().min(1),
@@ -32,7 +33,7 @@ type TournamentSummary = {
   source: "statsbomb_open_data";
   competitionId: number;
   seasonId: number;
-  competitionTier?: string;
+  competitionTier?: FootballCompetitionTier;
   matchesProcessed: number;
   players: TournamentSummaryPlayer[];
 };
@@ -62,7 +63,7 @@ async function buildTournamentSummary(options: {
   competitionId: number;
   seasonId: number;
   matches: Array<{ match_id: number; match_date?: string }>;
-  competitionTier?: string;
+  competitionTier?: FootballCompetitionTier;
   topCount: number;
   onProgress?: (processed: number, total: number) => void;
 }): Promise<TournamentSummary> {
@@ -188,7 +189,7 @@ async function runTournamentSummaryJob(options: {
   competitionId: number;
   seasonId: number;
   matches: Array<{ match_id: number; match_date?: string }>;
-  competitionTier?: string;
+  competitionTier?: FootballCompetitionTier;
   topCount: number;
 }) {
   const { jobId, cacheKey, competitionId, seasonId, matches, competitionTier, topCount } = options;

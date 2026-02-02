@@ -13,9 +13,9 @@ export default function FootballTierEditor({
   overrides,
 }: {
   base: TierMap;
-  overrides: TierMap;
+  overrides: Partial<TierMap>;
 }) {
-  const [localOverrides, setLocalOverrides] = useState<TierMap>(overrides ?? {});
+  const [localOverrides, setLocalOverrides] = useState<Partial<TierMap>>(overrides ?? {});
 
   const codes = useMemo(
     () => Array.from(new Set([...Object.keys(base), ...Object.keys(localOverrides)])).sort(),

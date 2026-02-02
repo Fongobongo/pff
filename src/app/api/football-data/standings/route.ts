@@ -3,6 +3,28 @@ import { z } from "zod";
 import { footballDataFetch } from "@/lib/footballdata";
 import { resolveCompetitionTierFromFootballData } from "@/lib/footballTier";
 
+type FootballDataStandingsRow = {
+  position?: number;
+  team?: { name?: string };
+  playedGames?: number;
+  won?: number;
+  draw?: number;
+  lost?: number;
+  points?: number;
+  goalsFor?: number;
+  goalsAgainst?: number;
+  goalDifference?: number;
+};
+
+type FootballDataStandingsEntry = {
+  type?: string;
+  table?: FootballDataStandingsRow[];
+};
+
+type FootballDataStandingsResponse = {
+  standings?: FootballDataStandingsEntry[];
+};
+
 const querySchema = z.object({
   competition: z.string().min(1),
   season: z.coerce.number().int().min(1900).optional(),
@@ -23,7 +45,7 @@ export async function GET(request: Request) {
     page_size: url.searchParams.get("page_size") ?? undefined,
   });
 
-  const data = await footballDataFetch(
+  const data = await footballDataFetch<FootballDataStandingsResponse>(
     `/competitions/${query.competition}/standings`,
     {
       season: query.season,
