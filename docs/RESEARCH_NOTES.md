@@ -32,6 +32,18 @@ These represent the minimum feature surface we should match.
 
 See `docs/STATS_NORMALIZATION.md` for the full NFL + Football scoring matrices and normalization rules.
 
+## Free-tier data sources (selected)
+
+### NFL
+
+- **nflverse-data** (via nflreadr/nflreadpy): play-by-play, rosters, and stats. Repo license: CC-BY-4.0; some datasets (FTN) are CC-BY-SA 4.0. https://github.com/nflverse/nflverse-data
+- **nflreadpy** docs: the majority of nflverse data is CC-BY 4.0; FTN data is CC-BY-SA 4.0. https://nflreadpy.nflverse.com/
+
+### Football (soccer)
+
+- **StatsBomb Open Data**: open JSON data (competitions, matches, events, lineups). Terms require attribution and use of the StatsBomb logo when publishing or sharing insights. Coverage is limited to selected leagues/seasons; see LICENSE.pdf in the repo for the full user agreement. https://github.com/statsbomb/open-data
+- **football-data.org** (optional fixtures/standings): free plan is rate-limited to 10 requests/minute for registered users; unauthenticated clients are limited to 100 requests/day and only access a small subset of endpoints. https://docs.football-data.org/general/v4/policies.html
+
 ## Access notes
 
 - `pro.football.fun` itself is protected by Cloudflare and is blocked from this execution environment.

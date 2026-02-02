@@ -67,3 +67,7 @@ This file tracks key decisions and requirements from our chats.
 - Surfaced mismatch diagnostics with sample tokenId/contract deltas and residuals in the Sport.fun portfolio UI.
 - Marked Step 3 complete and moved the active plan to stats ingestion + scoring (NFL + Football).
 - Added `docs/STATS_NORMALIZATION.md` with full scoring matrices, positional modifiers, and edge-case notes; linked it from research notes.
+- Refined stats normalization with verified Sport.fun scoring rules, edge cases, and competition tier notes.
+- Added a normalized stats scoring library for NFL + Football, including win/draw bonuses for football.
+- Added scoring API endpoints: `POST /api/stats/nfl/score` and `POST /api/stats/football/score`.
+- Selected free-tier data sources: nflverse-data (NFL), StatsBomb Open Data (football), with football-data.org as optional fixtures/standings.

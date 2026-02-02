@@ -7,7 +7,7 @@ It is based on the Sport.fun scoring matrices and edge-case notes.
 
 ### Scoring rules (normalized fields)
 
-All positions score the same for each action (no positional or win bonuses).
+All positions score the same for each action (no positional, win, or time bonuses).
 
 - passing_td: +4
 - passing_yards: +0.04 per yard (25 yards = 1 point)
@@ -28,7 +28,11 @@ All positions score the same for each action (no positional or win bonuses).
 ### Cut-off + edge notes
 
 - Scores lock 1 hour after a game finishes.
-- Sport.fun notes that scoring is pulled from SportRadar (source of truth).
+- Scoring is pulled from SportRadar (source of truth).
+- Cancelled/postponed mid-game: keep current score for the tournament.
+- If a game is restarted within the same tournament dates, the higher score from the two games counts.
+- Tie-breakers: average of last 5 scores; random if still tied.
+- Injury cover system (2025 season): if a player is ruled OUT before kickoff, the top projected backup at the same position scores on their behalf. In-game injuries do not trigger the cover.
 
 ### Derived/validation rules
 
@@ -43,7 +47,7 @@ All positions score the same for each action (no positional or win bonuses).
 Score = Base Points + Positional Points (if any) per action.
 Positions: GK (Goalkeeper), DEF (Defender), MID (Midfielder), FWD (Forward).
 
-Base-only actions (same for all positions):
+Base-only actions (same for all positions; some are GK-only in practice):
 - appearance_start: +10
 - appearance_subbed_on: +5
 - goals: +50
@@ -72,11 +76,13 @@ Base-only actions (same for all positions):
 - saves_penalty: +30
 - saves_outside_box: +3
 - saves_inside_box: +5
-- sweeper_keeper_success: +3
+- successful_sweeper_keepers: +3
 - smothers: +3
 - punches: +3
 - catches_cross: +3
 - pick_ups: +1
+- six_second_violations: -5
+- crosses_not_claimed: -5
 - own_goal: -20
 - penalty_given_away: -20
 - red_card: -20
@@ -106,13 +112,17 @@ Win/draw bonuses depend on competition tier, with a maximum win bonus of 30.
 
 Big match modifier: when two high-ranked teams face off, the win bonus can be boosted but is capped at 30.
 
+Competition rankings are based on OPTA Power Rankings (team strength based on real-life performances) and club transfer market value. These rankings are updated periodically.
+
 ### Cut-off + edge notes
 
 - Scores lock at midnight UTC after the final game of the tournament.
+- Cancelled/postponed mid-game: keep current score for the tournament.
+- If a match is restarted within the same tournament dates, the higher score from the two games counts.
 - If a player plays less than 45 minutes, win/draw bonus points are halved.
 - Scoring continues through Extra Time, but stops at the start of a penalty shootout.
 - If a player wins a penalty and then scores it, they receive goal points but no assist points.
-- Clean sheet bonus applies to the team even if a player is subbed off before a goal is conceded.
+- Clean sheet bonus applies to the entire team even if a player is subbed off before a goal is conceded.
 
 ### Tie-breaking (tournament ranking)
 

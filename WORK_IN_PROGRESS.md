@@ -1,17 +1,20 @@
 # Work in Progress
 
 ## Now
-- **Step 4 (Stats ingestion + scoring):** normalize NFL + Football stats and build the scoring pipeline.
+- **Step 4 (Stats ingestion + scoring):** scoring library + API endpoints exist; free-tier sources selected (nflverse-data, StatsBomb Open Data, optional football-data.org); normalization mapping + ingestion still pending.
 
 ## Next
 - Stats ingestion:
-  - Lock scoring matrices into normalized stat fields (NFL + Football).
+  - Confirm scoring matrices vs provider field mapping (NFL + Football).
   - Identify free-tier data sources and constraints.
   - Build ingestion endpoints + caching for stat feeds.
   - Add per-sport scoring tests to validate normalization.
 
 ## Status
 - Last updated: 2026-02-02
+- Step 4 (Stats ingestion + scoring) started:
+  - Added NFL + Football scoring library with normalized stat keys and result bonuses.
+  - Added scoring API endpoints: `/api/stats/nfl/score` and `/api/stats/football/score`.
 - Step 3 (Sport.fun portfolio) completed:
   - Activity pagination + cursors to avoid large receipt decode bursts.
   - Decoded-receipt cache (memory + disk) for speed and rate-limit relief.

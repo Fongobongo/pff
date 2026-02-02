@@ -35,6 +35,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Tx inspector now also attempts to decode tx call data (function selector -> OpenChain signature lookup)
   - Added `scripts/sportfun_discover.mjs` for contract/topic discovery
   - UI: `/sportfun/portfolio/[address]`, `/sportfun/tx/[hash]`
+- Stats scoring pipeline:
+  - Normalized NFL + Football stat keys and scoring utilities.
+  - Scoring API endpoints: `POST /api/stats/nfl/score` and `POST /api/stats/football/score`.
+- Selected free-tier data sources for stats ingestion (NFL: nflverse-data; Football: StatsBomb Open Data; optional fixtures/standings via football-data.org).
 
 ### Changed
 - Fixed server-side API fetching to derive the deployment base URL (Vercel env/headers) instead of hardcoded localhost or relative URLs.
@@ -45,6 +49,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added mismatch diagnostics with residual ERC-1155 deltas in the Sport.fun portfolio UI.
 - Updated project plan (Step 3 complete, Step 4 stats ingestion + scoring active).
 - Added stats normalization doc with full Sport.fun scoring matrices and edge-case notes.
+- Refined stats normalization with verified Sport.fun scoring rules and edge cases.
 - Sport.fun portfolio:
   - Pricing/valuation: added `currentValueAllHoldingsUsdcRaw` and `holdingsPricedCount`.
   - Analytics: promotions are treated as free shares (zero cost) in the moving-average cost basis ledger.
