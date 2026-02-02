@@ -1,4 +1,5 @@
 import { env } from "@/lib/env";
+import { withCache } from "@/lib/stats/cache";
 
 const FOOTBALL_DATA_BASE_URL = "https://api.football-data.org/v4";
 
@@ -20,14 +21,17 @@ export async function footballDataFetch<T>(
     headers.set("X-Auth-Token", env.FOOTBALL_DATA_API_KEY);
   }
 
-  const res = await fetch(url, {
-    headers,
-    next: { revalidate: revalidateSeconds },
+  const cacheKey = `football-data:${url.toString()}`;
+  return withCache(cacheKey, revalidateSeconds, async () => {
+    const res = await fetch(url, {
+      headers,
+      next: { revalidate: revalidateSeconds },
+    });
+
+    if (!res.ok) {
+      throw new Error(`football-data.org request failed: ${res.status} ${res.statusText}`);
+    }
+
+    return res.json() as Promise<T>;
   });
-
-  if (!res.ok) {
-    throw new Error(`football-data.org request failed: ${res.status} ${res.statusText}`);
-  }
-
-  return res.json() as Promise<T>;
 }

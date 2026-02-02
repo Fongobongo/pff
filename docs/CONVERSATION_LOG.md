@@ -80,3 +80,4 @@ This file tracks key decisions and requirements from our chats.
 - Added `GET /api/stats/nfl/score-week` and `GET /api/stats/football/score-competition`, plus basic football stats pages.
 - Improved penalty-assist heuristics (possession/time matching) and added football-data.org fixtures/standings endpoints + UI pages.
 - Added an NFL weekly scores page (`/nfl`) and linked it from the home page.
+- Added NFL player history endpoint + UI, football-data.org pagination/tier mapping, and cached fixtures/standings.

@@ -92,7 +92,14 @@ export default async function NflPage({
               <tbody>
                 {rows.slice(0, 100).map((row: any) => (
                   <tr key={`${row.player_id}-${row.team}`} className="border-t border-black/10 dark:border-white/10">
-                    <td className="px-3 py-2 text-black dark:text-white">{row.player_display_name}</td>
+                    <td className="px-3 py-2">
+                      <Link
+                        className="text-black hover:underline dark:text-white"
+                        href={`/nfl/player/${row.player_id}?season=${season}`}
+                      >
+                        {row.player_display_name}
+                      </Link>
+                    </td>
                     <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{row.team}</td>
                     <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{row.position}</td>
                     <td className="px-3 py-2 text-black dark:text-white">

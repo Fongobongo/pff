@@ -21,7 +21,7 @@ export default async function StandingsPage({
   const data = await res.json();
   const standings = data.standings?.standings ?? [];
   const table = standings.find((item: any) => item.type === "TOTAL") ?? standings[0];
-  const rows = table?.table ?? [];
+  const rows = data.table ?? table?.table ?? [];
 
   return (
     <div className="min-h-screen bg-zinc-50 font-sans dark:bg-black">
@@ -31,7 +31,7 @@ export default async function StandingsPage({
             Standings — {competition}
           </h1>
           <p className="mt-2 text-zinc-600 dark:text-zinc-400">
-            football-data.org competition table
+            football-data.org competition table (tier {data.competitionTier ?? "?"})
           </p>
         </header>
 

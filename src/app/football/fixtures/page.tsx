@@ -21,7 +21,7 @@ export default async function FixturesPage({
     next: { revalidate: 300 },
   });
   const data = await res.json();
-  const matches = data.matches?.matches ?? [];
+  const matches = data.pageMatches ?? data.matches?.matches ?? [];
 
   return (
     <div className="min-h-screen bg-zinc-50 font-sans dark:bg-black">
@@ -31,7 +31,7 @@ export default async function FixturesPage({
             Fixtures — {competition}
           </h1>
           <p className="mt-2 text-zinc-600 dark:text-zinc-400">
-            football-data.org competition matches
+            football-data.org competition matches (tier {data.competitionTier ?? "?"})
           </p>
         </header>
 

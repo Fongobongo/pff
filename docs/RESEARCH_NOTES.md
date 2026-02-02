@@ -51,6 +51,7 @@ See `docs/STATS_NORMALIZATION.md` for the full NFL + Football scoring matrices a
 - Source file: `stats_player_week_{season}.csv` from the `player_stats` release.
 - API endpoint: `GET /api/stats/nfl/weekly?season=YYYY&week=WW&season_type=REG&player_id=...`
 - Scoring endpoint: `GET /api/stats/nfl/score-week?season=YYYY&week=WW&season_type=REG&player_id=...`
+- Player history endpoint: `GET /api/stats/nfl/player?season=YYYY&player_id=...`
 - Current mapping coverage:
   - Mapped: passing/rushing/receiving yards + TDs, receptions, interceptions, special teams TDs, fumbles lost, 2pt conversions, fumble recovery TDs.
   - Bonus fields (300+ passing, 100+ rushing/receiving) are derived during scoring.
@@ -75,6 +76,8 @@ See `docs/STATS_NORMALIZATION.md` for the full NFL + Football scoring matrices a
 - API endpoints:
   - `GET /api/football-data/matches?competition=PL&matchday=...`
   - `GET /api/football-data/standings?competition=PL`
+- Pagination: add `page` and `page_size` to both endpoints for slicing results.
+- Competition tier mapping is inferred from the `competition` code (e.g., PL/CL -> Tier A, PD/BL1/SA/EL -> Tier B, FL1/UNL -> Tier C).
 - Requires `FOOTBALL_DATA_API_KEY` for full access; without a token only limited endpoints/quotas are available.
 
 ## Access notes
