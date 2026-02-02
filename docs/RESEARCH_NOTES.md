@@ -61,8 +61,10 @@ See `docs/STATS_NORMALIZATION.md` for the full NFL + Football scoring matrices a
   - `GET /api/stats/football/competitions`
   - `GET /api/stats/football/matches?competition_id=...&season_id=...`
   - `GET /api/stats/football/match-stats?match_id=...&competition_id=...&season_id=...`
-- Current mapping coverage (event-derived): goals, shots on/off target, blocked shots, assists, accurate passes by half, fouls, penalties won, cards, dribbles, duels, tackles, recoveries, interceptions, clearances, GK actions, offsides.
-- Unmapped fields remain: big chances, clean sheets/goals conceded, advanced GK violations, and several niche defensive actions.
+- Scoring endpoint:
+  - `GET /api/stats/football/score-from-match?match_id=...&competition_id=...&season_id=...&competition_tier=A`
+- Current mapping coverage (event-derived): goals, shots on/off target, blocked shots, assists, big chances (xG threshold heuristic), accurate passes by half, fouls, penalties won, cards, dribbles, duels/tackles (incl. last-man heuristic), recoveries, interceptions, clearances (incl. off-line heuristic), GK actions (inside/outside box), offsides, clean sheets, goals conceded, and error-to-shot/goal heuristics.
+- Unmapped fields remain: assists on penalties won (ambiguous), six-second violations, and a few niche GK/defensive actions not present in open data.
 
 ## Access notes
 

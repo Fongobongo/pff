@@ -43,6 +43,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - NFL weekly stats: `GET /api/stats/nfl/weekly` (nflverse-data).
   - Football competitions/matches/match-stats: `/api/stats/football/competitions`, `/api/stats/football/matches`, `/api/stats/football/match-stats` (StatsBomb Open Data).
 - Added `npm run test:stats` to validate scoring logic (tsx-based).
+- Expanded StatsBomb mapping coverage (big chances, clean sheets/goals conceded, GK inside/outside box, error-to-shot/goal heuristics).
+- Added football match-to-score endpoint: `GET /api/stats/football/score-from-match`.
 
 ### Changed
 - Fixed server-side API fetching to derive the deployment base URL (Vercel env/headers) instead of hardcoded localhost or relative URLs.

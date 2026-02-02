@@ -107,6 +107,11 @@ function mapPosition(positionName?: string): FootballPosition {
   return "FWD";
 }
 
+const BIG_CHANCE_XG_THRESHOLD = 0.3;
+const BOX_START_X = 102;
+const SIX_YARD_BOX_X = 114;
+const GOAL_LINE_X = 119;
+
 function normalizeCardName(cardName?: string): "yellow" | "red" | null {
   if (!cardName) return null;
   const value = cardName.toLowerCase();
@@ -192,6 +197,17 @@ export async function buildStatsBombMatchStats(options: {
   ]);
 
   const players = new Map<number, StatsBombPlayerStats>();
+  const eventsById = new Map<string, any>();
+  const shotsById = new Map<string, any>();
+
+  for (const event of events ?? []) {
+    if (event?.id) {
+      eventsById.set(event.id, event);
+      if (event.type?.name === "Shot") {
+        shotsById.set(event.id, event);
+      }
+    }
+  }
 
   for (const team of lineups ?? []) {
     const teamId = team.team_id ?? 0;
@@ -250,6 +266,11 @@ export async function buildStatsBombMatchStats(options: {
       if (onTarget) addStat(player, "shots_on_target", 1);
       if (offTarget) addStat(player, "shots_off_target", 1);
       if (outcomeText === "Blocked") addStat(player, "shots_blocked_by_opponent", 1);
+
+      const xg = toFiniteNumber(event.shot?.statsbomb_xg);
+      if (xg >= BIG_CHANCE_XG_THRESHOLD && outcomeText !== "Goal") {
+        addStat(player, "big_chances_missed", 1);
+      }
     }
 
     if (typeName === "Pass") {
@@ -269,6 +290,20 @@ export async function buildStatsBombMatchStats(options: {
         addStat(player, "assists", 1);
       } else if (event.pass?.shot_assist) {
         addStat(player, "assists_the_assister", 1);
+      }
+
+      const passType = event.pass?.type?.name;
+      if (passType === "Cross" && event.pass?.outcome?.name === "Blocked") {
+        addStat(player, "crosses_blocked", 1);
+      }
+
+      const assistedShotId = event.pass?.assisted_shot_id;
+      if (assistedShotId) {
+        const shot = shotsById.get(assistedShotId);
+        const xg = toFiniteNumber(shot?.shot?.statsbomb_xg);
+        if (xg >= BIG_CHANCE_XG_THRESHOLD) {
+          addStat(player, "big_chances_created", 1);
+        }
       }
     }
 
@@ -308,6 +343,10 @@ export async function buildStatsBombMatchStats(options: {
       const duelType = event.duel?.type?.name;
       if (duelType === "Tackle" && outcomeName === "Won") {
         addStat(player, "successful_tackles", 1);
+        const locationX = event.location?.[0];
+        if (typeof locationX === "number" && locationX >= 108) {
+          addStat(player, "last_player_tackles", 1);
+        }
       }
     }
 
@@ -329,10 +368,18 @@ export async function buildStatsBombMatchStats(options: {
       if (bodyPart.toLowerCase().includes("head")) {
         addStat(player, "effective_headed_clearances", 1);
       }
+      const locationX = event.location?.[0];
+      if (typeof locationX === "number" && locationX >= GOAL_LINE_X) {
+        addStat(player, "clearances_off_line", 1);
+      }
     }
 
     if (typeName === "Block") {
       addStat(player, "blocked_shots", 1);
+      const locationX = event.location?.[0];
+      if (typeof locationX === "number" && locationX >= SIX_YARD_BOX_X) {
+        addStat(player, "block_shots_six_yards", 1);
+      }
     }
 
     if (typeName === "Goal Keeper") {
@@ -340,7 +387,16 @@ export async function buildStatsBombMatchStats(options: {
       if (keeperType.includes("Penalty Saved")) {
         addStat(player, "saves_penalty", 1);
       } else if (keeperType.includes("Shot")) {
-        addStat(player, "saves_inside_box", 1);
+        const relatedShotId = Array.isArray(event.related_events)
+          ? event.related_events.find((id: string) => shotsById.has(id))
+          : undefined;
+        const shot = relatedShotId ? shotsById.get(relatedShotId) : undefined;
+        const shotX = shot?.location?.[0];
+        if (typeof shotX === "number" && shotX < BOX_START_X) {
+          addStat(player, "saves_outside_box", 1);
+        } else {
+          addStat(player, "saves_inside_box", 1);
+        }
       }
 
       if (keeperType.toLowerCase().includes("smother")) addStat(player, "smothers", 1);
@@ -348,6 +404,11 @@ export async function buildStatsBombMatchStats(options: {
       if (keeperType.toLowerCase().includes("claim")) addStat(player, "catches_cross", 1);
       if (keeperType.toLowerCase().includes("sweeper")) addStat(player, "successful_sweeper_keepers", 1);
       if (keeperType.toLowerCase().includes("pick")) addStat(player, "pick_ups", 1);
+
+      const keeperOutcome = String(event.goalkeeper?.outcome?.name ?? "");
+      if (keeperOutcome === "Fail" || keeperOutcome === "In Play Danger") {
+        addStat(player, "crosses_not_claimed", 1);
+      }
     }
 
     if (typeName === "Dribble") {
@@ -360,11 +421,45 @@ export async function buildStatsBombMatchStats(options: {
     if (typeName === "Offside") {
       addStat(player, "offsides", 1);
     }
+
+    if (typeName === "Error") {
+      const relatedEvents = Array.isArray(event.related_events) ? event.related_events : [];
+      let relatedShot: any | undefined;
+      for (const relatedId of relatedEvents) {
+        const rel = eventsById.get(relatedId);
+        if (rel?.type?.name === "Shot") {
+          relatedShot = rel;
+          break;
+        }
+      }
+      if (relatedShot) {
+        const outcomeName = relatedShot.shot?.outcome?.name;
+        if (outcomeName === "Goal") {
+          addStat(player, "errors_leading_to_goal", 1);
+        } else {
+          addStat(player, "errors_leading_to_shot", 1);
+        }
+      }
+    }
   }
 
   const playerArray = Array.from(players.values());
   const match = matches?.find((item) => item.match_id === matchId);
   const teamSummary = applyMatchResults(playerArray, match);
+
+  if (teamSummary?.homeTeamId && teamSummary?.awayTeamId) {
+    const homeConceded = toFiniteNumber(teamSummary.awayScore);
+    const awayConceded = toFiniteNumber(teamSummary.homeScore);
+    for (const player of playerArray) {
+      const conceded = player.teamId === teamSummary.homeTeamId ? homeConceded : awayConceded;
+      if (player.minutesPlayed > 0) {
+        addStat(player, "goals_conceded", conceded);
+      }
+      if (player.minutesPlayed >= 45 && conceded === 0) {
+        addStat(player, "clean_sheet_45_plus", 1);
+      }
+    }
+  }
 
   const mappedFields = [
     "appearance_start",
@@ -373,6 +468,8 @@ export async function buildStatsBombMatchStats(options: {
     "shots_on_target",
     "shots_off_target",
     "shots_blocked_by_opponent",
+    "big_chances_created",
+    "big_chances_missed",
     "assists",
     "assists_the_assister",
     "accurate_passes_opponents_half",
@@ -380,14 +477,19 @@ export async function buildStatsBombMatchStats(options: {
     "fouls_won",
     "penalties_won",
     "blocked_shots",
+    "block_shots_six_yards",
     "duels_won",
     "successful_tackles",
+    "last_player_tackles",
     "recoveries",
     "effective_clearances",
     "effective_headed_clearances",
     "interceptions",
     "interceptions_in_box",
+    "crosses_blocked",
+    "clearances_off_line",
     "saves_penalty",
+    "saves_outside_box",
     "saves_inside_box",
     "successful_sweeper_keepers",
     "smothers",
@@ -404,23 +506,16 @@ export async function buildStatsBombMatchStats(options: {
     "successful_dribbles",
     "offsides",
     "duels_lost",
-  ];
-
-  const unmappedFields = [
-    "assists_penalties_won",
-    "big_chances_created",
-    "big_chances_missed",
-    "block_shots_six_yards",
-    "last_player_tackles",
-    "crosses_blocked",
-    "clearances_off_line",
-    "saves_outside_box",
-    "six_second_violations",
     "crosses_not_claimed",
     "clean_sheet_45_plus",
     "goals_conceded",
     "errors_leading_to_goal",
     "errors_leading_to_shot",
+  ];
+
+  const unmappedFields = [
+    "assists_penalties_won",
+    "six_second_violations",
   ];
 
   return {
