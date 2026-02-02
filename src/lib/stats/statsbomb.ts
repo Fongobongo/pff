@@ -139,6 +139,44 @@ function isGoalOutcome(outcomeText: string): boolean {
   return value === "goal" || value.includes("own");
 }
 
+function findPenaltyAssistCandidate(
+  penaltyWins: Array<{
+    playerId: number;
+    teamId: number;
+    possession?: number;
+    minute: number;
+    index: number;
+  }>,
+  teamId: number,
+  shotIndex: number,
+  shotMinute: number,
+  shotPossession?: number
+): number {
+  let bestIdx = -1;
+  let bestEventIndex = -1;
+
+  for (let i = 0; i < penaltyWins.length; i += 1) {
+    const candidate = penaltyWins[i];
+    if (candidate.teamId !== teamId) continue;
+    if (candidate.index >= shotIndex) continue;
+
+    const minuteDelta = shotMinute - candidate.minute;
+    if (minuteDelta < 0 || minuteDelta > PENALTY_ASSIST_MAX_MINUTES) continue;
+
+    if (shotPossession !== undefined && candidate.possession !== undefined) {
+      const possessionDelta = shotPossession - candidate.possession;
+      if (possessionDelta < 0 || possessionDelta > PENALTY_ASSIST_MAX_POSSESSION_DELTA) continue;
+    }
+
+    if (candidate.index > bestEventIndex) {
+      bestEventIndex = candidate.index;
+      bestIdx = i;
+    }
+  }
+
+  return bestIdx;
+}
+
 function mapPosition(positionName?: string): FootballPosition {
   if (!positionName) return "MID";
   const name = positionName.toLowerCase();
@@ -152,6 +190,8 @@ const BIG_CHANCE_XG_THRESHOLD = 0.3;
 const BOX_START_X = 102;
 const SIX_YARD_BOX_X = 114;
 const GOAL_LINE_X = 119;
+const PENALTY_ASSIST_MAX_MINUTES = 10;
+const PENALTY_ASSIST_MAX_POSSESSION_DELTA = 2;
 
 function normalizeCardName(cardName?: string): "yellow" | "red" | null {
   if (!cardName) return null;
@@ -241,7 +281,13 @@ export async function buildStatsBombMatchStats(options: {
   const eventsById = new Map<string, any>();
   const shotsById = new Map<string, any>();
   const intervalsByPlayer = new Map<number, { start: number; end: number }[]>();
-  const pendingPenaltyWins = new Map<number, { playerId: number }[]>();
+  const penaltyWins: Array<{
+    playerId: number;
+    teamId: number;
+    possession?: number;
+    minute: number;
+    index: number;
+  }> = [];
   const teamIds = new Set<number>();
 
   for (const event of events ?? []) {
@@ -300,7 +346,9 @@ export async function buildStatsBombMatchStats(options: {
     }
   }
 
-  for (const event of events ?? []) {
+  for (let i = 0; i < (events ?? []).length; i += 1) {
+    const event = events[i];
+    const eventIndex = typeof event?.index === "number" ? event.index : i;
     const playerId = event.player?.id ?? event.player?.player_id ?? event.player_id;
     if (!playerId) continue;
 
@@ -332,12 +380,21 @@ export async function buildStatsBombMatchStats(options: {
       const shotType = event.shot?.type?.name;
       if (shotType === "Penalty") {
         const teamId = event.team?.id ?? player.teamId;
-        const pending = pendingPenaltyWins.get(teamId);
-        if (pending && pending.length > 0) {
-          const winner = pending.shift();
-          if (pending.length === 0) pendingPenaltyWins.delete(teamId);
+        const shotMinute = getEventMinute(event);
+        const shotPossession =
+          typeof event.possession === "number" ? event.possession : undefined;
+        const candidateIndex = findPenaltyAssistCandidate(
+          penaltyWins,
+          teamId,
+          eventIndex,
+          shotMinute,
+          shotPossession
+        );
+
+        if (candidateIndex >= 0) {
+          const winner = penaltyWins.splice(candidateIndex, 1)[0];
           const isGoal = outcomeText === "Goal";
-          if (isGoal && winner?.playerId && winner.playerId !== player.playerId) {
+          if (isGoal && winner.playerId !== player.playerId) {
             const winnerPlayer = players.get(winner.playerId);
             if (winnerPlayer) addStat(winnerPlayer, "assists_penalties_won", 1);
           }
@@ -383,10 +440,13 @@ export async function buildStatsBombMatchStats(options: {
       addStat(player, "fouls_won", 1);
       if (event.foul_won?.penalty) {
         addStat(player, "penalties_won", 1);
-        const teamId = event.team?.id ?? player.teamId;
-        const pending = pendingPenaltyWins.get(teamId) ?? [];
-        pending.push({ playerId: player.playerId });
-        pendingPenaltyWins.set(teamId, pending);
+        penaltyWins.push({
+          playerId: player.playerId,
+          teamId: event.team?.id ?? player.teamId,
+          possession: typeof event.possession === "number" ? event.possession : undefined,
+          minute: getEventMinute(event),
+          index: eventIndex,
+        });
       }
     }
 

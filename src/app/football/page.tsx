@@ -75,6 +75,31 @@ export default async function FootballPage() {
             </table>
           </div>
         </section>
+
+        <section className="mt-10">
+          <h2 className="text-lg font-semibold text-black dark:text-white">
+            Fixtures & standings (football-data.org)
+          </h2>
+          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <Link
+              className="rounded-xl border border-black/10 bg-white p-4 hover:bg-zinc-50 dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10"
+              href="/football/fixtures?competition=PL"
+            >
+              <div className="text-sm text-zinc-600 dark:text-zinc-400">Fixtures</div>
+              <div className="mt-1 text-lg font-medium text-black dark:text-white">Premier League</div>
+            </Link>
+            <Link
+              className="rounded-xl border border-black/10 bg-white p-4 hover:bg-zinc-50 dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10"
+              href="/football/standings?competition=PL"
+            >
+              <div className="text-sm text-zinc-600 dark:text-zinc-400">Standings</div>
+              <div className="mt-1 text-lg font-medium text-black dark:text-white">Premier League</div>
+            </Link>
+          </div>
+          <p className="mt-3 text-xs text-zinc-500 dark:text-zinc-400">
+            Requires football-data.org API token for full access.
+          </p>
+        </section>
       </main>
     </div>
   );

@@ -70,6 +70,13 @@ See `docs/STATS_NORMALIZATION.md` for the full NFL + Football scoring matrices a
 - Current mapping coverage (event-derived): goals, shots on/off target, blocked shots, assists + penalty-assist heuristics, big chances (xG threshold heuristic), accurate passes by half, fouls, penalties won, cards, dribbles, duels/tackles (incl. last-man heuristic), recoveries, interceptions, clearances (incl. off-line heuristic), GK actions (inside/outside box + six-second violations if present), offsides, clean sheets + goals conceded based on time-on-pitch, and error-to-shot/goal heuristics.
 - Unmapped fields remain: a few niche GK/defensive actions not present in open data.
 
+### football-data.org (fixtures/standings)
+
+- API endpoints:
+  - `GET /api/football-data/matches?competition=PL&matchday=...`
+  - `GET /api/football-data/standings?competition=PL`
+- Requires `FOOTBALL_DATA_API_KEY` for full access; without a token only limited endpoints/quotas are available.
+
 ## Access notes
 
 - `pro.football.fun` itself is protected by Cloudflare and is blocked from this execution environment.

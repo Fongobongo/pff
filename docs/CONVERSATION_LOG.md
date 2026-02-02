@@ -78,3 +78,5 @@ This file tracks key decisions and requirements from our chats.
 - Expanded StatsBomb mapping coverage (big chances, clean sheets/goals conceded, error-to-shot/goal heuristics, GK inside/outside box) and added `GET /api/stats/football/score-from-match`.
 - Added penalty-assist heuristics, time-on-pitch goals conceded/clean sheet logic, and auto competition tier mapping for `score-from-match`.
 - Added `GET /api/stats/nfl/score-week` and `GET /api/stats/football/score-competition`, plus basic football stats pages.
+- Improved penalty-assist heuristics (possession/time matching) and added football-data.org fixtures/standings endpoints + UI pages.
+- Added an NFL weekly scores page (`/nfl`) and linked it from the home page.

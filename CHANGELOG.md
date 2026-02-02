@@ -48,6 +48,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added time-on-pitch goals conceded/clean sheet logic, penalty-assist heuristics, and auto competition tier mapping for football scoring.
 - Added `GET /api/stats/nfl/score-week` and `GET /api/stats/football/score-competition` endpoints.
 - Added basic football stats pages (competitions, matches, match scores).
+- Improved penalty-assist heuristics using possession/time matching for penalty shots.
+- Added football-data.org fixtures/standings endpoints and basic UI pages.
+- Added NFL weekly scores page (`/nfl`) and linked it from the home page.
 
 ### Changed
 - Fixed server-side API fetching to derive the deployment base URL (Vercel env/headers) instead of hardcoded localhost or relative URLs.

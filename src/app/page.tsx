@@ -39,6 +39,14 @@ export default function Home() {
             <div className="text-sm text-zinc-600 dark:text-zinc-400">Football stats (StatsBomb)</div>
             <div className="mt-1 text-lg font-medium text-black dark:text-white">Competitions</div>
           </Link>
+
+          <Link
+            className="rounded-xl border border-black/10 bg-white p-4 hover:bg-zinc-50 dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10"
+            href="/nfl"
+          >
+            <div className="text-sm text-zinc-600 dark:text-zinc-400">NFL weekly scoring</div>
+            <div className="mt-1 text-lg font-medium text-black dark:text-white">nflverse stats</div>
+          </Link>
         </section>
 
         <section className="mt-10 rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-white/5">

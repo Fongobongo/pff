@@ -13,6 +13,9 @@ const envSchema = z.object({
   // Alchemy key (free tier supported). Used for wallet history via Alchemy-specific RPC methods.
   ALCHEMY_API_KEY: z.string().min(1).optional(),
 
+  // football-data.org API token (optional; free-tier has strict limits).
+  FOOTBALL_DATA_API_KEY: z.string().min(1).optional(),
+
 });
 
 const parsed = envSchema.parse({
@@ -20,6 +23,7 @@ const parsed = envSchema.parse({
   BASE_RPC_URL: process.env.BASE_RPC_URL,
   ETHERSCAN_API_KEY: process.env.ETHERSCAN_API_KEY,
   ALCHEMY_API_KEY: process.env.ALCHEMY_API_KEY,
+  FOOTBALL_DATA_API_KEY: process.env.FOOTBALL_DATA_API_KEY,
 });
 
 export const env = {
