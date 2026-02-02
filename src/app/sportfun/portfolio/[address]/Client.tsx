@@ -90,6 +90,13 @@ type SportfunPortfolioResponse = {
     balanceRaw: string;
     uri?: string;
     uriError?: string;
+    metadata?: {
+      name?: string;
+      description?: string;
+      image?: string;
+      imageUrl?: string;
+    };
+    metadataError?: string;
     priceUsdcPerShareRaw?: string;
     valueUsdcRaw?: string;
   }>;
@@ -171,7 +178,7 @@ export default function SportfunPortfolioClient({ address }: { address: string }
   const requestUrl = useMemo(() => {
     // Start modest, then the effect will auto-increase until complete.
     return (maxPages: number) =>
-      `/api/sportfun/portfolio/${address}?scanMode=full&maxPages=${maxPages}&maxCount=0x3e8&maxActivity=300&includeTrades=1&includePrices=1&includeUri=0`;
+      `/api/sportfun/portfolio/${address}?scanMode=full&maxPages=${maxPages}&maxCount=0x3e8&maxActivity=300&includeTrades=1&includePrices=1&includeMetadata=1`;
   }, [address]);
 
   const requestActivityPageUrl = useMemo(() => {
@@ -604,6 +611,7 @@ export default function SportfunPortfolioClient({ address }: { address: string }
           <table className="w-full text-sm">
             <thead className="bg-white/5 text-left text-gray-300">
               <tr>
+                <th className="p-3">Player</th>
                 <th className="p-3">Contract</th>
                 <th className="p-3">TokenId</th>
                 <th className="p-3">Shares</th>
@@ -614,6 +622,28 @@ export default function SportfunPortfolioClient({ address }: { address: string }
             <tbody className="divide-y divide-white/10">
               {data.holdings.map((h) => (
                 <tr key={`${h.contractAddress}:${h.tokenIdHex}`} className="text-gray-200">
+                  <td className="p-3">
+                    <div className="flex items-center gap-3">
+                      {h.metadata?.imageUrl ? (
+                        <img
+                          src={h.metadata.imageUrl}
+                          alt={h.metadata.name ?? "Player"}
+                          className="h-8 w-8 rounded-md object-cover"
+                          loading="lazy"
+                        />
+                      ) : (
+                        <div className="h-8 w-8 rounded-md bg-white/10" />
+                      )}
+                      <div className="min-w-0">
+                        <div className="truncate text-gray-100">
+                          {h.metadata?.name ?? "Unknown"}
+                        </div>
+                        {h.metadataError ? (
+                          <div className="text-xs text-amber-300">metadata error</div>
+                        ) : null}
+                      </div>
+                    </div>
+                  </td>
                   <td className="p-3 whitespace-nowrap">
                     <a className="text-blue-400 hover:underline" href={`https://basescan.org/address/${h.contractAddress}`} target="_blank" rel="noreferrer">
                       {shortenAddress(h.contractAddress)}

@@ -62,3 +62,4 @@ This file tracks key decisions and requirements from our chats.
 - Updated `/base/[address]` and `/sportfun/tx/[hash]` pages to use the new base URL helper when fetching API data.
 - Removed the temporary `ALEMBIC_API_KEY` alias; require `ALCHEMY_API_KEY`.
 - Tweaked Sport.fun activity pagination to avoid redundant full scans and skip price fetching on paged activity requests.
+- Added ERC-1155 metadata fetching from `uri(tokenId)` JSON (IPFS/http) and surfaced player names/images in the holdings table.

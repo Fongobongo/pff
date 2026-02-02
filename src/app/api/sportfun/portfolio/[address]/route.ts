@@ -44,6 +44,7 @@ const querySchema = z.object({
   includePrices: z.string().optional(),
   includeReceipts: z.string().optional(),
   includeUri: z.string().optional(),
+  includeMetadata: z.string().optional(),
   // Higher caps + best-effort full history scan (may still truncate if it risks timeouts).
   scanMode: z.enum(["default", "full"]).optional(),
 });
@@ -137,6 +138,50 @@ function encodeErc1155UriCall(tokenId: bigint): Hex {
 function decodeAbiString(hex: Hex): string {
   const [s] = decodeAbiParameters([{ type: "string" }], hex);
   return String(s);
+}
+
+function formatErc1155TokenIdHex(tokenId: bigint): string {
+  return tokenId.toString(16).padStart(64, "0");
+}
+
+function expandErc1155Uri(template: string, tokenId: bigint): string {
+  return template.replace(/\{id\}/gi, formatErc1155TokenIdHex(tokenId));
+}
+
+function normalizeToHttp(uri: string): string {
+  if (uri.startsWith("ipfs://")) {
+    let rest = uri.slice("ipfs://".length);
+    if (rest.startsWith("ipfs/")) rest = rest.slice("ipfs/".length);
+    return `https://ipfs.io/ipfs/${rest}`;
+  }
+  if (uri.startsWith("ar://")) {
+    return `https://arweave.net/${uri.slice("ar://".length)}`;
+  }
+  return uri;
+}
+
+function decodeDataUriJson(uri: string): unknown | null {
+  if (!uri.startsWith("data:")) return null;
+
+  const idx = uri.indexOf(",");
+  if (idx === -1) return null;
+  const meta = uri.slice(0, idx);
+  const payload = uri.slice(idx + 1);
+
+  const isJson = meta.includes("application/json");
+  if (!isJson) return null;
+
+  try {
+    if (meta.includes(";base64")) {
+      const raw = Buffer.from(payload, "base64").toString("utf8");
+      return JSON.parse(raw);
+    }
+
+    const raw = decodeURIComponent(payload);
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
 }
 
 function parseBool(v: string | undefined, defaultValue: boolean): boolean {
@@ -336,6 +381,111 @@ function dedupeTransfers(transfers: AlchemyTransfer[]): AlchemyTransfer[] {
 }
 
 const RECEIPT_CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 14; // 14 days
+
+type TokenMetadata = {
+  name?: string;
+  description?: string;
+  image?: string;
+  imageUrl?: string;
+};
+
+type MetadataCacheValue = {
+  uri: string;
+  metadata?: TokenMetadata;
+  error?: string;
+};
+
+const METADATA_CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 14; // 14 days
+
+function getMetadataCacheMap(): Map<string, { value: MetadataCacheValue; expiresAt: number }> {
+  const g = globalThis as unknown as {
+    __pff_sportfun_metadataCache?: Map<string, { value: MetadataCacheValue; expiresAt: number }>;
+  };
+  if (!g.__pff_sportfun_metadataCache) g.__pff_sportfun_metadataCache = new Map();
+  return g.__pff_sportfun_metadataCache;
+}
+
+function metadataCachePath(key: string): string {
+  const safe = sha1Hex(key);
+  return path.join(process.cwd(), ".cache", "sportfun", "metadata", `${safe}.json`);
+}
+
+function readMetadataCache(key: string): MetadataCacheValue | null {
+  const mem = getMetadataCacheMap();
+  const now = Date.now();
+  const cached = mem.get(key);
+  if (cached && cached.expiresAt > now) return cached.value;
+
+  try {
+    const p = metadataCachePath(key);
+    const st = fs.statSync(p);
+    const ageMs = now - st.mtimeMs;
+    if (ageMs < METADATA_CACHE_TTL_MS) {
+      const txt = fs.readFileSync(p, "utf8");
+      const parsed = JSON.parse(txt) as MetadataCacheValue;
+      mem.set(key, { value: parsed, expiresAt: now + METADATA_CACHE_TTL_MS });
+      return parsed;
+    }
+  } catch {
+    // ignore
+  }
+
+  return null;
+}
+
+function writeMetadataCache(key: string, value: MetadataCacheValue): void {
+  const mem = getMetadataCacheMap();
+  const now = Date.now();
+  mem.set(key, { value, expiresAt: now + METADATA_CACHE_TTL_MS });
+
+  try {
+    const p = metadataCachePath(key);
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    fs.writeFileSync(p, JSON.stringify(value), "utf8");
+  } catch {
+    // ignore
+  }
+}
+
+async function fetchMetadataFromUri(uri: string): Promise<{ metadata?: TokenMetadata; error?: string }> {
+  const fromData = decodeDataUriJson(uri);
+  if (fromData) {
+    return { metadata: parseMetadataPayload(fromData) };
+  }
+
+  const resolved = normalizeToHttp(uri);
+  try {
+    const res = await fetch(resolved, {
+      headers: { accept: "application/json" },
+      next: { revalidate: 60 * 60 },
+    });
+    if (!res.ok) {
+      return { error: `Metadata fetch failed: ${res.status} ${res.statusText}` };
+    }
+    const payload = (await res.json()) as unknown;
+    return { metadata: parseMetadataPayload(payload) };
+  } catch (err: unknown) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+function parseMetadataPayload(payload: unknown): TokenMetadata {
+  const data = payload as {
+    name?: unknown;
+    description?: unknown;
+    image?: unknown;
+  };
+
+  const image = typeof data?.image === "string" ? data.image : undefined;
+  const imageUrl = image ? normalizeToHttp(image) : undefined;
+
+  return {
+    name: typeof data?.name === "string" ? data.name : undefined,
+    description: typeof data?.description === "string" ? data.description : undefined,
+    image,
+    imageUrl,
+  };
+}
 
 function getReceiptCacheMap(): Map<string, { value: TxReceipt | null; expiresAt: number }> {
   const g = globalThis as unknown as {
@@ -738,7 +888,8 @@ export async function GET(request: Request, context: { params: Promise<{ address
   const includeTrades = parseBool(q.includeTrades, true);
   const includePrices = parseBool(q.includePrices, true);
   const includeReceipts = parseBool(q.includeReceipts, false);
-  const includeUri = parseBool(q.includeUri, false);
+  const includeMetadata = parseBool(q.includeMetadata, false);
+  const includeUri = parseBool(q.includeUri, false) || includeMetadata;
 
   const maxCount = q.maxCount ?? "0x3e8"; // 1000 per page
 
@@ -1123,17 +1274,19 @@ export async function GET(request: Request, context: { params: Promise<{ address
 
   // Optional ERC-1155 `uri(tokenId)` lookups.
   const uriByKey = new Map<string, { uri?: string; error?: string }>();
+  const metadataByKey = new Map<string, { metadata?: TokenMetadata; error?: string }>();
 
   if (includeUri) {
     await mapLimit(holdings, 8, async (h) => {
       const key = `${h.contractAddress}:${h.tokenIdHex}`;
       try {
-        const data = encodeErc1155UriCall(BigInt(h.tokenIdHex));
+        const tokenId = BigInt(h.tokenIdHex);
+        const data = encodeErc1155UriCall(tokenId);
         const result = (await withRetry(
           () => alchemyRpc("eth_call", [{ to: h.contractAddress, data }, "latest"]),
           { retries: 2, baseDelayMs: 200 }
         )) as Hex;
-        const uri = decodeAbiString(result);
+        const uri = expandErc1155Uri(decodeAbiString(result), tokenId);
         uriByKey.set(key, { uri });
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -1142,13 +1295,34 @@ export async function GET(request: Request, context: { params: Promise<{ address
     });
   }
 
+  if (includeMetadata) {
+    await mapLimit(holdings, 6, async (h) => {
+      const key = `${h.contractAddress}:${h.tokenIdHex}`;
+      const uri = uriByKey.get(key)?.uri;
+      if (!uri) return;
+
+      const cached = readMetadataCache(key);
+      if (cached) {
+        metadataByKey.set(key, { metadata: cached.metadata, error: cached.error });
+        return;
+      }
+
+      const result = await fetchMetadataFromUri(uri);
+      metadataByKey.set(key, result);
+      writeMetadataCache(key, { uri, metadata: result.metadata, error: result.error });
+    });
+  }
+
   const holdingsEnriched = holdings.map((h) => {
     const meta = uriByKey.get(`${h.contractAddress}:${h.tokenIdHex}`);
+    const metadata = metadataByKey.get(`${h.contractAddress}:${h.tokenIdHex}`);
     const priceMeta = priceByHoldingKey.get(tokenKey(h.contractAddress, h.tokenIdDec));
     return {
       ...h,
       uri: meta?.uri,
       uriError: meta?.error,
+      metadata: metadata?.metadata,
+      metadataError: metadata?.error,
       priceUsdcPerShareRaw: priceMeta?.priceUsdcPerShareRaw?.toString(10),
       valueUsdcRaw: priceMeta?.valueUsdcRaw?.toString(10),
     };
@@ -1549,6 +1723,7 @@ export async function GET(request: Request, context: { params: Promise<{ address
       includePrices,
       includeReceipts,
       includeUri,
+      includeMetadata,
     },
     assumptions: {
       shareUnits: "Player share amounts are treated as 18-dec fixed-point (1e18 = 1 share).",
