@@ -47,6 +47,14 @@ export default async function NflPlayerPage({
           >
             Back to weekly scores
           </Link>
+          <Link
+            className="rounded-full border border-black/10 bg-white px-4 py-2 text-sm text-black hover:bg-zinc-50 dark:border-white/10 dark:bg-white/5 dark:text-white dark:hover:bg-white/10"
+            href={`/api/stats/nfl/player?player_id=${playerId}&season=${seasonValue}${
+              season_type ? `&season_type=${season_type}` : ""
+            }${week ? `&week=${week}` : ""}&format=csv`}
+          >
+            Export CSV
+          </Link>
         </section>
 
         <NflPlayerControls />

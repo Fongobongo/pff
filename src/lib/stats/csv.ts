@@ -48,3 +48,20 @@ export function parseCsv(text: string): { headers: string[]; rows: string[][] } 
   const rows = lines.slice(1).map(parseCsvLine);
   return { headers, rows };
 }
+
+function escapeCsvValue(value: string): string {
+  if (value.includes('"') || value.includes(",") || value.includes("\n") || value.includes("\r")) {
+    return `"${value.replace(/"/g, '""')}"`;
+  }
+  return value;
+}
+
+export function toCsv(headers: string[], rows: Array<Array<string | number | null | undefined>>): string {
+  const headerLine = headers.map((header) => escapeCsvValue(String(header))).join(",");
+  const rowLines = rows.map((row) =>
+    row
+      .map((value) => escapeCsvValue(value == null ? "" : String(value)))
+      .join(","),
+  );
+  return [headerLine, ...rowLines].join("\n");
+}

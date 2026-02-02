@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
-const SEASONS = [2019, 2020, 2021, 2022, 2023];
+const SEASONS = [2019, 2020, 2021, 2022, 2023, 2024];
 const SEASON_TYPES = ["ALL", "REG", "POST"] as const;
 
 export default function NflPlayerControls() {

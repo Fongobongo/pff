@@ -55,6 +55,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added football-data.org pagination + tier mapping and cached fetches.
 - Added NFL player filters (season/week/season_type) and football tournament summary endpoint/UI.
 - Added select-based NFL player filters with paging, tournament summary caching, and a tier mapping settings page.
+- Added async football tournament summary jobs with status polling + CSV export.
+- Added NFL player history CSV export.
+- Added football-data.org fixtures → StatsBomb match bridge (`/api/football-data/score-from-fixtures`).
 
 ### Changed
 - Fixed server-side API fetching to derive the deployment base URL (Vercel env/headers) instead of hardcoded localhost or relative URLs.

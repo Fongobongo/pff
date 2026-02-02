@@ -83,3 +83,6 @@ This file tracks key decisions and requirements from our chats.
 - Added NFL player history endpoint + UI, football-data.org pagination/tier mapping, and cached fixtures/standings.
 - Added NFL player filters (season/week/season_type), tournament summary endpoint + page, and expanded football-data tier mapping.
 - Added NFL player select-based filters + pagination, tournament summary caching, and a tier mapping settings page.
+- Added async football tournament summary jobs with status polling + CSV export.
+- Added NFL player history CSV export.
+- Added football-data.org fixtures → StatsBomb score bridge endpoint (`/api/football-data/score-from-fixtures`).

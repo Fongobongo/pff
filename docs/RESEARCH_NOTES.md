@@ -52,6 +52,7 @@ See `docs/STATS_NORMALIZATION.md` for the full NFL + Football scoring matrices a
 - API endpoint: `GET /api/stats/nfl/weekly?season=YYYY&week=WW&season_type=REG&player_id=...`
 - Scoring endpoint: `GET /api/stats/nfl/score-week?season=YYYY&week=WW&season_type=REG&player_id=...`
 - Player history endpoint: `GET /api/stats/nfl/player?season=YYYY&player_id=...`
+- Player history CSV export: add `format=csv`.
 - Current mapping coverage:
   - Mapped: passing/rushing/receiving yards + TDs, receptions, interceptions, special teams TDs, fumbles lost, 2pt conversions, fumble recovery TDs.
   - Bonus fields (300+ passing, 100+ rushing/receiving) are derived during scoring.
@@ -70,7 +71,9 @@ See `docs/STATS_NORMALIZATION.md` for the full NFL + Football scoring matrices a
   - `GET /api/stats/football/score-competition?competition_id=...&season_id=...&limit=...`
 - Tournament summary:
   - `GET /api/stats/football/tournament-summary?competition_id=...&season_id=...&limit=...&top=...`
-  - Cached for 1h; add `refresh=true` to force recompute.
+  - Defaults to all matches (async job). Use `mode=sync` or `limit` for synchronous summaries.
+  - Status polling: `GET /api/stats/football/tournament-summary/status?job_id=...`
+  - CSV export: add `format=csv` (returns `202` until the job completes).
 - Current mapping coverage (event-derived): goals, shots on/off target, blocked shots, assists + penalty-assist heuristics, big chances (xG threshold heuristic), accurate passes by half, fouls, penalties won, cards, dribbles, duels/tackles (incl. last-man heuristic), recoveries, interceptions, clearances (incl. off-line heuristic), GK actions (inside/outside box + six-second violations if present), offsides, clean sheets + goals conceded based on time-on-pitch, and error-to-shot/goal heuristics.
 - Unmapped fields remain: a few niche GK/defensive actions not present in open data.
 
@@ -79,12 +82,13 @@ See `docs/STATS_NORMALIZATION.md` for the full NFL + Football scoring matrices a
 - API endpoints:
   - `GET /api/football-data/matches?competition=PL&matchday=...`
   - `GET /api/football-data/standings?competition=PL`
+  - `GET /api/football-data/score-from-fixtures?competition=PL&statsbomb_competition_id=...&statsbomb_season_id=...`
 - Pagination: add `page` and `page_size` to both endpoints for slicing results.
 - Competition tier mapping is inferred from the `competition` code (best-effort):
   - Tier A: `PL`, `CL`
   - Tier B: `PD`, `BL1`, `SA`, `EL`
   - Tier C: `FL1`, `UNL`, `ECL`, `DED`, `PPL`
-- Tier overrides can be supplied via `FOOTBALL_TIER_OVERRIDES` (JSON map of code -> tier).
+- Tier overrides can be supplied via `FOOTBALL_TIER_OVERRIDES` (JSON map of code -> tier) and previewed in `/football/tiers`.
 - Requires `FOOTBALL_DATA_API_KEY` for full access; without a token only limited endpoints/quotas are available.
 
 ## Access notes
