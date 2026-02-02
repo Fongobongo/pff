@@ -415,7 +415,6 @@ export async function buildStatsBombMatchStats(options: {
     "crosses_blocked",
     "clearances_off_line",
     "saves_outside_box",
-    "successful_sweeper_keepers",
     "six_second_violations",
     "crosses_not_claimed",
     "clean_sheet_45_plus",
