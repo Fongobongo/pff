@@ -3,6 +3,7 @@ import { formatEthFromWeiHex, shortenAddress } from "@/lib/format";
 import TokenBalances from "./TokenBalances";
 import FlowsTable from "./FlowsTable";
 import { type TokenMetadata } from "@/lib/token";
+import { getBaseUrl } from "@/lib/serverBaseUrl";
 
 type PortfolioResponse = {
   chain: string;
@@ -57,7 +58,7 @@ export default async function BaseWalletPage({
   params: Promise<{ address: string }>;
 }) {
   const { address } = await params;
-  const base = process.env.NEXT_PUBLIC_BASE_URL ?? "http://127.0.0.1:3000";
+  const base = await getBaseUrl();
 
   const [portfolio, flows, transfers] = await Promise.all([
     getJson<PortfolioResponse>(`${base}/api/base/${address}/portfolio`),

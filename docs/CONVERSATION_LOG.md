@@ -54,3 +54,10 @@ This file tracks key decisions and requirements from our chats.
 - Agreed to implement performance hardening first.
 - Added local decoded-receipt cache (memory + disk) for Sport.fun portfolio activity.
 - Added activity cursor support to page transaction activity results.
+
+## 2026-02-02
+
+- Investigated Vercel runtime failures: server components were calling API routes via hardcoded localhost or relative URLs.
+- Added a server-only base URL helper that derives the origin from Vercel env or request headers.
+- Updated `/base/[address]` and `/sportfun/tx/[hash]` pages to use the new base URL helper when fetching API data.
+- Added `ALEMBIC_API_KEY` as a compatible alias for `ALCHEMY_API_KEY` to match Vercel env configuration.

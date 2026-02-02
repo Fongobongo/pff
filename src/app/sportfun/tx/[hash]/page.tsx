@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { z } from "zod";
 import { shortenAddress } from "@/lib/format";
+import { getBaseUrl } from "@/lib/serverBaseUrl";
 
 const paramsSchema = z.object({
   hash: z.string().min(1),
@@ -54,7 +55,8 @@ export default async function SportfunTxInspectorPage({
 }) {
   const { hash } = paramsSchema.parse(await params);
 
-  const data = await getJson<TxInspectorResponse>(`/api/sportfun/tx/${hash}`);
+  const base = await getBaseUrl();
+  const data = await getJson<TxInspectorResponse>(`${base}/api/sportfun/tx/${hash}`);
 
   return (
     <main className="mx-auto max-w-5xl p-6">
