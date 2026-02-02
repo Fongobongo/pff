@@ -4,24 +4,32 @@ import { getBaseUrl } from "@/lib/serverBaseUrl";
 export default async function FixturesPage({
   searchParams,
 }: {
-  searchParams: Promise<{ competition?: string; matchday?: string; season?: string }>;
+  searchParams: Promise<{ competition?: string; matchday?: string; season?: string; page?: string; page_size?: string }>;
 }) {
   const params = await searchParams;
   const competition = params.competition ?? "PL";
   const matchday = params.matchday;
   const season = params.season;
+  const page = Number(params.page ?? "1");
+  const pageSize = Number(params.page_size ?? "20");
 
   const baseUrl = await getBaseUrl();
   const query = new URLSearchParams();
   query.set("competition", competition);
   if (matchday) query.set("matchday", matchday);
   if (season) query.set("season", season);
+  if (Number.isFinite(page)) query.set("page", String(page));
+  if (Number.isFinite(pageSize)) query.set("page_size", String(pageSize));
 
   const res = await fetch(`${baseUrl}/api/football-data/matches?${query.toString()}`, {
     next: { revalidate: 300 },
   });
   const data = await res.json();
   const matches = data.pageMatches ?? data.matches?.matches ?? [];
+  const totalMatches = data.totalMatches ?? matches.length;
+  const totalPages = pageSize > 0 ? Math.ceil(totalMatches / pageSize) : 1;
+  const hasPrev = page > 1;
+  const hasNext = page < totalPages;
 
   return (
     <div className="min-h-screen bg-zinc-50 font-sans dark:bg-black">
@@ -48,6 +56,30 @@ export default async function FixturesPage({
           >
             Standings
           </Link>
+          {hasPrev ? (
+            <Link
+              className="rounded-full border border-black/10 bg-white px-4 py-2 text-sm text-black hover:bg-zinc-50 dark:border-white/10 dark:bg-white/5 dark:text-white dark:hover:bg-white/10"
+              href={`/football/fixtures?competition=${competition}${season ? `&season=${season}` : ""}${
+                matchday ? `&matchday=${matchday}` : ""
+              }&page=${page - 1}&page_size=${pageSize}`}
+            >
+              Prev
+            </Link>
+          ) : null}
+          {hasNext ? (
+            <Link
+              className="rounded-full border border-black/10 bg-white px-4 py-2 text-sm text-black hover:bg-zinc-50 dark:border-white/10 dark:bg-white/5 dark:text-white dark:hover:bg-white/10"
+              href={`/football/fixtures?competition=${competition}${season ? `&season=${season}` : ""}${
+                matchday ? `&matchday=${matchday}` : ""
+              }&page=${page + 1}&page_size=${pageSize}`}
+            >
+              Next
+            </Link>
+          ) : null}
+        </section>
+
+        <section className="mt-4 text-sm text-zinc-500 dark:text-zinc-400">
+          Page {page} of {totalPages}
         </section>
 
         <section className="mt-8">

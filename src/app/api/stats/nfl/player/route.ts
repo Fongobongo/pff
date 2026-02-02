@@ -7,6 +7,7 @@ const querySchema = z.object({
   season: z.coerce.number().int().min(1999),
   player_id: z.string().min(1),
   season_type: z.string().optional(),
+  week: z.coerce.number().int().min(1).max(25).optional(),
 });
 
 export async function GET(request: Request) {
@@ -15,12 +16,14 @@ export async function GET(request: Request) {
     season: url.searchParams.get("season"),
     player_id: url.searchParams.get("player_id"),
     season_type: url.searchParams.get("season_type") ?? undefined,
+    week: url.searchParams.get("week") ?? undefined,
   });
 
   const data = await fetchNflWeeklyStats({
     season: query.season,
     seasonType: query.season_type,
     playerId: query.player_id,
+    week: query.week,
   });
 
   const rows = data.rows
@@ -53,6 +56,7 @@ export async function GET(request: Request) {
     sport: "nfl",
     season: query.season,
     seasonType: query.season_type,
+    week: query.week,
     player,
     summary: {
       games,

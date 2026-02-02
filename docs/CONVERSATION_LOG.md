@@ -81,3 +81,4 @@ This file tracks key decisions and requirements from our chats.
 - Improved penalty-assist heuristics (possession/time matching) and added football-data.org fixtures/standings endpoints + UI pages.
 - Added an NFL weekly scores page (`/nfl`) and linked it from the home page.
 - Added NFL player history endpoint + UI, football-data.org pagination/tier mapping, and cached fixtures/standings.
+- Added NFL player filters (season/week/season_type), tournament summary endpoint + page, and expanded football-data tier mapping.

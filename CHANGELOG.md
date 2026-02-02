@@ -53,6 +53,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added NFL weekly scores page (`/nfl`) and linked it from the home page.
 - Added NFL player history endpoint/UI (`/api/stats/nfl/player`, `/nfl/player/[playerId]`).
 - Added football-data.org pagination + tier mapping and cached fetches.
+- Added NFL player filters (season/week/season_type) and football tournament summary endpoint/UI.
 
 ### Changed
 - Fixed server-side API fetching to derive the deployment base URL (Vercel env/headers) instead of hardcoded localhost or relative URLs.

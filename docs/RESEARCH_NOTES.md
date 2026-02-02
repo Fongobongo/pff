@@ -68,6 +68,8 @@ See `docs/STATS_NORMALIZATION.md` for the full NFL + Football scoring matrices a
   - If `competition_tier` is omitted, it is auto-resolved from StatsBomb competition names (best-effort tiers for major leagues).
 - Competition batch scoring:
   - `GET /api/stats/football/score-competition?competition_id=...&season_id=...&limit=...`
+- Tournament summary:
+  - `GET /api/stats/football/tournament-summary?competition_id=...&season_id=...&limit=...&top=...`
 - Current mapping coverage (event-derived): goals, shots on/off target, blocked shots, assists + penalty-assist heuristics, big chances (xG threshold heuristic), accurate passes by half, fouls, penalties won, cards, dribbles, duels/tackles (incl. last-man heuristic), recoveries, interceptions, clearances (incl. off-line heuristic), GK actions (inside/outside box + six-second violations if present), offsides, clean sheets + goals conceded based on time-on-pitch, and error-to-shot/goal heuristics.
 - Unmapped fields remain: a few niche GK/defensive actions not present in open data.
 
@@ -77,7 +79,10 @@ See `docs/STATS_NORMALIZATION.md` for the full NFL + Football scoring matrices a
   - `GET /api/football-data/matches?competition=PL&matchday=...`
   - `GET /api/football-data/standings?competition=PL`
 - Pagination: add `page` and `page_size` to both endpoints for slicing results.
-- Competition tier mapping is inferred from the `competition` code (e.g., PL/CL -> Tier A, PD/BL1/SA/EL -> Tier B, FL1/UNL -> Tier C).
+- Competition tier mapping is inferred from the `competition` code (best-effort):
+  - Tier A: `PL`, `CL`
+  - Tier B: `PD`, `BL1`, `SA`, `EL`
+  - Tier C: `FL1`, `UNL`, `ECL`, `DED`, `PPL`
 - Requires `FOOTBALL_DATA_API_KEY` for full access; without a token only limited endpoints/quotas are available.
 
 ## Access notes

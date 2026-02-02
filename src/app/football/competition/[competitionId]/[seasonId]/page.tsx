@@ -36,6 +36,12 @@ export default async function CompetitionPage({
             </Link>
             <Link
               className="rounded-full border border-black/10 bg-white px-4 py-2 text-sm text-black hover:bg-zinc-50 dark:border-white/10 dark:bg-white/5 dark:text-white dark:hover:bg-white/10"
+              href={`/football/competition/${competitionId}/${seasonId}/summary`}
+            >
+              Tournament summary
+            </Link>
+            <Link
+              className="rounded-full border border-black/10 bg-white px-4 py-2 text-sm text-black hover:bg-zinc-50 dark:border-white/10 dark:bg-white/5 dark:text-white dark:hover:bg-white/10"
               href="/football"
             >
               Back to competitions
