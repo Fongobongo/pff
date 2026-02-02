@@ -38,7 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Fixed server-side API fetching to derive the deployment base URL (Vercel env/headers) instead of hardcoded localhost or relative URLs.
-- Accepted `ALEMBIC_API_KEY` as a backward-compatible alias for `ALCHEMY_API_KEY`.
+- Removed the temporary `ALEMBIC_API_KEY` alias; only `ALCHEMY_API_KEY` is supported.
 - Sport.fun portfolio:
   - Pricing/valuation: added `currentValueAllHoldingsUsdcRaw` and `holdingsPricedCount`.
   - Analytics: promotions are treated as free shares (zero cost) in the moving-average cost basis ledger.

@@ -7,7 +7,7 @@ export function getAlchemyBaseRpcUrl(): string {
   const key = env.ALCHEMY_API_KEY;
   if (!key) {
     throw new Error(
-      "ALCHEMY_API_KEY is not set. Add it (or ALEMBIC_API_KEY) to .env(.local) to enable wallet history endpoints."
+      "ALCHEMY_API_KEY is not set. Add it to .env(.local) to enable wallet history endpoints."
     );
   }
 

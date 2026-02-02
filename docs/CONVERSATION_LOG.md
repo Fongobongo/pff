@@ -60,4 +60,4 @@ This file tracks key decisions and requirements from our chats.
 - Investigated Vercel runtime failures: server components were calling API routes via hardcoded localhost or relative URLs.
 - Added a server-only base URL helper that derives the origin from Vercel env or request headers.
 - Updated `/base/[address]` and `/sportfun/tx/[hash]` pages to use the new base URL helper when fetching API data.
-- Added `ALEMBIC_API_KEY` as a compatible alias for `ALCHEMY_API_KEY` to match Vercel env configuration.
+- Removed the temporary `ALEMBIC_API_KEY` alias; require `ALCHEMY_API_KEY`.
