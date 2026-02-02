@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { getBaseUrl } from "@/lib/serverBaseUrl";
+import { getStatsBombCompetitions } from "@/lib/stats/statsbomb";
 
 const SAMPLE_COMPETITIONS = [
   { id: 2, seasonId: 27, label: "Premier League 2015/2016" },
@@ -8,11 +8,7 @@ const SAMPLE_COMPETITIONS = [
 ];
 
 export default async function FootballPage() {
-  const baseUrl = await getBaseUrl();
-  const res = await fetch(`${baseUrl}/api/stats/football/competitions`, {
-    next: { revalidate: 3600 },
-  });
-  const data = await res.json();
+  const competitions = await getStatsBombCompetitions();
 
   return (
     <div className="min-h-screen bg-zinc-50 font-sans dark:bg-black">
@@ -54,7 +50,7 @@ export default async function FootballPage() {
                 </tr>
               </thead>
               <tbody>
-                {(data.competitions ?? []).map((comp: any) => (
+                {competitions.map((comp) => (
                   <tr
                     key={`${comp.competition_id}-${comp.season_id}`}
                     className="border-t border-black/10 dark:border-white/10"
