@@ -50,6 +50,7 @@ type SportfunPortfolioResponse = {
   };
   analytics?: {
     realizedPnlUsdcRaw: string;
+    realizedPnlEconomicUsdcRaw?: string;
     unrealizedPnlUsdcRaw: string;
     totalCostBasisUsdcRaw: string;
     currentValueUsdcRaw: string;
@@ -473,7 +474,15 @@ export default function SportfunPortfolioClient({ address }: { address: string }
             <div className={BigInt(data.analytics.realizedPnlUsdcRaw) >= 0n ? "mt-2 text-xl text-green-400" : "mt-2 text-xl text-red-400"}>
               {formatUsdc(data.analytics.realizedPnlUsdcRaw, decimals)}
             </div>
-            <p className="mt-1 text-xs text-gray-500">USDC</p>
+            <p className="mt-1 text-xs text-gray-500">Cashflow · USDC</p>
+            {data.analytics.realizedPnlEconomicUsdcRaw ? (
+              <div className="mt-2 text-xs text-gray-400">
+                Economic:{" "}
+                <span className={BigInt(data.analytics.realizedPnlEconomicUsdcRaw) >= 0n ? "text-green-400" : "text-red-400"}>
+                  {formatUsdc(data.analytics.realizedPnlEconomicUsdcRaw, decimals)}
+                </span>
+              </div>
+            ) : null}
           </div>
         </section>
       ) : null}

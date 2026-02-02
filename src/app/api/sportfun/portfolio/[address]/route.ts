@@ -1503,6 +1503,7 @@ export async function GET(request: Request, context: { params: Promise<{ address
   >();
 
   let realizedPnlUsdcRaw = 0n;
+  let realizedPnlEconomicUsdcRaw = 0n;
   let costBasisUnknownTradeCount = 0;
   let giftBuyCount = 0;
   let sellNoProceedsCount = 0;
@@ -1616,6 +1617,11 @@ export async function GET(request: Request, context: { params: Promise<{ address
         } else {
           // Proceeds may have been redirected to another recipient.
           sellNoProceedsCount++;
+        }
+
+        const economicProceeds = BigInt(item.currencyRaw);
+        if (economicProceeds > 0n) {
+          realizedPnlEconomicUsdcRaw += economicProceeds - costBasisSold;
         }
       }
     }
@@ -1766,6 +1772,7 @@ export async function GET(request: Request, context: { params: Promise<{ address
     activity: activityEnriched,
     analytics: {
       realizedPnlUsdcRaw: realizedPnlUsdcRaw.toString(10),
+      realizedPnlEconomicUsdcRaw: realizedPnlEconomicUsdcRaw.toString(10),
       unrealizedPnlUsdcRaw: unrealizedPnlUsdcRaw.toString(10),
       totalCostBasisUsdcRaw: totalCostBasisUsdcRaw.toString(10),
       // Value of positions that have a computed cost basis (decoded trades/promotions).
@@ -1779,7 +1786,7 @@ export async function GET(request: Request, context: { params: Promise<{ address
       reconciledTransferInCount,
       reconciledTransferOutCount,
       positionsByToken: positionsByToken,
-      note: "PnL is a WIP: cost basis is tracked only from decoded FDFPair trades (moving average). Promotions and reconciled transfers add free shares (zero cost). positionsByToken is computed from the same (possibly truncated) ledger. currentValueAllHoldingsUsdcRaw sums priced holdings; missing historical trades may still skew cost basis.",
+      note: "PnL is a WIP: cost basis is tracked only from decoded FDFPair trades (moving average). Promotions and reconciled transfers add free shares (zero cost). positionsByToken is computed from the same (possibly truncated) ledger. currentValueAllHoldingsUsdcRaw sums priced holdings; missing historical trades may still skew cost basis. realizedPnlEconomicUsdcRaw uses trade proceeds even if redirected to another recipient (cashflow remains in realizedPnlUsdcRaw).",
     },
     debug: {
       contracts: [...contractSet].map((c) => ({ address: c, label: shortenAddress(c) })),

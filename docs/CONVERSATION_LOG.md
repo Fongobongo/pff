@@ -63,3 +63,4 @@ This file tracks key decisions and requirements from our chats.
 - Removed the temporary `ALEMBIC_API_KEY` alias; require `ALCHEMY_API_KEY`.
 - Tweaked Sport.fun activity pagination to avoid redundant full scans and skip price fetching on paged activity requests.
 - Added ERC-1155 metadata fetching from `uri(tokenId)` JSON (IPFS/http) and surfaced player names/images in the holdings table.
+- Added economic realized PnL (trade proceeds regardless of recipient) alongside cashflow-based realized PnL.
