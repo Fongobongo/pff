@@ -1,20 +1,23 @@
 # Work in Progress
 
 ## Now
-- **Step 3 (Sport.fun portfolio):** harden trade semantics + performance.
+- **Step 4 (Stats ingestion + scoring):** normalize NFL + Football stats and build the scoring pipeline.
 
 ## Next
-- Performance hardening:
-  - Add paging / cursors for `activity` (avoid fetching/decoding hundreds of receipts in one request).
-  - Add a lightweight cache for decoded receipts by tx hash (DB or file-based for dev).
-- Semantics hardening:
-  - Decide how to represent “economic” PnL vs wallet cashflow (e.g., sells where proceeds go to another recipient).
-  - Expand mismatch diagnostics (surface which tokenIds/contracts mismatch and why).
-- Metadata:
-  - Map ERC-1155 `tokenId` -> player metadata by fetching/parsing `uri(uint256)` JSON (IPFS/http) and display name/image.
+- Stats ingestion:
+  - Lock scoring matrices into normalized stat fields (NFL + Football).
+  - Identify free-tier data sources and constraints.
+  - Build ingestion endpoints + caching for stat feeds.
+  - Add per-sport scoring tests to validate normalization.
 
 ## Status
-- Last updated: 2026-02-01
+- Last updated: 2026-02-02
+- Step 3 (Sport.fun portfolio) completed:
+  - Activity pagination + cursors to avoid large receipt decode bursts.
+  - Decoded-receipt cache (memory + disk) for speed and rate-limit relief.
+  - Economic vs cashflow realized PnL split.
+  - Mismatch diagnostics surfaced with residual ERC-1155 deltas.
+  - ERC-1155 `uri(tokenId)` metadata fetch + display (name/image).
 - Portfolio endpoint + UI exist and support:
   - Holdings from ERC-1155 transfers (filtered to known Sport.fun ERC-1155 contracts).
   - Tx-grouped activity.

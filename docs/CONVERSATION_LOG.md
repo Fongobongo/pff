@@ -65,3 +65,4 @@ This file tracks key decisions and requirements from our chats.
 - Added ERC-1155 metadata fetching from `uri(tokenId)` JSON (IPFS/http) and surfaced player names/images in the holdings table.
 - Added economic realized PnL (trade proceeds regardless of recipient) alongside cashflow-based realized PnL.
 - Surfaced mismatch diagnostics with sample tokenId/contract deltas and residuals in the Sport.fun portfolio UI.
+- Marked Step 3 complete and moved the active plan to stats ingestion + scoring (NFL + Football).
