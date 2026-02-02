@@ -66,3 +66,4 @@ This file tracks key decisions and requirements from our chats.
 - Added economic realized PnL (trade proceeds regardless of recipient) alongside cashflow-based realized PnL.
 - Surfaced mismatch diagnostics with sample tokenId/contract deltas and residuals in the Sport.fun portfolio UI.
 - Marked Step 3 complete and moved the active plan to stats ingestion + scoring (NFL + Football).
+- Added `docs/STATS_NORMALIZATION.md` with full scoring matrices, positional modifiers, and edge-case notes; linked it from research notes.

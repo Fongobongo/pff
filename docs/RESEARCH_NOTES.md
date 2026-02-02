@@ -30,23 +30,7 @@ These represent the minimum feature surface we should match.
 
 ### NFL scoring matrix (high level)
 
-(We should ingest all of these stat fields from our web sources)
-
-- Passing TD: +4
-- Passing yard: +0.04 (25 yards = 1 point)
-- 300+ passing yards bonus: +3
-- Interception: -1
-- Rushing TD: +6
-- Rushing yard: +0.1 (10 yards = 1 point)
-- 100+ rushing yards bonus: +3
-- Receiving TD: +6
-- Reception: +1
-- Receiving yard: +0.1
-- 100+ receiving yards bonus: +3
-- Return TD (punt/kickoff/FG): +6
-- Fumble lost: -1
-- 2pt conversion (pass/run/catch): +2
-- Offensive fumble recovery TD: +6
+See `docs/STATS_NORMALIZATION.md` for the full NFL + Football scoring matrices and normalization rules.
 
 ## Access notes
 

@@ -44,6 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added economic realized PnL that counts trade proceeds even when redirected to another recipient.
 - Added mismatch diagnostics with residual ERC-1155 deltas in the Sport.fun portfolio UI.
 - Updated project plan (Step 3 complete, Step 4 stats ingestion + scoring active).
+- Added stats normalization doc with full Sport.fun scoring matrices and edge-case notes.
 - Sport.fun portfolio:
   - Pricing/valuation: added `currentValueAllHoldingsUsdcRaw` and `holdingsPricedCount`.
   - Analytics: promotions are treated as free shares (zero cost) in the moving-average cost basis ledger.
