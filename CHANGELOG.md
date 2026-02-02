@@ -42,6 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Reduced redundant full-scan retries and skipped price lookups on paged Sport.fun activity requests.
 - Added Sport.fun ERC-1155 metadata fetching from `uri(tokenId)` JSON (including IPFS) and displayed names/images in holdings.
 - Added economic realized PnL that counts trade proceeds even when redirected to another recipient.
+- Added mismatch diagnostics with residual ERC-1155 deltas in the Sport.fun portfolio UI.
 - Sport.fun portfolio:
   - Pricing/valuation: added `currentValueAllHoldingsUsdcRaw` and `holdingsPricedCount`.
   - Analytics: promotions are treated as free shares (zero cost) in the moving-average cost basis ledger.

@@ -1369,6 +1369,8 @@ export async function GET(request: Request, context: { params: Promise<{ address
     tokenIdDec: string;
     expectedDeltaRaw: string;
     decodedDeltaRaw: string;
+    residualDeltaRaw: string;
+    reason: "erc1155_unexplained_delta";
   }> = [];
 
   activityEnriched = activityEnriched.map((a) => {
@@ -1419,6 +1421,8 @@ export async function GET(request: Request, context: { params: Promise<{ address
           tokenIdDec,
           expectedDeltaRaw: expectedDelta.toString(10),
           decodedDeltaRaw: decodedDelta.toString(10),
+          residualDeltaRaw: residual.toString(10),
+          reason: "erc1155_unexplained_delta",
         });
       }
     }

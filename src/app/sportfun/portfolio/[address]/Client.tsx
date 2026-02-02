@@ -134,6 +134,17 @@ type SportfunPortfolioResponse = {
       }>;
     };
   }>;
+  debug?: {
+    shareDeltaMismatchSamples?: Array<{
+      hash: string;
+      contractAddress: string;
+      tokenIdDec: string;
+      expectedDeltaRaw: string;
+      decodedDeltaRaw: string;
+      residualDeltaRaw: string;
+      reason: string;
+    }>;
+  };
 };
 
 async function getJson<T>(url: string): Promise<T> {
@@ -737,6 +748,57 @@ export default function SportfunPortfolioClient({ address }: { address: string }
           </table>
         </div>
       </section>
+
+      {data.debug?.shareDeltaMismatchSamples?.length ? (
+        <section className="mt-8">
+          <h2 className="text-lg font-semibold text-white">Mismatch diagnostics</h2>
+          <p className="mt-1 text-sm text-gray-400">
+            ERC-1155 deltas that were not fully explained by decoded trades/promotions.
+          </p>
+
+          <div className="mt-3 overflow-x-auto rounded-xl border border-white/10">
+            <table className="w-full text-sm">
+              <thead className="bg-white/5 text-left text-gray-300">
+                <tr>
+                  <th className="p-3">Tx</th>
+                  <th className="p-3">Contract</th>
+                  <th className="p-3">TokenId</th>
+                  <th className="p-3">Expected Δ</th>
+                  <th className="p-3">Decoded Δ</th>
+                  <th className="p-3">Residual Δ</th>
+                  <th className="p-3">Reason</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/10">
+                {data.debug.shareDeltaMismatchSamples.map((s, idx) => (
+                  <tr key={`${s.hash}-${idx}`} className="text-gray-200">
+                    <td className="p-3 whitespace-nowrap">
+                      <div className="flex flex-col">
+                        <a className="text-blue-400 hover:underline" href={`/sportfun/tx/${s.hash}`}>
+                          Inspect
+                        </a>
+                        <a className="text-xs text-gray-500 hover:underline" href={`https://basescan.org/tx/${s.hash}`} target="_blank" rel="noreferrer">
+                          {shortenAddress(s.hash)}
+                        </a>
+                      </div>
+                    </td>
+                    <td className="p-3 whitespace-nowrap">
+                      <a className="text-blue-400 hover:underline" href={`https://basescan.org/address/${s.contractAddress}`} target="_blank" rel="noreferrer">
+                        {shortenAddress(s.contractAddress)}
+                      </a>
+                    </td>
+                    <td className="p-3 whitespace-nowrap">{s.tokenIdDec}</td>
+                    <td className="p-3 whitespace-nowrap">{formatShares(s.expectedDeltaRaw)}</td>
+                    <td className="p-3 whitespace-nowrap">{formatShares(s.decodedDeltaRaw)}</td>
+                    <td className="p-3 whitespace-nowrap">{formatShares(s.residualDeltaRaw)}</td>
+                    <td className="p-3 whitespace-nowrap text-gray-400">{s.reason}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : null}
 
       {data.analytics?.note ? (
         <section className="mt-8 rounded-xl border border-white/10 bg-white/5 p-4">
