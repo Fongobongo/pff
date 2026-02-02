@@ -9,7 +9,8 @@
     "lint": "eslint .",
     "db:generate": "drizzle-kit generate:pg",
     "db:migrate": "drizzle-kit up:pg",
-    "sportfun:discover": "node scripts/sportfun_discover.mjs"
+    "sportfun:discover": "node scripts/sportfun_discover.mjs",
+    "test:stats": "tsx scripts/test_stats.ts"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.90.20",
@@ -31,6 +32,7 @@
     "eslint": "^9",
     "eslint-config-next": "^16.1.6",
     "tailwindcss": "^4",
+    "tsx": "^4.20.5",
     "typescript": "^5"
   }
 }

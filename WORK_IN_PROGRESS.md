@@ -1,7 +1,7 @@
 # Work in Progress
 
 ## Now
-- **Step 4 (Stats ingestion + scoring):** scoring library + API endpoints exist; free-tier sources selected (nflverse-data, StatsBomb Open Data, optional football-data.org); normalization mapping + ingestion still pending.
+- **Step 4 (Stats ingestion + scoring):** scoring library + API endpoints exist; ingestion endpoints are in place for NFL (nflverse weekly) + Football (StatsBomb). Mapping coverage is partial; remaining fields + tests still pending.
 
 ## Next
 - Stats ingestion:
@@ -15,6 +15,8 @@
 - Step 4 (Stats ingestion + scoring) started:
   - Added NFL + Football scoring library with normalized stat keys and result bonuses.
   - Added scoring API endpoints: `/api/stats/nfl/score` and `/api/stats/football/score`.
+  - Added ingestion endpoints for NFL weekly stats and StatsBomb open data.
+  - Added basic scoring tests.
 - Step 3 (Sport.fun portfolio) completed:
   - Activity pagination + cursors to avoid large receipt decode bursts.
   - Decoded-receipt cache (memory + disk) for speed and rate-limit relief.

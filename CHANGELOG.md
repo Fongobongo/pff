@@ -39,6 +39,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Normalized NFL + Football stat keys and scoring utilities.
   - Scoring API endpoints: `POST /api/stats/nfl/score` and `POST /api/stats/football/score`.
 - Selected free-tier data sources for stats ingestion (NFL: nflverse-data; Football: StatsBomb Open Data; optional fixtures/standings via football-data.org).
+- Stats ingestion endpoints:
+  - NFL weekly stats: `GET /api/stats/nfl/weekly` (nflverse-data).
+  - Football competitions/matches/match-stats: `/api/stats/football/competitions`, `/api/stats/football/matches`, `/api/stats/football/match-stats` (StatsBomb Open Data).
+- Added `npm run test:stats` to validate scoring logic (tsx-based).
 
 ### Changed
 - Fixed server-side API fetching to derive the deployment base URL (Vercel env/headers) instead of hardcoded localhost or relative URLs.

@@ -71,3 +71,7 @@ This file tracks key decisions and requirements from our chats.
 - Added a normalized stats scoring library for NFL + Football, including win/draw bonuses for football.
 - Added scoring API endpoints: `POST /api/stats/nfl/score` and `POST /api/stats/football/score`.
 - Selected free-tier data sources: nflverse-data (NFL), StatsBomb Open Data (football), with football-data.org as optional fixtures/standings.
+- Added ingestion endpoints:
+  - NFL weekly stats: `GET /api/stats/nfl/weekly`.
+  - Football competitions/matches/match-stats: `/api/stats/football/competitions`, `/api/stats/football/matches`, `/api/stats/football/match-stats`.
+- Added basic scoring tests via `npm run test:stats` (tsx-based).

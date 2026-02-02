@@ -44,6 +44,26 @@ See `docs/STATS_NORMALIZATION.md` for the full NFL + Football scoring matrices a
 - **StatsBomb Open Data**: open JSON data (competitions, matches, events, lineups). Terms require attribution and use of the StatsBomb logo when publishing or sharing insights. Coverage is limited to selected leagues/seasons; see LICENSE.pdf in the repo for the full user agreement. https://github.com/statsbomb/open-data
 - **football-data.org** (optional fixtures/standings): free plan is rate-limited to 10 requests/minute for registered users; unauthenticated clients are limited to 100 requests/day and only access a small subset of endpoints. https://docs.football-data.org/general/v4/policies.html
 
+## Ingestion status (MVP)
+
+### NFL (nflverse-data)
+
+- Source file: `stats_player_week_{season}.csv` from the `player_stats` release.
+- API endpoint: `GET /api/stats/nfl/weekly?season=YYYY&week=WW&season_type=REG&player_id=...`
+- Current mapping coverage:
+  - Mapped: passing/rushing/receiving yards + TDs, receptions, interceptions, special teams TDs, fumbles lost, 2pt conversions, fumble recovery TDs.
+  - Bonus fields (300+ passing, 100+ rushing/receiving) are derived during scoring.
+
+### Football (StatsBomb Open Data)
+
+- Sources: `competitions.json`, `matches/{competition}/{season}.json`, `events/{match}.json`, `lineups/{match}.json`.
+- API endpoints:
+  - `GET /api/stats/football/competitions`
+  - `GET /api/stats/football/matches?competition_id=...&season_id=...`
+  - `GET /api/stats/football/match-stats?match_id=...&competition_id=...&season_id=...`
+- Current mapping coverage (event-derived): goals, shots on/off target, blocked shots, assists, accurate passes by half, fouls, penalties won, cards, dribbles, duels, tackles, recoveries, interceptions, clearances, GK actions, offsides.
+- Unmapped fields remain: big chances, clean sheets/goals conceded, advanced GK violations, and several niche defensive actions.
+
 ## Access notes
 
 - `pro.football.fun` itself is protected by Cloudflare and is blocked from this execution environment.
