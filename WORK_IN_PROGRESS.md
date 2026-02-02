@@ -14,6 +14,17 @@
   - Identify free-tier data sources and constraints.
   - Build ingestion endpoints + caching for stat feeds.
   - Add per-sport scoring tests to validate normalization.
+- NFL parity plan (from nfl-fun.vercel.app gap list):
+  - **Stage 0**: confirm scope (full parity vs stubs) and definition of “done”.
+  - **Stage 1**: add UI shells + navigation for missing routes:
+    - `/nfl/players`, `/nfl/teams`, `/nfl/standings`, `/nfl/portfolio`, `/nfl/token`
+    - `/nfl/trending`, `/nfl/analytics`, `/nfl/advanced-stats`
+    - `/nfl/opportunities`, `/nfl/matchups`, `/nfl/defensive-matchups`
+    - `/nfl/tournament-summary`, `/nfl/tournament-matrix`
+  - **Stage 2**: add core NFL data APIs (players/teams/standings/schedule) and wire to pages.
+  - **Stage 3**: derive advanced pages (trending/analytics/matchups/opportunities).
+  - **Stage 4**: tournament summary + matrix (aggregates from weekly stats + scoring).
+  - **Stage 5**: portfolio/token pages (pending source confirmation).
 
 ## Status
 - Last updated: 2026-02-02
