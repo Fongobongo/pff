@@ -186,6 +186,43 @@ export default function SportfunPortfolioClient({ address }: { address: string }
   const [contractFilter, setContractFilter] = useState<string>("all");
 
   const decimals = data?.assumptions.usdc.decimals ?? 6;
+  const tokenLabelMap = useMemo(() => {
+    const map = new Map<string, string>();
+    if (!data?.holdings) return map;
+    for (const holding of data.holdings) {
+      const name = holding.metadata?.name?.trim();
+      if (name) {
+        map.set(`${holding.contractAddress.toLowerCase()}:${holding.tokenIdDec}`, name);
+      }
+    }
+    return map;
+  }, [data?.holdings]);
+
+  function getTokenLabel(contractAddress?: string, tokenIdDec?: string): string {
+    if (!tokenIdDec) return "—";
+    if (!contractAddress) return tokenIdDec;
+    const key = `${contractAddress.toLowerCase()}:${tokenIdDec}`;
+    return tokenLabelMap.get(key) ?? tokenIdDec;
+  }
+
+  function renderTokenLabel(contractAddress?: string, tokenIdDec?: string) {
+    if (!tokenIdDec) return "—";
+    const label = getTokenLabel(contractAddress, tokenIdDec);
+    if (label === tokenIdDec) return label;
+    return (
+      <div className="flex flex-col">
+        <span className="text-gray-100">{label}</span>
+        <span className="text-xs text-gray-500">#{tokenIdDec}</span>
+      </div>
+    );
+  }
+
+  function formatTokenLabel(contractAddress?: string, tokenIdDec?: string) {
+    if (!tokenIdDec) return "tokenId —";
+    const label = getTokenLabel(contractAddress, tokenIdDec);
+    if (label === tokenIdDec) return `tokenId ${tokenIdDec}`;
+    return `${label} (#${tokenIdDec})`;
+  }
 
   const requestUrl = useMemo(() => {
     // Start modest, then the effect will auto-increase until complete.
@@ -564,7 +601,7 @@ export default function SportfunPortfolioClient({ address }: { address: string }
               <thead className="bg-white/5 text-left text-gray-300">
                 <tr>
                   <th className="p-3">Contract</th>
-                  <th className="p-3">TokenId</th>
+                  <th className="p-3">Player</th>
                   <th className="p-3">Holding shares</th>
                   <th className="p-3">Spent</th>
                   <th className="p-3">Avg cost/share</th>
@@ -586,7 +623,7 @@ export default function SportfunPortfolioClient({ address }: { address: string }
                           {shortenAddress(p.playerToken)}
                         </a>
                       </td>
-                      <td className="p-3 whitespace-nowrap">{p.tokenIdDec}</td>
+                      <td className="p-3 whitespace-nowrap">{renderTokenLabel(p.playerToken, p.tokenIdDec)}</td>
                       <td className="p-3 whitespace-nowrap">{formatShares(p.holdingSharesRaw)}</td>
                       <td className="p-3 whitespace-nowrap">{p.totals ? formatUsdc(p.totals.spentUsdcRaw, decimals) : "—"}</td>
                       <td className="p-3 whitespace-nowrap">{p.avgCostUsdcPerShareRaw ? formatUsdc(p.avgCostUsdcPerShareRaw, decimals) : "—"}</td>
@@ -719,12 +756,12 @@ export default function SportfunPortfolioClient({ address }: { address: string }
                       {a.decoded?.trades?.slice(0, 3).map((t, idx) => (
                         <div key={idx} className="text-gray-200">
                           <span className={t.kind === "buy" ? "text-green-400" : "text-red-400"}>{t.kind.toUpperCase()}</span>{" "}
-                          tokenId {t.tokenIdDec} · shares {formatShares(t.shareAmountRaw)} · net {formatUsdc(t.currencyRaw, decimals)} · fee {formatUsdc(t.feeRaw, decimals)}
+                          {formatTokenLabel(t.playerToken, t.tokenIdDec)} · shares {formatShares(t.shareAmountRaw)} · net {formatUsdc(t.currencyRaw, decimals)} · fee {formatUsdc(t.feeRaw, decimals)}
                         </div>
                       ))}
                       {a.decoded?.promotions?.slice(0, 2).map((p, idx) => (
                         <div key={`p-${idx}`} className="text-amber-300">
-                          PROMO tokenId {p.tokenIdDec} · shares {formatShares(p.shareAmountRaw)}
+                          PROMO {formatTokenLabel(p.playerToken, p.tokenIdDec)} · shares {formatShares(p.shareAmountRaw)}
                         </div>
                       ))}
                       {a.decoded?.trades && a.decoded.trades.length > 3 ? (
@@ -762,7 +799,7 @@ export default function SportfunPortfolioClient({ address }: { address: string }
                 <tr>
                   <th className="p-3">Tx</th>
                   <th className="p-3">Contract</th>
-                  <th className="p-3">TokenId</th>
+                  <th className="p-3">Player</th>
                   <th className="p-3">Expected Δ</th>
                   <th className="p-3">Decoded Δ</th>
                   <th className="p-3">Residual Δ</th>
@@ -787,7 +824,9 @@ export default function SportfunPortfolioClient({ address }: { address: string }
                         {shortenAddress(s.contractAddress)}
                       </a>
                     </td>
-                    <td className="p-3 whitespace-nowrap">{s.tokenIdDec}</td>
+                    <td className="p-3 whitespace-nowrap">
+                      {renderTokenLabel(s.contractAddress, s.tokenIdDec)}
+                    </td>
                     <td className="p-3 whitespace-nowrap">{formatShares(s.expectedDeltaRaw)}</td>
                     <td className="p-3 whitespace-nowrap">{formatShares(s.decodedDeltaRaw)}</td>
                     <td className="p-3 whitespace-nowrap">{formatShares(s.residualDeltaRaw)}</td>
