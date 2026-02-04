@@ -316,8 +316,8 @@ export default async function NflPricesPage({
         ))}
       </section>
 
-      <section className="mt-4 rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-white/5">
-        <form className="flex flex-wrap items-end gap-3" method="get">
+      <section className="mt-4 rounded-xl border border-black/10 bg-white p-0 dark:border-white/10 dark:bg-white/5">
+        <form className="sticky top-0 z-10 flex flex-wrap items-end gap-3 border-b border-black/10 bg-white p-4 text-xs text-zinc-600 dark:border-white/10 dark:bg-black dark:text-zinc-400" method="get">
           <input type="hidden" name="windowHours" value={String(windowHours)} />
           <label className="flex flex-col gap-1 text-xs text-zinc-600 dark:text-zinc-400">
             <span>Search</span>
