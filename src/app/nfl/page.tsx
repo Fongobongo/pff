@@ -122,17 +122,6 @@ function extractSupply(attributes: unknown): number | null {
   return parsed;
 }
 
-function formatUsdValue(value?: number): string {
-  if (value === undefined || Number.isNaN(value)) return "—";
-  const abs = Math.abs(value);
-  if (abs >= 1e9) return `$${(value / 1e9).toFixed(2)}B`;
-  if (abs >= 1e6) return `$${(value / 1e6).toFixed(2)}M`;
-  if (abs >= 1e3) return `$${(value / 1e3).toFixed(2)}K`;
-  if (abs >= 1) return `$${value.toFixed(2)}`;
-  if (abs >= 0.01) return `$${value.toFixed(4)}`;
-  return `$${value.toFixed(6)}`;
-}
-
 function extractTeam(attributes: unknown): string | null {
   const raw = extractAttributeValue(attributes, (key) => key.includes("team") || key.includes("club"));
   if (typeof raw === "string" && raw.trim()) return raw.trim();
