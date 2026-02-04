@@ -45,6 +45,7 @@ const querySchema = z.object({
   includeReceipts: z.string().optional(),
   includeUri: z.string().optional(),
   includeMetadata: z.string().optional(),
+  metadataLimit: z.coerce.number().int().min(1).max(200).optional(),
   // Higher caps + best-effort full history scan (may still truncate if it risks timeouts).
   scanMode: z.enum(["default", "full"]).optional(),
 });
@@ -894,6 +895,7 @@ export async function GET(request: Request, context: { params: Promise<{ address
   const includeReceipts = parseBool(q.includeReceipts, false);
   const includeMetadata = parseBool(q.includeMetadata, false);
   const includeUri = parseBool(q.includeUri, false) || includeMetadata;
+  const metadataLimit = q.metadataLimit;
 
   const maxCount = q.maxCount ?? "0x3e8"; // 1000 per page
 
@@ -1281,8 +1283,10 @@ export async function GET(request: Request, context: { params: Promise<{ address
   const metadataByKey = new Map<string, { metadata?: TokenMetadata; error?: string }>();
 
   const shouldIncludeUri = includeUri && hasTime(1500);
+  const holdingsForMetadata = metadataLimit ? holdings.slice(0, metadataLimit) : holdings;
+
   if (shouldIncludeUri) {
-    await mapLimit(holdings, 8, async (h) => {
+    await mapLimit(holdingsForMetadata, 8, async (h) => {
       const key = `${h.contractAddress}:${h.tokenIdHex}`;
       try {
         const tokenId = BigInt(h.tokenIdHex);
@@ -1302,7 +1306,7 @@ export async function GET(request: Request, context: { params: Promise<{ address
 
   const shouldIncludeMetadata = includeMetadata && shouldIncludeUri && hasTime(1500);
   if (shouldIncludeMetadata) {
-    await mapLimit(holdings, 6, async (h) => {
+    await mapLimit(holdingsForMetadata, 6, async (h) => {
       const key = `${h.contractAddress}:${h.tokenIdHex}`;
       const uri = uriByKey.get(key)?.uri;
       if (!uri) return;
@@ -1768,6 +1772,7 @@ export async function GET(request: Request, context: { params: Promise<{ address
       includeReceipts,
       includeUri,
       includeMetadata,
+      metadataLimit,
     },
     assumptions: {
       shareUnits: "Player share amounts are treated as 18-dec fixed-point (1e18 = 1 share).",

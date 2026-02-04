@@ -310,6 +310,7 @@ export default function SportfunPortfolioClient({ address }: { address: string }
       includePrices?: boolean;
       includeMetadata?: boolean;
       includeUri?: boolean;
+      metadataLimit?: number;
       activityCursor?: number;
     }) => {
       const query = new URLSearchParams();
@@ -318,6 +319,7 @@ export default function SportfunPortfolioClient({ address }: { address: string }
       query.set("maxCount", "0x3e8");
       query.set("maxActivity", String(params.maxActivity));
       if (params.activityCursor !== undefined) query.set("activityCursor", String(params.activityCursor));
+      if (params.metadataLimit !== undefined) query.set("metadataLimit", String(params.metadataLimit));
       query.set("includeTrades", params.includeTrades ? "1" : "0");
       query.set("includePrices", params.includePrices ? "1" : "0");
       query.set("includeMetadata", params.includeMetadata ? "1" : "0");
@@ -546,7 +548,7 @@ export default function SportfunPortfolioClient({ address }: { address: string }
             maxActivity: 200,
             includeTrades: true,
             includePrices: true,
-            includeMetadata: true,
+            includeMetadata: false,
           }),
           30000
         );
@@ -561,6 +563,31 @@ export default function SportfunPortfolioClient({ address }: { address: string }
         setActivityCursor(cursor ?? null);
         setActivityDone(!cursor);
       }
+    } catch (err: unknown) {
+      setFullScanError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setFullScanLoading(false);
+    }
+  }
+
+  async function runMetadataScan() {
+    setFullScanLoading(true);
+    setFullScanError(null);
+    try {
+      const next = await getJson<SportfunPortfolioResponse>(
+        buildRequestUrl({
+          scanMode: data.query?.scanMode ?? "default",
+          maxPages: data.query?.maxPages ?? 10,
+          maxActivity: data.query?.maxActivity ?? 150,
+          includeTrades: false,
+          includePrices: false,
+          includeMetadata: true,
+          includeUri: true,
+          metadataLimit: 25,
+        }),
+        25000
+      );
+      setData(next);
     } catch (err: unknown) {
       setFullScanError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -643,6 +670,13 @@ export default function SportfunPortfolioClient({ address }: { address: string }
             disabled={fullScanLoading}
           >
             {fullScanLoading ? "Running full scan…" : "Run full scan"}
+          </button>
+          <button
+            className="rounded-md border border-white/10 bg-white/10 px-3 py-1 text-sm text-white hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-60"
+            onClick={runMetadataScan}
+            disabled={fullScanLoading}
+          >
+            {fullScanLoading ? "Loading metadata…" : "Load metadata (top 25)"}
           </button>
           <Link className="text-sm text-blue-400 hover:underline" href={`/base/${address}`}>
             Base wallet
