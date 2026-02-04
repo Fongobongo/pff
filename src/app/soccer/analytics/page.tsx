@@ -12,10 +12,6 @@ function buildQuery(params: Record<string, string | undefined>) {
   return qs ? `?${qs}` : "";
 }
 
-function toNumber(value: number | undefined): number {
-  return Number(value ?? 0) || 0;
-}
-
 export default async function SoccerAnalyticsPage({
   searchParams,
 }: {

@@ -112,12 +112,6 @@ function toHex(value: bigint): Hex {
   return `0x${value.toString(16)}` as Hex;
 }
 
-function parseBigIntish(value: unknown): bigint {
-  if (typeof value !== "string") throw new Error(`Expected string, got ${typeof value}`);
-  if (value.startsWith("0x") || value.startsWith("0X")) return BigInt(value);
-  return BigInt(value);
-}
-
 async function ethCall(to: string, abi: Abi, functionName: string, args: unknown[] = []) {
   const data = encodeFunctionData({ abi, functionName, args });
   const result = await alchemyRpc("eth_call", [{ to, data }, "latest"]);
@@ -203,15 +197,11 @@ function computePrice(params: { reserveFun: bigint; reserveUsdc: bigint; funDeci
 
 export async function getFunTokenSnapshot(): Promise<FunTokenSnapshot> {
   return withCache("fun:token:snapshot", 120, async () => {
-    const [token0, token1] = (await Promise.all([
-      ethCall(FUN_PAIR_ADDRESS, PAIR_ABI, "token0"),
-      ethCall(FUN_PAIR_ADDRESS, PAIR_ABI, "token1"),
-    ])) as [string, string];
+    const token0 = (await ethCall(FUN_PAIR_ADDRESS, PAIR_ABI, "token0")) as string;
 
     const [reserve0, reserve1] = (await ethCall(FUN_PAIR_ADDRESS, PAIR_ABI, "getReserves")) as [bigint, bigint];
 
     const token0Lc = token0.toLowerCase();
-    const token1Lc = token1.toLowerCase();
     const funLc = FUN_TOKEN_ADDRESS.toLowerCase();
     const usdcLc = BASE_USDC.toLowerCase();
 
