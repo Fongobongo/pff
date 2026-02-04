@@ -293,6 +293,8 @@ type TrendRow = {
   usageTrendScore?: number;
   usageShareScore?: number;
   usageScore?: number;
+  usageCluster?: "Low" | "Medium" | "High";
+  signal?: "Surge" | "Breakout" | "Fade" | "Neutral";
   tpRateL3: number;
   trend?: number;
   oppDelta?: number;
@@ -681,6 +683,37 @@ export default async function NflTrendingPage({
 
     return entry;
   });
+
+  const usageScores = rows
+    .map((row) => row.usageScore)
+    .filter((value): value is number => value !== undefined && Number.isFinite(value))
+    .sort((a, b) => a - b);
+  const usageLow = usageScores.length ? usageScores[Math.floor(usageScores.length * 0.33)] : undefined;
+  const usageHigh = usageScores.length ? usageScores[Math.floor(usageScores.length * 0.66)] : undefined;
+
+  for (const row of rows) {
+    if (row.usageScore === undefined) {
+      row.usageCluster = "Medium";
+    } else if (usageLow !== undefined && row.usageScore <= usageLow) {
+      row.usageCluster = "Low";
+    } else if (usageHigh !== undefined && row.usageScore >= usageHigh) {
+      row.usageCluster = "High";
+    } else {
+      row.usageCluster = "Medium";
+    }
+
+    const usageScore = row.usageScore ?? 0;
+    const l3Delta = row.l3VsSeason ?? 0;
+    if (usageScore >= 1.2 && l3Delta >= 3) {
+      row.signal = "Surge";
+    } else if (usageScore >= 0.6 && l3Delta >= 1.5) {
+      row.signal = "Breakout";
+    } else if (usageScore <= -0.6 && l3Delta <= -1.5) {
+      row.signal = "Fade";
+    } else {
+      row.signal = "Neutral";
+    }
+  }
 
   const usageByPos = new Map<
     string,
@@ -1358,7 +1391,8 @@ export default async function NflTrendingPage({
           <div className="text-xs uppercase tracking-wide text-zinc-500 dark:text-zinc-400">Usage focus</div>
           <div className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
             L3 Targets, Touches, Yards, Air Yards are per-game across the last {TREND_WEEKS} games. Usage Score is
-            position-weighted (WR/TE emphasize air + share; RB emphasizes touches; QB emphasizes rushes).
+            position-weighted (WR/TE emphasize air + share; RB emphasizes touches; QB emphasizes rushes). Signals are based
+            on Usage Score + L3 vs Season.
           </div>
         </div>
         <div className="rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-white/5">
@@ -1371,7 +1405,7 @@ export default async function NflTrendingPage({
 
       <section className="mt-8">
         <div className="overflow-x-auto rounded-xl border border-black/10 bg-white dark:border-white/10 dark:bg-white/5">
-          <table className="w-full min-w-[2600px] text-left text-sm">
+          <table className="w-full min-w-[2700px] text-left text-sm">
             <thead className="bg-zinc-100 text-xs uppercase tracking-wide text-zinc-500 dark:bg-white/10 dark:text-zinc-400">
               <tr>
                 <th className="px-3 py-2">Player</th>
@@ -1379,6 +1413,8 @@ export default async function NflTrendingPage({
                 <th className="px-3 py-2">Team</th>
                 <th className="px-3 py-2">Games</th>
                 <th className="px-3 py-2">Price</th>
+                <th className="px-3 py-2">Signal</th>
+                <th className="px-3 py-2">Cluster</th>
                 <th className="px-3 py-2">Season FPPG</th>
                 <th className="px-3 py-2">Home FPPG</th>
                 <th className="px-3 py-2">Away FPPG</th>
@@ -1426,6 +1462,22 @@ export default async function NflTrendingPage({
                     <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{row.games}</td>
                     <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
                       {formatUsd(row.token?.currentPriceUsdcRaw)}
+                    </td>
+                    <td
+                      className={`px-3 py-2 ${
+                        row.signal === "Surge"
+                          ? "text-emerald-500"
+                          : row.signal === "Breakout"
+                            ? "text-sky-500"
+                            : row.signal === "Fade"
+                              ? "text-rose-500"
+                              : "text-zinc-600 dark:text-zinc-400"
+                      }`}
+                    >
+                      {row.signal ?? "Neutral"}
+                    </td>
+                    <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
+                      {row.usageCluster ?? "—"}
                     </td>
                     <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
                       {formatNumber(row.seasonAvg)}
@@ -1545,7 +1597,7 @@ export default async function NflTrendingPage({
               })}
               {sorted.length === 0 ? (
                 <tr>
-                  <td className="px-3 py-4 text-zinc-600 dark:text-zinc-400" colSpan={41}>
+                  <td className="px-3 py-4 text-zinc-600 dark:text-zinc-400" colSpan={43}>
                     No players match the filters.
                   </td>
                 </tr>
