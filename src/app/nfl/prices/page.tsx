@@ -322,24 +322,24 @@ export default async function NflPricesPage({
           </label>
           <div className="flex items-center gap-2">
                 {["QB", "RB", "WR", "TE", "K", "DST"].map((pos) => (
-                  <Link
-                    key={pos}
-                    className={`rounded-full border px-3 py-1 text-[11px] uppercase ${
-                      positionFilter === pos
-                        ? "border-black bg-black text-white dark:border-white dark:bg-white dark:text-black"
-                        : "border-black/10 bg-white text-black hover:bg-zinc-50 dark:border-white/10 dark:bg-white/5 dark:text-white dark:hover:bg-white/10"
-                    }`}
-                    href={`/nfl/prices${buildQuery({
-                      windowHours: String(windowHours),
-                      position: pos,
-                      team: teamFilter ?? undefined,
-                      q: queryText || undefined,
-                      sort: sortParam,
-                    })}`}
-                  >
-                    {pos}
-                  </Link>
-                ))}
+              <Link
+                key={pos}
+                className={`rounded-full border px-3 py-1 text-[11px] uppercase ${
+                  positionFilter === pos
+                    ? "border-black bg-black text-white dark:border-white dark:bg-white dark:text-black"
+                    : "border-black/10 bg-white text-black hover:bg-zinc-50 dark:border-white/10 dark:bg-white/5 dark:text-white dark:hover:bg-white/10"
+                }`}
+                href={`/nfl/prices${buildQuery({
+                  windowHours: String(windowHours),
+                  position: pos,
+                  team: teamFilter ?? undefined,
+                  q: queryText || undefined,
+                  sort: sortParam,
+                })}`}
+              >
+                {pos}
+              </Link>
+            ))}
           </div>
           <label className="flex flex-col gap-1 text-xs text-zinc-600 dark:text-zinc-400">
             <span>Position</span>
