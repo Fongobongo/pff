@@ -122,6 +122,12 @@ function extractSupply(attributes: unknown): number | null {
   return parsed;
 }
 
+function extractTeam(attributes: unknown): string | null {
+  const raw = extractAttributeValue(attributes, (key) => key.includes("team") || key.includes("club"));
+  if (typeof raw === "string" && raw.trim()) return raw.trim();
+  return null;
+}
+
 function buildQuery(params: Record<string, string | undefined>) {
   const query = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
@@ -135,12 +141,24 @@ function buildQuery(params: Record<string, string | undefined>) {
 export default async function NflMarketPage({
   searchParams,
 }: {
-  searchParams: Promise<{ trendDays?: string; windowHours?: string; series?: string }>;
+  searchParams: Promise<{
+    trendDays?: string;
+    windowHours?: string;
+    series?: string;
+    price_position?: string;
+    price_team?: string;
+    price_page?: string;
+  }>;
 }) {
   const params = await searchParams;
   const trendDays = parseNumber(params.trendDays, 30, 7, 365);
   const windowHours = parseNumber(params.windowHours, 24, 1, 168);
   const series = SERIES_OPTIONS.find((opt) => opt.key === params.series)?.key ?? "all";
+  const pricePositionParam = params.price_position?.toUpperCase();
+  const priceTeamParam = params.price_team?.toUpperCase();
+  const pricePositionFilter = pricePositionParam && pricePositionParam !== "ALL" ? pricePositionParam : undefined;
+  const priceTeamFilter = priceTeamParam && priceTeamParam !== "ALL" ? priceTeamParam : undefined;
+  const pricePageParam = parseNumber(params.price_page, 1, 1, 200);
 
   const snapshot = await getSportfunMarketSnapshot({
     sport: "nfl",
@@ -177,6 +195,18 @@ export default async function NflMarketPage({
 
   const volumePoints = trendData.map((p) => ({ ts: p.ts, volume: BigInt(p.volumeSharesRaw ?? "0") }));
   const hasTrend = trendData.length > 1 && pricePoints.length > 1;
+
+  const pricePointsAll = snapshot.trend
+    .filter((p) => p.avgPriceUsdcRaw)
+    .map((p) => ({ ts: p.ts, price: BigInt(p.avgPriceUsdcRaw ?? "0") }));
+  const latestPricePoint = pricePointsAll.length ? pricePointsAll[pricePointsAll.length - 1] : undefined;
+  const prevPricePoint = pricePointsAll.length > 1 ? pricePointsAll[pricePointsAll.length - 2] : undefined;
+  const marketTrend24hDeltaRaw =
+    latestPricePoint && prevPricePoint ? latestPricePoint.price - prevPricePoint.price : undefined;
+  const marketTrend24hPct =
+    latestPricePoint && prevPricePoint && prevPricePoint.price !== 0n
+      ? (Number(marketTrend24hDeltaRaw) / Number(prevPricePoint.price)) * 100
+      : undefined;
 
   const minPrice = pricePoints.length ? pricePoints.reduce((a, b) => (a.price < b.price ? a : b)).price : 0n;
   const maxPrice = pricePoints.length ? pricePoints.reduce((a, b) => (a.price > b.price ? a : b)).price : 0n;
@@ -245,6 +275,36 @@ export default async function NflMarketPage({
       if (aPrice === bPrice) return a.tokenIdDec.localeCompare(b.tokenIdDec);
       return bPrice > aPrice ? 1 : -1;
     });
+  const pricePositions = Array.from(
+    new Set(
+      currentPrices
+        .map((row) => row.position ?? (row.attributes ? extractPosition(row.attributes) : null))
+        .filter((value): value is string => typeof value === "string" && Boolean(value))
+        .map((value) => value.toUpperCase())
+    )
+  ).sort();
+  const priceTeams = Array.from(
+    new Set(
+      currentPrices
+        .map((row) => row.team ?? (row.attributes ? extractTeam(row.attributes) : null))
+        .filter((value): value is string => typeof value === "string" && Boolean(value))
+        .map((value) => value.toUpperCase())
+    )
+  ).sort();
+  const currentPricesFiltered = currentPrices.filter((row) => {
+    const position = row.position ?? (row.attributes ? extractPosition(row.attributes) : null);
+    const team = row.team ?? (row.attributes ? extractTeam(row.attributes) : null);
+    if (pricePositionFilter && (position ?? "").toUpperCase() !== pricePositionFilter) return false;
+    if (priceTeamFilter && (team ?? "").toUpperCase() !== priceTeamFilter) return false;
+    return true;
+  });
+  const pricePageSize = 50;
+  const priceTotalPages = Math.max(1, Math.ceil(currentPricesFiltered.length / pricePageSize));
+  const pricePageSafe = Math.min(priceTotalPages, Math.max(1, pricePageParam));
+  const pricePageRows = currentPricesFiltered.slice(
+    (pricePageSafe - 1) * pricePageSize,
+    pricePageSafe * pricePageSize
+  );
   const sentiment =
     gainersCount > losersCount ? "Bullish" : losersCount > gainersCount ? "Bearish" : "Neutral";
 
@@ -381,6 +441,19 @@ export default async function NflMarketPage({
             {gainersCount} gainers · {losersCount} losers · {neutralCount} flat
           </div>
         </div>
+        <div className="rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-white/5">
+          <div className="text-xs uppercase tracking-wide text-zinc-500 dark:text-zinc-400">Market trend (24h)</div>
+          <div
+            className={`mt-2 text-2xl font-semibold ${
+              (marketTrend24hPct ?? 0) >= 0 ? "text-emerald-500" : "text-rose-500"
+            }`}
+          >
+            {marketTrend24hPct !== undefined ? `${marketTrend24hPct.toFixed(2)}%` : "—"}
+          </div>
+          <div className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+            {marketTrend24hDeltaRaw !== undefined ? formatUsd(marketTrend24hDeltaRaw.toString()) : "No 24h trend"}
+          </div>
+        </div>
       </section>
 
       <section className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-2">
@@ -451,6 +524,62 @@ export default async function NflMarketPage({
           <div className="border-b border-black/10 px-3 py-2 text-xs uppercase tracking-wide text-zinc-500 dark:border-white/10 dark:text-zinc-400">
             Current prices
           </div>
+          <div className="border-b border-black/10 px-3 py-3 text-xs text-zinc-600 dark:border-white/10 dark:text-zinc-400">
+            <form className="flex flex-wrap items-end gap-3" method="get">
+              <input type="hidden" name="windowHours" value={String(windowHours)} />
+              <input type="hidden" name="trendDays" value={String(trendDays)} />
+              <input type="hidden" name="series" value={series} />
+              <label className="flex flex-col gap-1">
+                <span>Position</span>
+                <select
+                  name="price_position"
+                  defaultValue={pricePositionFilter ?? "all"}
+                  className="rounded-md border border-black/10 bg-white px-2 py-1 text-xs text-black dark:border-white/10 dark:bg-white/5 dark:text-white"
+                >
+                  <option value="all">All</option>
+                  {pricePositions.map((pos) => (
+                    <option key={pos} value={pos}>
+                      {pos}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex flex-col gap-1">
+                <span>Team</span>
+                <select
+                  name="price_team"
+                  defaultValue={priceTeamFilter ?? "all"}
+                  className="min-w-[140px] rounded-md border border-black/10 bg-white px-2 py-1 text-xs text-black dark:border-white/10 dark:bg-white/5 dark:text-white"
+                >
+                  <option value="all">All</option>
+                  {priceTeams.map((team) => (
+                    <option key={team} value={team}>
+                      {team}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                type="submit"
+                className="rounded-md border border-black/10 bg-black px-3 py-1 text-xs text-white hover:bg-zinc-800 dark:border-white/10 dark:bg-white dark:text-black dark:hover:bg-zinc-200"
+              >
+                Apply
+              </button>
+              <Link
+                className="text-xs text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white"
+                href={`/nfl${buildQuery({
+                  windowHours: String(windowHours),
+                  trendDays: String(trendDays),
+                  series,
+                })}`}
+              >
+                Reset
+              </Link>
+              <div className="ml-auto text-xs text-zinc-500 dark:text-zinc-400">
+                {currentPricesFiltered.length} tokens · page {pricePageSafe} / {priceTotalPages}
+              </div>
+            </form>
+          </div>
           <div className="max-h-[620px] overflow-auto">
             <table className="w-full text-left text-sm">
               <thead className="sticky top-0 bg-zinc-100 text-xs uppercase tracking-wide text-zinc-500 dark:bg-black dark:text-zinc-400">
@@ -465,7 +594,7 @@ export default async function NflMarketPage({
                 </tr>
               </thead>
               <tbody>
-                {currentPrices.map((row) => {
+                {pricePageRows.map((row) => {
                   const position = row.position ?? (row.attributes ? extractPosition(row.attributes) : null);
                   return (
                     <tr key={row.tokenIdDec} className="border-t border-black/10 dark:border-white/10">
@@ -489,7 +618,7 @@ export default async function NflMarketPage({
                     </tr>
                   );
                 })}
-                {currentPrices.length === 0 ? (
+                {pricePageRows.length === 0 ? (
                   <tr>
                     <td className="px-3 py-4 text-zinc-600 dark:text-zinc-400" colSpan={7}>
                       No token prices available.
@@ -498,6 +627,37 @@ export default async function NflMarketPage({
                 ) : null}
               </tbody>
             </table>
+          </div>
+          <div className="flex items-center justify-between gap-3 border-t border-black/10 px-3 py-2 text-xs text-zinc-600 dark:border-white/10 dark:text-zinc-400">
+            <Link
+              href={`/nfl${buildQuery({
+                windowHours: String(windowHours),
+                trendDays: String(trendDays),
+                series,
+                price_position: pricePositionFilter ?? undefined,
+                price_team: priceTeamFilter ?? undefined,
+                price_page: String(Math.max(1, pricePageSafe - 1)),
+              })}`}
+              className={pricePageSafe > 1 ? "hover:underline" : "pointer-events-none opacity-40"}
+            >
+              Prev
+            </Link>
+            <span>
+              Page {pricePageSafe} of {priceTotalPages}
+            </span>
+            <Link
+              href={`/nfl${buildQuery({
+                windowHours: String(windowHours),
+                trendDays: String(trendDays),
+                series,
+                price_position: pricePositionFilter ?? undefined,
+                price_team: priceTeamFilter ?? undefined,
+                price_page: String(Math.min(priceTotalPages, pricePageSafe + 1)),
+              })}`}
+              className={pricePageSafe < priceTotalPages ? "hover:underline" : "pointer-events-none opacity-40"}
+            >
+              Next
+            </Link>
           </div>
         </div>
       </section>
