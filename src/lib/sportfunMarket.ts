@@ -27,6 +27,9 @@ export type SportfunMarketToken = {
   image?: string;
   description?: string;
   attributes?: unknown;
+  position?: string;
+  team?: string;
+  supply?: number;
   currentPriceUsdcRaw?: string;
   price24hAgoUsdcRaw?: string;
   priceChangeUsdcRaw?: string;
@@ -164,6 +167,70 @@ function decodeDataUriJson(uri: string): unknown | null {
   } catch {
     return null;
   }
+}
+
+function extractAttributeValue(attributes: unknown, matchKey: (key: string) => boolean): unknown {
+  if (!attributes) return undefined;
+  if (Array.isArray(attributes)) {
+    for (const entry of attributes) {
+      if (!entry || typeof entry !== "object") continue;
+      const record = entry as Record<string, unknown>;
+      const key = String(record.trait_type ?? record.traitType ?? record.name ?? record.key ?? "").toLowerCase();
+      if (!key) continue;
+      if (matchKey(key)) return record.value ?? record.val ?? record.text ?? record.content;
+    }
+  }
+  if (typeof attributes === "object") {
+    for (const [key, value] of Object.entries(attributes as Record<string, unknown>)) {
+      if (matchKey(key.toLowerCase())) return value;
+    }
+  }
+  return undefined;
+}
+
+function parseNumericValue(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const cleaned = value.replace(/,/g, "").trim();
+    if (!cleaned) return null;
+    const parsed = Number(cleaned);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function normalizePosition(raw: string): string {
+  const value = raw.trim().toUpperCase();
+  if (value.includes("QUARTERBACK") || value === "QB") return "QB";
+  if (value.includes("RUNNING BACK") || value === "RB") return "RB";
+  if (value.includes("WIDE RECEIVER") || value === "WR") return "WR";
+  if (value.includes("TIGHT END") || value === "TE") return "TE";
+  if (value.includes("KICKER") || value === "K") return "K";
+  if (value.includes("DEF") || value.includes("DST")) return "DST";
+  return value;
+}
+
+function extractPosition(attributes: unknown): string | null {
+  const raw = extractAttributeValue(attributes, (key) => key.includes("position") || key === "pos");
+  if (typeof raw === "string" && raw.trim()) return normalizePosition(raw);
+  return null;
+}
+
+function extractTeam(attributes: unknown): string | null {
+  const raw = extractAttributeValue(attributes, (key) => key.includes("team") || key.includes("club"));
+  if (typeof raw === "string" && raw.trim()) return raw.trim();
+  return null;
+}
+
+function extractSupply(attributes: unknown): number | null {
+  const raw = extractAttributeValue(
+    attributes,
+    (key) => key.includes("supply") || key.includes("shares") || key.includes("outstanding")
+  );
+  const parsed = parseNumericValue(raw);
+  if (parsed === null) return null;
+  if (parsed > 1e12) return parsed / 1e18;
+  return parsed;
 }
 
 function sumBigInt(values: bigint[]): bigint {
@@ -723,12 +790,19 @@ export async function getSportfunMarketSnapshot(params: {
       const decoratedTokens = tokens.map((token) => {
         const metaEntry = metaByToken.get(token.tokenIdDec);
         const override = getSportfunNameOverride(contracts[0].playerToken, token.tokenIdDec);
+        const attributes = metaEntry?.attributes;
+        const position = extractPosition(attributes);
+        const team = extractTeam(attributes);
+        const supply = extractSupply(attributes);
         return {
           ...token,
           name: override ?? metaEntry?.name ?? undefined,
           image: metaEntry?.image ?? undefined,
           description: metaEntry?.description ?? undefined,
-          attributes: metaEntry?.attributes,
+          attributes,
+          position: position ?? undefined,
+          team: team ?? undefined,
+          supply: supply ?? undefined,
         };
       });
 

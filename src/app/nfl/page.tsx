@@ -235,7 +235,7 @@ export default async function NflMarketPage({
   let totalMarketCap = 0;
   let marketCapTokens = 0;
   for (const token of snapshot.tokens) {
-    const supply = extractSupply(token.attributes);
+    const supply = token.supply ?? extractSupply(token.attributes);
     const price = token.currentPriceUsdcRaw ? toUsdNumber(token.currentPriceUsdcRaw) : 0;
     if (supply && price) {
       totalMarketCap += price * supply;
@@ -248,7 +248,7 @@ export default async function NflMarketPage({
     { count: number; sumChange: number; gainers: number; losers: number }
   >();
   for (const token of snapshot.tokens) {
-    const position = extractPosition(token.attributes);
+    const position = token.position ?? extractPosition(token.attributes);
     if (!position) continue;
     const entry = positionMap.get(position) ?? { count: 0, sumChange: 0, gainers: 0, losers: 0 };
     const change = token.priceChange24hPercent ?? 0;
@@ -440,8 +440,8 @@ export default async function NflMarketPage({
             </thead>
             <tbody>
               {inactiveTop.map((row) => {
-                const position = row.attributes ? extractPosition(row.attributes) : null;
-                const supply = row.attributes ? extractSupply(row.attributes) : null;
+                const position = row.position ?? (row.attributes ? extractPosition(row.attributes) : null);
+                const supply = row.supply ?? (row.attributes ? extractSupply(row.attributes) : null);
                 return (
                   <tr key={row.tokenIdDec} className="border-t border-black/10 dark:border-white/10">
                     <td className="px-3 py-2 text-black dark:text-white">{row.name ?? `#${row.tokenIdDec}`}</td>
