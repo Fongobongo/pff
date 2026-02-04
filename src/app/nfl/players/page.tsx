@@ -1,6 +1,7 @@
 import Link from "next/link";
 import NflPageShell from "../_components/NflPageShell";
 import { getSportfunMarketSnapshot, toUsdNumber } from "@/lib/sportfunMarket";
+import { buildNflTokenPlayerIndex } from "@/lib/sportfunPlayerMap";
 import { fetchNflWeeklyStats, type NflWeeklyRow } from "@/lib/stats/nflverse";
 import { scoreNfl } from "@/lib/stats/nfl";
 
@@ -237,7 +238,10 @@ export default async function NflPlayersPage({
     priceChange24hPercent: token.priceChange24hPercent,
   }));
 
-  const tokenIndex = buildTokenIndex(tokens);
+  const [tokenLookup, tokenIndex] = await Promise.all([
+    buildNflTokenPlayerIndex(snapshot.tokens),
+    Promise.resolve(buildTokenIndex(tokens)),
+  ]);
 
   const weeks = Array.from(new Set(weeklyData.rows.map((row) => row.week).filter(Boolean))).sort(
     (a, b) => a - b
@@ -275,7 +279,7 @@ export default async function NflPlayersPage({
       tpCount: 0,
       tpRate: 0,
       weeks: [],
-      token: tokenIndex.get(normalizeName(playerName)),
+      token: tokenLookup.get(row.player_id) ?? tokenIndex.get(normalizeName(playerName)),
     };
 
     const score = scores.get(`${row.player_id}:${row.week}`) ?? 0;

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import NflPageShell from "../_components/NflPageShell";
 import { getSportfunMarketSnapshot, toUsdNumber } from "@/lib/sportfunMarket";
+import { buildNflTokenPlayerIndex } from "@/lib/sportfunPlayerMap";
 import { fetchNflSchedule, fetchNflWeeklyStats, type NflWeeklyRow } from "@/lib/stats/nflverse";
 import { scoreNfl } from "@/lib/stats/nfl";
 
@@ -498,6 +499,7 @@ export default async function NflTrendingPage({
       priceChange24hPercent: token.priceChange24hPercent,
     }))
   );
+  const tokenLookup = await buildNflTokenPlayerIndex(snapshot.tokens);
 
   const oppWindowWeeks = windowWeeks.slice(-OPP_WINDOW_WEEKS);
   const oppWindowSet = new Set(oppWindowWeeks);
@@ -560,7 +562,7 @@ export default async function NflTrendingPage({
       l3VsSeason: undefined,
       tpRateL3: 0,
       weeks: [],
-      token: tokenIndex.get(normalizeName(playerName)),
+      token: tokenLookup.get(row.player_id) ?? tokenIndex.get(normalizeName(playerName)),
     };
 
     const score = scores.get(`${row.player_id}:${row.week}`) ?? 0;

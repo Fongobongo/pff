@@ -1,6 +1,7 @@
 import Link from "next/link";
 import NflPageShell from "../_components/NflPageShell";
 import { getSportfunMarketSnapshot, toUsdNumber } from "@/lib/sportfunMarket";
+import { buildNflTokenPlayerIndex } from "@/lib/sportfunPlayerMap";
 import { fetchNflWeeklyStats, type NflWeeklyRow } from "@/lib/stats/nflverse";
 import { scoreNfl } from "@/lib/stats/nfl";
 
@@ -197,6 +198,7 @@ export default async function NflSignalsPage({
       priceChange24hPercent: token.priceChange24hPercent,
     }))
   );
+  const tokenLookup = await buildNflTokenPlayerIndex(snapshot.tokens);
 
   const players = new Map<string, SignalRow>();
 
@@ -212,7 +214,7 @@ export default async function NflSignalsPage({
       seasonAvg: 0,
       l3Avg: 0,
       weeks: [],
-      token: tokenIndex.get(normalizeName(playerName)),
+      token: tokenLookup.get(row.player_id) ?? tokenIndex.get(normalizeName(playerName)),
     };
 
     const score = scoreNfl(row.stats).totalRounded ?? 0;
