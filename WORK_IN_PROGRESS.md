@@ -1,14 +1,12 @@
 # Work in Progress
 
 ## Now
-- **Step 5 (Soccer analytics + market expansion):** Expand StatsBomb competition coverage for soccer pages and improve Sport.fun market breadth (include inactive tokens + richer metadata).
-  - Add more competitions/seasons to the soccer analytics selectors.
-  - Enrich market snapshot with more metadata for low-activity tokens.
-  - Revisit sport summary pages after competition expansion.
+- **Step 5 (Soccer analytics + market expansion):** Finish soccer overview polish after the competition expansion.
+  - Revisit soccer summary pages to ensure the expanded competition list + higher match limits render cleanly.
 
 ## Next
-- Expand soccer leaderboards (xG/xA, assists, defenders) across more competitions.
-- Improve Sport.fun token universe coverage (inactive tokens, promotions-only IDs).
+- Add deeper soccer leaderboards (defensive/GK focus) where still missing.
+- Spot-check inactive Sport.fun tokens for metadata coverage.
 
 ## Status
 - Last updated: 2026-02-04
@@ -23,8 +21,10 @@
   - Added football match-to-score endpoint and expanded StatsBomb mapping coverage.
   - Added NFL score-week endpoint and football competition scoring endpoint.
   - Added football-data.org fixtures/standings endpoints and basic NFL/football pages.
-- Step 5 (Soccer analytics + market expansion) started:
-  - Adding more StatsBomb competitions to soccer analytics pages.
+- Step 5 (Soccer analytics + market expansion) updates:
+  - Expanded StatsBomb competition list to the full open-data catalog.
+  - Raised soccer analytics match limits up to 380/400 matches.
+  - Market snapshot now scans token universe from 2025-08-01 and prioritizes metadata for inactive tokens.
 - Step 3 (Sport.fun portfolio) completed:
   - Activity pagination + cursors to avoid large receipt decode bursts.
   - Decoded-receipt cache (memory + disk) for speed and rate-limit relief.
