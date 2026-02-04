@@ -1,10 +1,11 @@
 # Work in Progress
 
 ## Now
-- **Step 5 (Soccer analytics + market expansion):** Spot-check inactive Sport.fun tokens for metadata coverage.
+- **Step 5 (Soccer analytics + market expansion):** Identify missing Sport.fun metadata source (ERC-1155 `uri()` returns numeric IDs in spot check).
 
 ## Next
 - Review soccer pages for load/perf impact with the expanded competition list.
+- Find/confirm the Sport.fun metadata base URL (current on-chain `uri()` is not resolving).
 
 ## Status
 - Last updated: 2026-02-04
@@ -25,6 +26,7 @@
   - Market snapshot now scans token universe from 2025-08-01 and prioritizes metadata for inactive tokens.
   - Soccer competition pickers now use featured chips + collapsible full list.
   - Added defensive + GK leaderboards to soccer advanced stats.
+  - Added transfer-based fallback for token universe when log scanning fails on Alchemy free tier.
 - Step 3 (Sport.fun portfolio) completed:
   - Activity pagination + cursors to avoid large receipt decode bursts.
   - Decoded-receipt cache (memory + disk) for speed and rate-limit relief.
