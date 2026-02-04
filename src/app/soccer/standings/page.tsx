@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { getBaseUrl } from "@/lib/serverBaseUrl";
+import { footballDataFetch } from "@/lib/footballdata";
 import SoccerPageShell from "../_components/SoccerPageShell";
 
 const LEAGUES = [
@@ -26,27 +26,34 @@ type FootballDataStandingsEntry = {
   table?: FootballDataStandingsRow[];
 };
 
-type StandingsResponse = {
-  standings?: { standings?: FootballDataStandingsEntry[] };
-  table?: FootballDataStandingsRow[];
+type FootballDataStandingsResponse = {
+  standings?: FootballDataStandingsEntry[];
 };
 
-function extractRows(data: StandingsResponse): FootballDataStandingsRow[] {
-  const standings = data.standings?.standings ?? [];
+function extractRows(data: FootballDataStandingsResponse): FootballDataStandingsRow[] {
+  const standings = data.standings ?? [];
   const table = standings.find((item) => item.type === "TOTAL") ?? standings[0];
-  return data.table ?? table?.table ?? [];
+  return table?.table ?? [];
+}
+
+async function fetchLeagueRows(competition: string): Promise<FootballDataStandingsRow[]> {
+  try {
+    const data = await footballDataFetch<FootballDataStandingsResponse>(
+      `/competitions/${competition}/standings`,
+      {},
+      300
+    );
+    return extractRows(data);
+  } catch {
+    return [];
+  }
 }
 
 export default async function SoccerStandingsPage() {
-  const baseUrl = await getBaseUrl();
-
   const results = await Promise.all(
     LEAGUES.map(async (league) => {
-      const res = await fetch(`${baseUrl}/api/football-data/standings?competition=${league.code}`, {
-        next: { revalidate: 300 },
-      });
-      const data = (await res.json()) as StandingsResponse;
-      return { league, rows: extractRows(data) };
+      const rows = await fetchLeagueRows(league.code);
+      return { league, rows };
     })
   );
 
@@ -88,6 +95,13 @@ export default async function SoccerStandingsPage() {
                     <td className="px-3 py-2 text-black dark:text-white">{row.points}</td>
                   </tr>
                 ))}
+                {rows.length === 0 ? (
+                  <tr>
+                    <td className="px-3 py-4 text-sm text-zinc-500 dark:text-zinc-400" colSpan={8}>
+                      No data available.
+                    </td>
+                  </tr>
+                ) : null}
               </tbody>
             </table>
             <div className="border-t border-black/10 px-3 py-2 text-xs text-zinc-500 dark:border-white/10 dark:text-zinc-400">
