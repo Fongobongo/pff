@@ -49,6 +49,17 @@ const SORT_OPTIONS = [
   { key: "yards_l3", label: "L3 Yards" },
   { key: "ypt_l3", label: "Yards/Touch" },
   { key: "air_yards_l3", label: "L3 Air Yards" },
+  { key: "targets_delta", label: "Targets Δ" },
+  { key: "touches_delta", label: "Touches Δ" },
+  { key: "air_delta", label: "Air Δ" },
+  { key: "target_share", label: "Target Share" },
+  { key: "air_share", label: "Air Share" },
+  { key: "wopr", label: "WOPR" },
+  { key: "racr", label: "RACR" },
+  { key: "catch_rate", label: "Catch %" },
+  { key: "ypt", label: "Yards/Target" },
+  { key: "home_l3", label: "Home L3" },
+  { key: "away_l3", label: "Away L3" },
   { key: "home_avg", label: "Home FPPG" },
   { key: "away_avg", label: "Away FPPG" },
   { key: "home_vs_away", label: "Home vs Away" },
@@ -174,6 +185,15 @@ type TrendRow = {
   homeL3Avg?: number;
   awayL3Avg?: number;
   homeVsAway?: number;
+  l3TargetsDelta?: number;
+  l3TouchesDelta?: number;
+  l3AirYardsDelta?: number;
+  l3TargetShare?: number;
+  l3AirShare?: number;
+  l3Wopr?: number;
+  l3Racr?: number;
+  l3CatchRate?: number;
+  l3YardsPerTarget?: number;
   tpRateL3: number;
   trend?: number;
   oppDelta?: number;
@@ -267,6 +287,14 @@ export default async function NflTrendingPage({
     token_only?: string;
     home_away?: string;
     lookback?: string;
+    min_targets?: string;
+    min_touches?: string;
+    min_air?: string;
+    min_target_share?: string;
+    min_air_share?: string;
+    min_wopr?: string;
+    min_catch?: string;
+    min_ypt?: string;
   }>;
 }) {
   const params = await searchParams;
@@ -285,6 +313,14 @@ export default async function NflTrendingPage({
   const tokenOnly = params.token_only === "1";
   const homeAway = HOME_AWAY_OPTIONS.find((opt) => opt.key === params.home_away)?.key ?? "all";
   const lookback = parseNumber(params.lookback, DEFAULT_LOOKBACK_WEEKS, 1, 18);
+  const minTargets = parseNumber(params.min_targets, 0, 0, 50);
+  const minTouches = parseNumber(params.min_touches, 0, 0, 60);
+  const minAir = parseNumber(params.min_air, 0, 0, 300);
+  const minTargetShare = parseNumber(params.min_target_share, 0, 0, 100);
+  const minAirShare = parseNumber(params.min_air_share, 0, 0, 100);
+  const minWopr = parseNumber(params.min_wopr, 0, 0, 1);
+  const minCatch = parseNumber(params.min_catch, 0, 0, 100);
+  const minYpt = parseNumber(params.min_ypt, 0, 0, 50);
 
   const [snapshot, weeklyData, schedule] = await Promise.all([
     getSportfunMarketSnapshot({ sport: "nfl", windowHours: 24, trendDays: 30, maxTokens: 500 }),
@@ -476,6 +512,10 @@ export default async function NflTrendingPage({
     const l3RushYardsTotal = last3.reduce((acc, w) => acc + (w.usage?.rushingYards ?? 0), 0);
     const l3RecYardsTotal = last3.reduce((acc, w) => acc + (w.usage?.receivingYards ?? 0), 0);
     const l3AirYardsTotal = last3.reduce((acc, w) => acc + (w.usage?.airYards ?? 0), 0);
+    const l3TargetShareTotal = last3.reduce((acc, w) => acc + (w.usage?.targetShare ?? 0), 0);
+    const l3AirShareTotal = last3.reduce((acc, w) => acc + (w.usage?.airYardsShare ?? 0), 0);
+    const l3WoprTotal = last3.reduce((acc, w) => acc + (w.usage?.wopr ?? 0), 0);
+    const l3RacrTotal = last3.reduce((acc, w) => acc + (w.usage?.racr ?? 0), 0);
     const touchesTotal = l3CarriesTotal + l3ReceptionsTotal;
 
     entry.l3Targets = l3Count ? l3TargetsTotal / l3Count : 0;
@@ -484,6 +524,25 @@ export default async function NflTrendingPage({
     entry.l3Yards = l3Count ? (l3RushYardsTotal + l3RecYardsTotal) / l3Count : 0;
     entry.l3AirYards = l3Count ? l3AirYardsTotal / l3Count : 0;
     entry.l3YardsPerTouch = touchesTotal > 0 ? (l3RushYardsTotal + l3RecYardsTotal) / touchesTotal : undefined;
+    entry.l3TargetShare = l3Count ? l3TargetShareTotal / l3Count : undefined;
+    entry.l3AirShare = l3Count ? l3AirShareTotal / l3Count : undefined;
+    entry.l3Wopr = l3Count ? l3WoprTotal / l3Count : undefined;
+    entry.l3Racr = l3Count ? l3RacrTotal / l3Count : undefined;
+    entry.l3CatchRate = l3TargetsTotal > 0 ? l3ReceptionsTotal / l3TargetsTotal : undefined;
+    entry.l3YardsPerTarget = l3TargetsTotal > 0 ? l3RecYardsTotal / l3TargetsTotal : undefined;
+
+    const prevTargetsTotal = prev3.reduce((acc, w) => acc + (w.usage?.targets ?? 0), 0);
+    const prevCarriesTotal = prev3.reduce((acc, w) => acc + (w.usage?.carries ?? 0), 0);
+    const prevReceptionsTotal = prev3.reduce((acc, w) => acc + (w.usage?.receptions ?? 0), 0);
+    const prevAirYardsTotal = prev3.reduce((acc, w) => acc + (w.usage?.airYards ?? 0), 0);
+    const prevTouchesTotal = prevCarriesTotal + prevReceptionsTotal;
+    const prevCount = prev3.length;
+    const prevTargetsAvg = prevCount ? prevTargetsTotal / prevCount : 0;
+    const prevTouchesAvg = prevCount ? prevTouchesTotal / prevCount : 0;
+    const prevAirAvg = prevCount ? prevAirYardsTotal / prevCount : 0;
+    entry.l3TargetsDelta = entry.l3Targets - prevTargetsAvg;
+    entry.l3TouchesDelta = entry.l3Touches - prevTouchesAvg;
+    entry.l3AirYardsDelta = entry.l3AirYards - prevAirAvg;
 
     const pos = (entry.position ?? "UNK").toUpperCase();
     const threshold = TOP_THRESHOLDS[pos] ?? 24;
@@ -561,6 +620,38 @@ export default async function NflTrendingPage({
     filtered = filtered.filter((row) => row.tpRateL3 * 100 >= minTpRate);
   }
 
+  if (minTargets > 0) {
+    filtered = filtered.filter((row) => (row.l3Targets ?? 0) >= minTargets);
+  }
+
+  if (minTouches > 0) {
+    filtered = filtered.filter((row) => (row.l3Touches ?? 0) >= minTouches);
+  }
+
+  if (minAir > 0) {
+    filtered = filtered.filter((row) => (row.l3AirYards ?? 0) >= minAir);
+  }
+
+  if (minTargetShare > 0) {
+    filtered = filtered.filter((row) => (row.l3TargetShare ?? 0) * 100 >= minTargetShare);
+  }
+
+  if (minAirShare > 0) {
+    filtered = filtered.filter((row) => (row.l3AirShare ?? 0) * 100 >= minAirShare);
+  }
+
+  if (minWopr > 0) {
+    filtered = filtered.filter((row) => (row.l3Wopr ?? 0) >= minWopr);
+  }
+
+  if (minCatch > 0) {
+    filtered = filtered.filter((row) => (row.l3CatchRate ?? 0) * 100 >= minCatch);
+  }
+
+  if (minYpt > 0) {
+    filtered = filtered.filter((row) => (row.l3YardsPerTarget ?? 0) >= minYpt);
+  }
+
   const sorted = filtered.slice().sort((a, b) => {
     switch (sort) {
       case "trend":
@@ -585,6 +676,28 @@ export default async function NflTrendingPage({
         return (b.l3YardsPerTouch ?? -Infinity) - (a.l3YardsPerTouch ?? -Infinity);
       case "air_yards_l3":
         return (b.l3AirYards ?? 0) - (a.l3AirYards ?? 0);
+      case "targets_delta":
+        return (b.l3TargetsDelta ?? -Infinity) - (a.l3TargetsDelta ?? -Infinity);
+      case "touches_delta":
+        return (b.l3TouchesDelta ?? -Infinity) - (a.l3TouchesDelta ?? -Infinity);
+      case "air_delta":
+        return (b.l3AirYardsDelta ?? -Infinity) - (a.l3AirYardsDelta ?? -Infinity);
+      case "target_share":
+        return (b.l3TargetShare ?? -Infinity) - (a.l3TargetShare ?? -Infinity);
+      case "air_share":
+        return (b.l3AirShare ?? -Infinity) - (a.l3AirShare ?? -Infinity);
+      case "wopr":
+        return (b.l3Wopr ?? -Infinity) - (a.l3Wopr ?? -Infinity);
+      case "racr":
+        return (b.l3Racr ?? -Infinity) - (a.l3Racr ?? -Infinity);
+      case "catch_rate":
+        return (b.l3CatchRate ?? -Infinity) - (a.l3CatchRate ?? -Infinity);
+      case "ypt":
+        return (b.l3YardsPerTarget ?? -Infinity) - (a.l3YardsPerTarget ?? -Infinity);
+      case "home_l3":
+        return (b.homeL3Avg ?? -Infinity) - (a.homeL3Avg ?? -Infinity);
+      case "away_l3":
+        return (b.awayL3Avg ?? -Infinity) - (a.awayL3Avg ?? -Infinity);
       case "home_avg":
         return (b.homeAvg ?? -Infinity) - (a.homeAvg ?? -Infinity);
       case "away_avg":
@@ -793,6 +906,98 @@ export default async function NflTrendingPage({
             className="mt-1 block w-20 rounded-md border border-black/10 bg-white px-3 py-2 text-sm text-black placeholder:text-zinc-400 dark:border-white/10 dark:bg-white/5 dark:text-white"
           />
         </label>
+        <label className="text-xs text-zinc-600 dark:text-zinc-400">
+          Min targets
+          <input
+            type="number"
+            name="min_targets"
+            min={0}
+            step={0.1}
+            defaultValue={minTargets || ""}
+            className="mt-1 block w-24 rounded-md border border-black/10 bg-white px-3 py-2 text-sm text-black placeholder:text-zinc-400 dark:border-white/10 dark:bg-white/5 dark:text-white"
+          />
+        </label>
+        <label className="text-xs text-zinc-600 dark:text-zinc-400">
+          Min touches
+          <input
+            type="number"
+            name="min_touches"
+            min={0}
+            step={0.1}
+            defaultValue={minTouches || ""}
+            className="mt-1 block w-24 rounded-md border border-black/10 bg-white px-3 py-2 text-sm text-black placeholder:text-zinc-400 dark:border-white/10 dark:bg-white/5 dark:text-white"
+          />
+        </label>
+        <label className="text-xs text-zinc-600 dark:text-zinc-400">
+          Min air
+          <input
+            type="number"
+            name="min_air"
+            min={0}
+            step={1}
+            defaultValue={minAir || ""}
+            className="mt-1 block w-24 rounded-md border border-black/10 bg-white px-3 py-2 text-sm text-black placeholder:text-zinc-400 dark:border-white/10 dark:bg-white/5 dark:text-white"
+          />
+        </label>
+        <label className="text-xs text-zinc-600 dark:text-zinc-400">
+          Min tgt share
+          <input
+            type="number"
+            name="min_target_share"
+            min={0}
+            max={100}
+            step={1}
+            defaultValue={minTargetShare || ""}
+            className="mt-1 block w-20 rounded-md border border-black/10 bg-white px-3 py-2 text-sm text-black placeholder:text-zinc-400 dark:border-white/10 dark:bg-white/5 dark:text-white"
+          />
+        </label>
+        <label className="text-xs text-zinc-600 dark:text-zinc-400">
+          Min air share
+          <input
+            type="number"
+            name="min_air_share"
+            min={0}
+            max={100}
+            step={1}
+            defaultValue={minAirShare || ""}
+            className="mt-1 block w-20 rounded-md border border-black/10 bg-white px-3 py-2 text-sm text-black placeholder:text-zinc-400 dark:border-white/10 dark:bg-white/5 dark:text-white"
+          />
+        </label>
+        <label className="text-xs text-zinc-600 dark:text-zinc-400">
+          Min WOPR
+          <input
+            type="number"
+            name="min_wopr"
+            min={0}
+            max={1}
+            step={0.01}
+            defaultValue={minWopr || ""}
+            className="mt-1 block w-20 rounded-md border border-black/10 bg-white px-3 py-2 text-sm text-black placeholder:text-zinc-400 dark:border-white/10 dark:bg-white/5 dark:text-white"
+          />
+        </label>
+        <label className="text-xs text-zinc-600 dark:text-zinc-400">
+          Min catch%
+          <input
+            type="number"
+            name="min_catch"
+            min={0}
+            max={100}
+            step={1}
+            defaultValue={minCatch || ""}
+            className="mt-1 block w-20 rounded-md border border-black/10 bg-white px-3 py-2 text-sm text-black placeholder:text-zinc-400 dark:border-white/10 dark:bg-white/5 dark:text-white"
+          />
+        </label>
+        <label className="text-xs text-zinc-600 dark:text-zinc-400">
+          Min Y/Tgt
+          <input
+            type="number"
+            name="min_ypt"
+            min={0}
+            step={0.1}
+            defaultValue={minYpt || ""}
+            className="mt-1 block w-20 rounded-md border border-black/10 bg-white px-3 py-2 text-sm text-black placeholder:text-zinc-400 dark:border-white/10 dark:bg-white/5 dark:text-white"
+          />
+        </label>
         <label className="flex items-center gap-2 text-xs text-zinc-600 dark:text-zinc-400">
           <input
             type="checkbox"
@@ -856,7 +1061,7 @@ export default async function NflTrendingPage({
 
       <section className="mt-8">
         <div className="overflow-x-auto rounded-xl border border-black/10 bg-white dark:border-white/10 dark:bg-white/5">
-          <table className="w-full min-w-[1900px] text-left text-sm">
+          <table className="w-full min-w-[2400px] text-left text-sm">
             <thead className="bg-zinc-100 text-xs uppercase tracking-wide text-zinc-500 dark:bg-white/10 dark:text-zinc-400">
               <tr>
                 <th className="px-3 py-2">Player</th>
@@ -868,11 +1073,22 @@ export default async function NflTrendingPage({
                 <th className="px-3 py-2">Home FPPG</th>
                 <th className="px-3 py-2">Away FPPG</th>
                 <th className="px-3 py-2">L3 Avg</th>
+                <th className="px-3 py-2">Home L3</th>
+                <th className="px-3 py-2">Away L3</th>
                 <th className="px-3 py-2">L3 Targets</th>
                 <th className="px-3 py-2">L3 Touches</th>
                 <th className="px-3 py-2">L3 Yards</th>
                 <th className="px-3 py-2">Y/Tch</th>
                 <th className="px-3 py-2">L3 Air</th>
+                <th className="px-3 py-2">Tgt Δ</th>
+                <th className="px-3 py-2">Touch Δ</th>
+                <th className="px-3 py-2">Air Δ</th>
+                <th className="px-3 py-2">Tgt%</th>
+                <th className="px-3 py-2">Air%</th>
+                <th className="px-3 py-2">WOPR</th>
+                <th className="px-3 py-2">RACR</th>
+                <th className="px-3 py-2">Catch%</th>
+                <th className="px-3 py-2">Y/Tgt</th>
                 <th className="px-3 py-2">L3 Std</th>
                 <th className="px-3 py-2">L3 Floor</th>
                 <th className="px-3 py-2">L3 Ceiling</th>
@@ -909,6 +1125,12 @@ export default async function NflTrendingPage({
                     </td>
                     <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{formatNumber(row.l3Avg)}</td>
                     <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
+                      {row.homeL3Avg !== undefined ? formatNumber(row.homeL3Avg) : "—"}
+                    </td>
+                    <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
+                      {row.awayL3Avg !== undefined ? formatNumber(row.awayL3Avg) : "—"}
+                    </td>
+                    <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
                       {row.l3Targets !== undefined ? formatNumber(row.l3Targets) : "—"}
                     </td>
                     <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
@@ -922,6 +1144,33 @@ export default async function NflTrendingPage({
                     </td>
                     <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
                       {row.l3AirYards !== undefined ? formatNumber(row.l3AirYards) : "—"}
+                    </td>
+                    <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
+                      {row.l3TargetsDelta !== undefined ? formatNumber(row.l3TargetsDelta) : "—"}
+                    </td>
+                    <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
+                      {row.l3TouchesDelta !== undefined ? formatNumber(row.l3TouchesDelta) : "—"}
+                    </td>
+                    <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
+                      {row.l3AirYardsDelta !== undefined ? formatNumber(row.l3AirYardsDelta) : "—"}
+                    </td>
+                    <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
+                      {row.l3TargetShare !== undefined ? formatPercent(row.l3TargetShare * 100) : "—"}
+                    </td>
+                    <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
+                      {row.l3AirShare !== undefined ? formatPercent(row.l3AirShare * 100) : "—"}
+                    </td>
+                    <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
+                      {row.l3Wopr !== undefined ? formatNumber(row.l3Wopr) : "—"}
+                    </td>
+                    <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
+                      {row.l3Racr !== undefined ? formatNumber(row.l3Racr) : "—"}
+                    </td>
+                    <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
+                      {row.l3CatchRate !== undefined ? formatPercent(row.l3CatchRate * 100) : "—"}
+                    </td>
+                    <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
+                      {row.l3YardsPerTarget !== undefined ? formatNumber(row.l3YardsPerTarget) : "—"}
                     </td>
                     <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
                       {row.l3StdDev !== undefined ? formatNumber(row.l3StdDev) : "—"}
@@ -968,7 +1217,7 @@ export default async function NflTrendingPage({
               })}
               {sorted.length === 0 ? (
                 <tr>
-                  <td className="px-3 py-4 text-zinc-600 dark:text-zinc-400" colSpan={26}>
+                  <td className="px-3 py-4 text-zinc-600 dark:text-zinc-400" colSpan={37}>
                     No players match the filters.
                   </td>
                 </tr>
@@ -982,7 +1231,7 @@ export default async function NflTrendingPage({
         <p>
           L3 Avg Rank follows the selected rank mode. TP Rate L3 counts top‑finish weeks vs positional thresholds. Opp Rank
           is relative to position over the last {OPP_WINDOW_WEEKS} weeks. Prices come from Sport.fun tokens when a name
-          match exists.
+          match exists. Target/Air share and WOPR come from nflverse weekly stats.
         </p>
       </section>
     </NflPageShell>

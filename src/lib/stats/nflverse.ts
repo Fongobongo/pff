@@ -54,6 +54,14 @@ export type NflWeeklyRow = {
     receivingYards?: number;
     passingYards?: number;
     airYards?: number;
+    targetShare?: number;
+    airYardsShare?: number;
+    wopr?: number;
+    racr?: number;
+    pacr?: number;
+    receivingEpa?: number;
+    rushingEpa?: number;
+    passingEpa?: number;
     fantasyPoints?: number;
     fantasyPointsPpr?: number;
   };
@@ -300,6 +308,14 @@ export async function fetchNflWeeklyStats(options: {
         receivingYards: toNumber(rowObj.receiving_yards),
         passingYards: toNumber(rowObj.passing_yards),
         airYards: toNumber(rowObj.receiving_air_yards),
+        targetShare: toNumber(rowObj.target_share),
+        airYardsShare: toNumber(rowObj.air_yards_share),
+        wopr: toNumber(rowObj.wopr),
+        racr: toNumber(rowObj.racr),
+        pacr: toNumber(rowObj.pacr),
+        receivingEpa: toNumber(rowObj.receiving_epa),
+        rushingEpa: toNumber(rowObj.rushing_epa),
+        passingEpa: toNumber(rowObj.passing_epa),
         fantasyPoints: toNumber(rowObj.fantasy_points),
         fantasyPointsPpr: toNumber(rowObj.fantasy_points_ppr),
       },
