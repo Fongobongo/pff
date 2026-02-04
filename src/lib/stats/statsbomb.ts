@@ -139,6 +139,8 @@ export type StatsBombPlayerStats = {
   minutesPlayed: number;
   matchResult?: FootballMatchResult;
   stats: FootballNormalizedStats;
+  xg?: number;
+  xa?: number;
 };
 
 export type StatsBombMatchStats = {
@@ -326,6 +328,8 @@ function ensureStats(
     position: "MID",
     minutesPlayed: 0,
     stats: {},
+    xg: 0,
+    xa: 0,
   };
 
   map.set(playerId, stats);
@@ -477,6 +481,9 @@ export async function buildStatsBombMatchStats(options: {
       if (outcomeText === "Blocked") addStat(player, "shots_blocked_by_opponent", 1);
 
       const xg = toFiniteNumber(event.shot?.statsbomb_xg);
+      if (xg > 0) {
+        player.xg = (player.xg ?? 0) + xg;
+      }
       if (xg >= BIG_CHANCE_XG_THRESHOLD && outcomeText !== "Goal") {
         addStat(player, "big_chances_missed", 1);
       }
@@ -534,6 +541,9 @@ export async function buildStatsBombMatchStats(options: {
       if (assistedShotId) {
         const shot = shotsById.get(assistedShotId);
         const xg = toFiniteNumber(shot?.shot?.statsbomb_xg);
+        if (xg > 0) {
+          player.xa = (player.xa ?? 0) + xg;
+        }
         if (xg >= BIG_CHANCE_XG_THRESHOLD) {
           addStat(player, "big_chances_created", 1);
         }

@@ -5,6 +5,7 @@ import { alchemyRpc } from "@/lib/alchemy";
 import { getSportfunNameOverride, getSportfunSportLabel, type SportfunSport } from "@/lib/sportfunNames";
 import {
   BASE_USDC_DECIMALS,
+  DEVPLAYERS_EVENTS_ABI,
   FDFPAIR_EVENTS_ABI,
   FDFPAIR_READ_ABI,
   SPORTFUN_PLAYER_TOKENS,
@@ -24,6 +25,8 @@ export type SportfunMarketToken = {
   tokenIdDec: string;
   name?: string;
   image?: string;
+  description?: string;
+  attributes?: unknown;
   currentPriceUsdcRaw?: string;
   price24hAgoUsdcRaw?: string;
   priceChangeUsdcRaw?: string;
@@ -301,6 +304,26 @@ function decodeTradeLog(log: RpcLog): Array<{ tokenIdDec: string; priceRaw?: big
   return items.filter((item) => item.tokenIdDec);
 }
 
+function decodePromotionLog(log: RpcLog): string[] {
+  if (!log.topics?.length) return [];
+  const topic0 = String(log.topics[0]).toLowerCase();
+  if (topic0 !== SPORTFUN_TOPICS.PlayerSharesPromoted) return [];
+
+  try {
+    const decoded = decodeEventLog({
+      abi: DEVPLAYERS_EVENTS_ABI,
+      data: log.data,
+      topics: log.topics as [Hex, ...Hex[]],
+    });
+
+    if (!decoded.args || decoded.eventName !== "PlayerSharesPromoted") return [];
+    const ids = decoded.args.playerTokenIds as readonly bigint[];
+    return ids.map((id) => id.toString(10));
+  } catch {
+    return [];
+  }
+}
+
 function getSportContracts(sport: SportfunMarketSport) {
   const contracts = SPORTFUN_PLAYER_TOKENS.filter(
     (item) => getSportfunSportLabel(item.playerToken) === sport
@@ -428,6 +451,7 @@ async function getErc1155Metadata(params: { contractAddress: string; tokenId: bi
             : typeof obj.image === "string"
               ? obj.image
               : undefined,
+        attributes: obj.attributes,
       };
     } catch {
       return null;
@@ -508,7 +532,24 @@ async function getTokenUniverse(sport: SportfunMarketSport, days: number): Promi
   const fromTs = Date.now() - days * 24 * 60 * 60 * 1000;
   const fromBlock = await findBlockByTimestamp(fromTs);
   const events = await getTradeEvents({ sport, fromBlock, toBlock: latest });
-  const tokenIds = Array.from(new Set(events.map((e) => e.tokenIdDec))).sort((a, b) => Number(a) - Number(b));
+  const tradeTokenIds = events.map((e) => e.tokenIdDec);
+
+  const contracts = getSportContracts(sport);
+  const devPlayers = contracts.map((c) => c.developmentPlayers?.toLowerCase()).filter(Boolean) as string[];
+  let promoTokenIds: string[] = [];
+  if (devPlayers.length) {
+    const promoLogs = await fetchLogs({
+      addresses: devPlayers,
+      topic0: SPORTFUN_TOPICS.PlayerSharesPromoted,
+      fromBlock,
+      toBlock: latest,
+    });
+    promoTokenIds = promoLogs.flatMap(decodePromotionLog);
+  }
+
+  const tokenSet = new Set<string>([...(cache?.tokenIds ?? []), ...tradeTokenIds, ...promoTokenIds]);
+  const tokenIds = Array.from(tokenSet).sort((a, b) => Number(a) - Number(b));
+  if (!tokenIds.length && cache?.tokenIds?.length) return cache.tokenIds;
   writeTokenCache(sport, tokenIds);
   return tokenIds;
 }
@@ -595,112 +636,138 @@ export async function getSportfunMarketSnapshot(params: {
   windowHours?: number;
   trendDays?: number;
   maxTokens?: number;
+  metadataLimit?: number;
 }): Promise<SportfunMarketSnapshot> {
   const windowHours = params.windowHours ?? DEFAULT_WINDOW_HOURS;
   const trendDays = params.trendDays ?? DEFAULT_TREND_DAYS;
   const maxTokens = params.maxTokens ?? 250;
+  const metadataLimit = params.metadataLimit ?? 500;
 
   const cacheKey = `sportfun:market:${params.sport}:${windowHours}:${trendDays}:${maxTokens}`;
   return withCache(cacheKey, 120, async () => {
-    const latest = await getLatestBlock();
     const now = Date.now();
-    const windowStart = now - windowHours * 60 * 60 * 1000;
-    const trendStart = now - trendDays * 24 * 60 * 60 * 1000;
-    const trendFromBlock = await findBlockByTimestamp(trendStart);
+    try {
+      const latest = await getLatestBlock();
+      const windowStart = now - windowHours * 60 * 60 * 1000;
+      const trendStart = now - trendDays * 24 * 60 * 60 * 1000;
+      const trendFromBlock = await findBlockByTimestamp(trendStart);
 
-    const events = await getTradeEvents({ sport: params.sport, fromBlock: trendFromBlock, toBlock: latest });
-    const tokenAgg = normalizeTokenAgg(events, windowStart);
+      const events = await getTradeEvents({ sport: params.sport, fromBlock: trendFromBlock, toBlock: latest });
+      const tokenAgg = normalizeTokenAgg(events, windowStart);
 
-    const tokenIds = await getTokenUniverse(params.sport, TOKEN_UNIVERSE_DAYS);
-    const tokenIdBigInts = tokenIds.map((id) => BigInt(id));
+      const tokenIds = await getTokenUniverse(params.sport, TOKEN_UNIVERSE_DAYS);
+      const tokenIdBigInts = tokenIds.map((id) => BigInt(id));
 
-    const contracts = getSportContracts(params.sport);
-    const fdfPair = contracts[0].fdfPair;
-    const priceMap = await fetchCurrentPrices({ fdfPair, tokenIds: tokenIdBigInts });
+      const contracts = getSportContracts(params.sport);
+      const fdfPair = contracts[0].fdfPair;
+      const priceMap = await fetchCurrentPrices({ fdfPair, tokenIds: tokenIdBigInts });
 
-    const tokens = tokenIds
-      .map((tokenIdDec) => {
-        const agg = tokenAgg.get(tokenIdDec);
-        const currentPrice = priceMap.get(tokenIdDec);
-        const firstPrice = agg?.firstPrice;
-        const lastPrice = agg?.lastPrice;
-        const priceChange =
-          currentPrice !== undefined && firstPrice !== undefined
-            ? currentPrice - firstPrice
-            : lastPrice !== undefined && firstPrice !== undefined
-              ? lastPrice - firstPrice
+      const tokens = tokenIds
+        .map((tokenIdDec) => {
+          const agg = tokenAgg.get(tokenIdDec);
+          const currentPrice = priceMap.get(tokenIdDec);
+          const firstPrice = agg?.firstPrice;
+          const lastPrice = agg?.lastPrice;
+          const priceChange =
+            currentPrice !== undefined && firstPrice !== undefined
+              ? currentPrice - firstPrice
+              : lastPrice !== undefined && firstPrice !== undefined
+                ? lastPrice - firstPrice
+                : undefined;
+          const priceChangePct =
+            firstPrice && priceChange !== undefined
+              ? Number(priceChange) / Number(firstPrice)
               : undefined;
-        const priceChangePct =
-          firstPrice && priceChange !== undefined
-            ? Number(priceChange) / Number(firstPrice)
-            : undefined;
-        return {
-          tokenIdDec,
-          currentPriceUsdcRaw: currentPrice?.toString(10),
-          price24hAgoUsdcRaw: firstPrice?.toString(10),
-          priceChangeUsdcRaw: priceChange?.toString(10),
-          priceChange24hPercent: priceChangePct !== undefined ? priceChangePct * 100 : undefined,
-          volume24hSharesRaw: agg ? agg.volumeSharesRaw.toString(10) : "0",
-          trades24h: agg ? agg.trades : 0,
-          lastTradeAt: agg?.lastTs ? new Date(agg.lastTs).toISOString() : undefined,
-        } as SportfunMarketToken;
-      })
-      .sort((a, b) => {
-        const aPrice = BigInt(a.currentPriceUsdcRaw ?? "0");
-        const bPrice = BigInt(b.currentPriceUsdcRaw ?? "0");
-        if (aPrice === bPrice) return a.tokenIdDec.localeCompare(b.tokenIdDec);
-        return bPrice > aPrice ? 1 : -1;
+          return {
+            tokenIdDec,
+            currentPriceUsdcRaw: currentPrice?.toString(10),
+            price24hAgoUsdcRaw: firstPrice?.toString(10),
+            priceChangeUsdcRaw: priceChange?.toString(10),
+            priceChange24hPercent: priceChangePct !== undefined ? priceChangePct * 100 : undefined,
+            volume24hSharesRaw: agg ? agg.volumeSharesRaw.toString(10) : "0",
+            trades24h: agg ? agg.trades : 0,
+            lastTradeAt: agg?.lastTs ? new Date(agg.lastTs).toISOString() : undefined,
+          } as SportfunMarketToken;
+        })
+        .sort((a, b) => {
+          const aPrice = BigInt(a.currentPriceUsdcRaw ?? "0");
+          const bPrice = BigInt(b.currentPriceUsdcRaw ?? "0");
+          if (aPrice === bPrice) return a.tokenIdDec.localeCompare(b.tokenIdDec);
+          return bPrice > aPrice ? 1 : -1;
+        });
+
+      const metadataTargets = tokens.slice(0, Math.min(tokens.length, metadataLimit)).map((t) => t.tokenIdDec);
+      const meta = await mapLimit(metadataTargets, 6, async (tokenIdDec) => {
+        const tokenId = BigInt(tokenIdDec);
+        const contractAddress = contracts[0].playerToken;
+        const metadata = await getErc1155Metadata({ contractAddress, tokenId });
+        return { tokenIdDec, metadata };
       });
 
-    const metadataTargets = tokens.slice(0, maxTokens).map((t) => t.tokenIdDec);
-    const meta = await mapLimit(metadataTargets, 6, async (tokenIdDec) => {
-      const tokenId = BigInt(tokenIdDec);
-      const contractAddress = contracts[0].playerToken;
-      const metadata = await getErc1155Metadata({ contractAddress, tokenId });
-      return { tokenIdDec, metadata };
-    });
+      const metaByToken = new Map(meta.map((m) => [m.tokenIdDec, m.metadata]));
 
-    const metaByToken = new Map(meta.map((m) => [m.tokenIdDec, m.metadata]));
+      const decoratedTokens = tokens.map((token) => {
+        const metaEntry = metaByToken.get(token.tokenIdDec);
+        const override = getSportfunNameOverride(contracts[0].playerToken, token.tokenIdDec);
+        return {
+          ...token,
+          name: override ?? metaEntry?.name ?? undefined,
+          image: metaEntry?.image ?? undefined,
+          description: metaEntry?.description ?? undefined,
+          attributes: metaEntry?.attributes,
+        };
+      });
 
-    const decoratedTokens = tokens.map((token) => {
-      const metaEntry = metaByToken.get(token.tokenIdDec);
-      const override = getSportfunNameOverride(contracts[0].playerToken, token.tokenIdDec);
-      return {
-        ...token,
-        name: override ?? metaEntry?.name ?? undefined,
-        image: metaEntry?.image ?? undefined,
+      const prices = tokens
+        .map((t) => (t.currentPriceUsdcRaw ? BigInt(t.currentPriceUsdcRaw) : null))
+        .filter((v): v is bigint => v !== null)
+        .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+
+      const summary: SportfunMarketSummary = {
+        totalTokens: tokens.length,
+        activeTokens24h: tokenAgg.size,
+        trades24h: Array.from(tokenAgg.values()).reduce((acc, item) => acc + item.trades, 0),
+        volume24hSharesRaw: sumBigInt(Array.from(tokenAgg.values()).map((item) => item.volumeSharesRaw)).toString(10),
+        priceAvgUsdcRaw: prices.length ? (sumBigInt(prices) / BigInt(prices.length)).toString(10) : undefined,
+        priceMedianUsdcRaw: percentile(prices, 0.5)?.toString(10),
+        priceMinUsdcRaw: prices[0]?.toString(10),
+        priceMaxUsdcRaw: prices[prices.length - 1]?.toString(10),
       };
-    });
 
-    const prices = tokens
-      .map((t) => (t.currentPriceUsdcRaw ? BigInt(t.currentPriceUsdcRaw) : null))
-      .filter((v): v is bigint => v !== null)
-      .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+      const distribution = buildDistribution(prices);
+      const trend = buildTrend(events, trendStart);
 
-    const summary: SportfunMarketSummary = {
-      totalTokens: tokens.length,
-      activeTokens24h: tokenAgg.size,
-      trades24h: Array.from(tokenAgg.values()).reduce((acc, item) => acc + item.trades, 0),
-      volume24hSharesRaw: sumBigInt(Array.from(tokenAgg.values()).map((item) => item.volumeSharesRaw)).toString(10),
-      priceAvgUsdcRaw: prices.length ? (sumBigInt(prices) / BigInt(prices.length)).toString(10) : undefined,
-      priceMedianUsdcRaw: percentile(prices, 0.5)?.toString(10),
-      priceMinUsdcRaw: prices[0]?.toString(10),
-      priceMaxUsdcRaw: prices[prices.length - 1]?.toString(10),
-    };
-
-    const distribution = buildDistribution(prices);
-    const trend = buildTrend(events, trendStart);
-
-    return {
-      sport: params.sport,
-      asOf: new Date(now).toISOString(),
-      windowHours,
-      trendDays,
-      tokens: decoratedTokens,
-      summary,
-      trend,
-      distribution,
-    };
+      return {
+        sport: params.sport,
+        asOf: new Date(now).toISOString(),
+        windowHours,
+        trendDays,
+        tokens: decoratedTokens,
+        summary,
+        trend,
+        distribution,
+      };
+    } catch {
+      return {
+        sport: params.sport,
+        asOf: new Date(now).toISOString(),
+        windowHours,
+        trendDays,
+        tokens: [],
+        summary: {
+          totalTokens: 0,
+          activeTokens24h: 0,
+          trades24h: 0,
+          volume24hSharesRaw: "0",
+          priceAvgUsdcRaw: undefined,
+          priceMedianUsdcRaw: undefined,
+          priceMinUsdcRaw: undefined,
+          priceMaxUsdcRaw: undefined,
+        },
+        trend: [],
+        distribution: buildDistribution([]),
+      };
+    }
   });
 }
 

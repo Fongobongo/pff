@@ -7,6 +7,8 @@ import {
   getFunTokenSnapshot,
 } from "@/lib/funToken";
 
+export const dynamic = "force-dynamic";
+
 function formatPercent(value?: number): string {
   if (value === undefined || Number.isNaN(value)) return "—";
   const sign = value >= 0 ? "+" : "";

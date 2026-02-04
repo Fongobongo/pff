@@ -197,108 +197,136 @@ function computePrice(params: { reserveFun: bigint; reserveUsdc: bigint; funDeci
 
 export async function getFunTokenSnapshot(): Promise<FunTokenSnapshot> {
   return withCache("fun:token:snapshot", 120, async () => {
-    const token0 = (await ethCall(FUN_PAIR_ADDRESS, PAIR_ABI, "token0")) as string;
-
-    const [reserve0, reserve1] = (await ethCall(FUN_PAIR_ADDRESS, PAIR_ABI, "getReserves")) as [bigint, bigint];
-
-    const token0Lc = token0.toLowerCase();
-    const funLc = FUN_TOKEN_ADDRESS.toLowerCase();
-    const usdcLc = BASE_USDC.toLowerCase();
-
-    const funIsToken0 = token0Lc === funLc;
-    const usdcIsToken0 = token0Lc === usdcLc;
-
-    const funDecimals = Number(await ethCall(FUN_TOKEN_ADDRESS, ERC20_ABI, "decimals"));
-    const totalSupply = (await ethCall(FUN_TOKEN_ADDRESS, ERC20_ABI, "totalSupply")) as bigint;
-
-    const reserveFun = funIsToken0 ? reserve0 : reserve1;
-    const reserveUsdc = usdcIsToken0 ? reserve0 : reserve1;
-
-    const priceUsdcRaw = computePrice({ reserveFun, reserveUsdc, funDecimals });
-
-    const liquidityUsdcRaw = reserveUsdc * 2n;
-    const marketCapUsdcRaw = priceUsdcRaw ? (priceUsdcRaw * totalSupply) / 10n ** BigInt(funDecimals) : undefined;
-
     const now = Date.now();
-    const windowStart = now - 24 * 60 * 60 * 1000;
-    const fromBlock = await findBlockByTimestamp(windowStart);
-    const toBlock = await getLatestBlock();
 
-    const [swapLogs, syncLogs] = await Promise.all([
-      fetchLogs({ address: FUN_PAIR_ADDRESS, topic0: SWAP_TOPIC, fromBlock, toBlock }),
-      fetchLogs({ address: FUN_PAIR_ADDRESS, topic0: SYNC_TOPIC, fromBlock, toBlock }),
-    ]);
+    try {
+      const token0 = (await ethCall(FUN_PAIR_ADDRESS, PAIR_ABI, "token0")) as string;
 
-    let volumeUsdc = 0n;
-    for (const log of swapLogs) {
-      try {
-        const decoded = decodeEventLog({
-          abi: SWAP_EVENT_ABI,
-          data: log.data,
-          topics: log.topics as [Hex, ...Hex[]],
-        });
-        const amount0In = decoded.args?.amount0In as bigint;
-        const amount0Out = decoded.args?.amount0Out as bigint;
-        const amount1In = decoded.args?.amount1In as bigint;
-        const amount1Out = decoded.args?.amount1Out as bigint;
+      const [reserve0, reserve1] = (await ethCall(FUN_PAIR_ADDRESS, PAIR_ABI, "getReserves")) as [
+        bigint,
+        bigint,
+      ];
 
-        if (usdcIsToken0) {
-          volumeUsdc += (amount0In ?? 0n) + (amount0Out ?? 0n);
-        } else {
-          volumeUsdc += (amount1In ?? 0n) + (amount1Out ?? 0n);
+      const token0Lc = token0.toLowerCase();
+      const funLc = FUN_TOKEN_ADDRESS.toLowerCase();
+      const usdcLc = BASE_USDC.toLowerCase();
+
+      const funIsToken0 = token0Lc === funLc;
+      const usdcIsToken0 = token0Lc === usdcLc;
+
+      const funDecimals = Number(await ethCall(FUN_TOKEN_ADDRESS, ERC20_ABI, "decimals"));
+      const totalSupply = (await ethCall(FUN_TOKEN_ADDRESS, ERC20_ABI, "totalSupply")) as bigint;
+
+      const reserveFun = funIsToken0 ? reserve0 : reserve1;
+      const reserveUsdc = usdcIsToken0 ? reserve0 : reserve1;
+
+      const priceUsdcRaw = computePrice({ reserveFun, reserveUsdc, funDecimals });
+
+      const liquidityUsdcRaw = reserveUsdc * 2n;
+      const marketCapUsdcRaw = priceUsdcRaw ? (priceUsdcRaw * totalSupply) / 10n ** BigInt(funDecimals) : undefined;
+
+      const windowStart = now - 24 * 60 * 60 * 1000;
+      const fromBlock = await findBlockByTimestamp(windowStart);
+      const toBlock = await getLatestBlock();
+
+      const [swapLogs, syncLogs] = await Promise.all([
+        fetchLogs({ address: FUN_PAIR_ADDRESS, topic0: SWAP_TOPIC, fromBlock, toBlock }),
+        fetchLogs({ address: FUN_PAIR_ADDRESS, topic0: SYNC_TOPIC, fromBlock, toBlock }),
+      ]);
+
+      let volumeUsdc = 0n;
+      for (const log of swapLogs) {
+        try {
+          const decoded = decodeEventLog({
+            abi: SWAP_EVENT_ABI,
+            data: log.data,
+            topics: log.topics as [Hex, ...Hex[]],
+          });
+          const args = decoded.args as
+            | {
+                amount0In: bigint;
+                amount0Out: bigint;
+                amount1In: bigint;
+                amount1Out: bigint;
+              }
+            | undefined;
+          if (!args) continue;
+          const { amount0In, amount0Out, amount1In, amount1Out } = args;
+
+          if (usdcIsToken0) {
+            volumeUsdc += (amount0In ?? 0n) + (amount0Out ?? 0n);
+          } else {
+            volumeUsdc += (amount1In ?? 0n) + (amount1Out ?? 0n);
+          }
+        } catch {
+          // ignore decode errors
         }
-      } catch {
-        // ignore decode errors
       }
-    }
 
-    let priceStart: bigint | undefined;
-    let priceEnd: bigint | undefined;
-    if (syncLogs.length) {
-      const first = syncLogs[0];
-      const last = syncLogs[syncLogs.length - 1];
-      try {
-        const decodedFirst = decodeEventLog({
-          abi: SYNC_EVENT_ABI,
-          data: first.data,
-          topics: first.topics as [Hex, ...Hex[]],
-        });
-        const decodedLast = decodeEventLog({
-          abi: SYNC_EVENT_ABI,
-          data: last.data,
-          topics: last.topics as [Hex, ...Hex[]],
-        });
-        const r0First = decodedFirst.args?.reserve0 as bigint;
-        const r1First = decodedFirst.args?.reserve1 as bigint;
-        const r0Last = decodedLast.args?.reserve0 as bigint;
-        const r1Last = decodedLast.args?.reserve1 as bigint;
-        const funReserveFirst = funIsToken0 ? r0First : r1First;
-        const usdcReserveFirst = usdcIsToken0 ? r0First : r1First;
-        const funReserveLast = funIsToken0 ? r0Last : r1Last;
-        const usdcReserveLast = usdcIsToken0 ? r0Last : r1Last;
-        priceStart = computePrice({ reserveFun: funReserveFirst, reserveUsdc: usdcReserveFirst, funDecimals });
-        priceEnd = computePrice({ reserveFun: funReserveLast, reserveUsdc: usdcReserveLast, funDecimals });
-      } catch {
-        // ignore
+      let priceStart: bigint | undefined;
+      let priceEnd: bigint | undefined;
+      if (syncLogs.length) {
+        const first = syncLogs[0];
+        const last = syncLogs[syncLogs.length - 1];
+        try {
+          const decodedFirst = decodeEventLog({
+            abi: SYNC_EVENT_ABI,
+            data: first.data,
+            topics: first.topics as [Hex, ...Hex[]],
+          });
+          const decodedLast = decodeEventLog({
+            abi: SYNC_EVENT_ABI,
+            data: last.data,
+            topics: last.topics as [Hex, ...Hex[]],
+          });
+          const firstArgs = decodedFirst.args as { reserve0: bigint; reserve1: bigint } | undefined;
+          const lastArgs = decodedLast.args as { reserve0: bigint; reserve1: bigint } | undefined;
+          if (firstArgs && lastArgs) {
+            const r0First = firstArgs.reserve0;
+            const r1First = firstArgs.reserve1;
+            const r0Last = lastArgs.reserve0;
+            const r1Last = lastArgs.reserve1;
+            const funReserveFirst = funIsToken0 ? r0First : r1First;
+            const usdcReserveFirst = usdcIsToken0 ? r0First : r1First;
+            const funReserveLast = funIsToken0 ? r0Last : r1Last;
+            const usdcReserveLast = usdcIsToken0 ? r0Last : r1Last;
+            priceStart = computePrice({ reserveFun: funReserveFirst, reserveUsdc: usdcReserveFirst, funDecimals });
+            priceEnd = computePrice({ reserveFun: funReserveLast, reserveUsdc: usdcReserveLast, funDecimals });
+          }
+        } catch {
+          // ignore
+        }
       }
+
+      const priceChange24hPercent =
+        priceStart && priceEnd
+          ? (Number(priceEnd - priceStart) / Number(priceStart)) * 100
+          : undefined;
+
+      return {
+        asOf: new Date(now).toISOString(),
+        token: FUN_TOKEN_ADDRESS,
+        pair: FUN_PAIR_ADDRESS,
+        priceUsdcRaw: priceUsdcRaw?.toString(10),
+        priceChange24hPercent,
+        volume24hUsdcRaw: volumeUsdc.toString(10),
+        liquidityUsdcRaw: liquidityUsdcRaw.toString(10),
+        marketCapUsdcRaw: marketCapUsdcRaw?.toString(10),
+        fdvUsdcRaw: marketCapUsdcRaw?.toString(10),
+      };
+    } catch {
+      return {
+        asOf: new Date(now).toISOString(),
+        token: FUN_TOKEN_ADDRESS,
+        pair: FUN_PAIR_ADDRESS,
+        priceUsdcRaw: undefined,
+        priceChange24hPercent: undefined,
+        volume24hUsdcRaw: "0",
+        liquidityUsdcRaw: "0",
+        marketCapUsdcRaw: undefined,
+        fdvUsdcRaw: undefined,
+      };
     }
-
-    const priceChange24hPercent =
-      priceStart && priceEnd
-        ? (Number(priceEnd - priceStart) / Number(priceStart)) * 100
-        : undefined;
-
-    return {
-      asOf: new Date(now).toISOString(),
-      token: FUN_TOKEN_ADDRESS,
-      pair: FUN_PAIR_ADDRESS,
-      priceUsdcRaw: priceUsdcRaw?.toString(10),
-      priceChange24hPercent,
-      volume24hUsdcRaw: volumeUsdc.toString(10),
-      liquidityUsdcRaw: liquidityUsdcRaw.toString(10),
-      marketCapUsdcRaw: marketCapUsdcRaw?.toString(10),
-      fdvUsdcRaw: marketCapUsdcRaw?.toString(10),
-    };
   });
 }
 
