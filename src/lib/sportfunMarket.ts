@@ -662,7 +662,7 @@ export async function getSportfunMarketSnapshot(params: {
 
     const metaByToken = new Map(meta.map((m) => [m.tokenIdDec, m.metadata]));
 
-    const decoratedTokens = tokens.slice(0, maxTokens).map((token) => {
+    const decoratedTokens = tokens.map((token) => {
       const metaEntry = metaByToken.get(token.tokenIdDec);
       const override = getSportfunNameOverride(contracts[0].playerToken, token.tokenIdDec);
       return {
