@@ -6,6 +6,7 @@ import crypto from "node:crypto";
 import { alchemyRpc } from "@/lib/alchemy";
 import { shortenAddress } from "@/lib/format";
 import { withCache } from "@/lib/stats/cache";
+import { kvEnabled, kvGetJson, kvSetRaw } from "@/lib/kv";
 import {
   decodeAbiParameters,
   decodeEventLog,
@@ -958,6 +959,29 @@ export async function GET(request: Request, context: { params: Promise<{ address
   const maxActivity = Math.max(1, Math.min(maxActivityCeil, q.maxActivity ? Number(q.maxActivity) : scanMode === "full" ? 5000 : 100));
   const activityCursor = q.activityCursor ? Number(q.activityCursor) : 0;
 
+  const cacheKeyRaw = [
+    "sportfun:portfolio",
+    walletLc,
+    scanMode,
+    maxPages,
+    maxActivity,
+    includeTrades ? "1" : "0",
+    includePrices ? "1" : "0",
+    includeMetadata ? "1" : "0",
+    includeUri ? "1" : "0",
+    metadataLimit ?? "",
+    scanStartBlock,
+    activityCursor,
+  ].join(":");
+  const cacheKey = `sportfun:portfolio:${sha1Hex(cacheKeyRaw)}`;
+  const cacheTtl = scanMode === "full" ? 900 : 300;
+  if (kvEnabled()) {
+    const cached = await kvGetJson<unknown>(cacheKey);
+    if (cached) {
+      return NextResponse.json(cached);
+    }
+  }
+
   // Best-effort deadline (helps avoid serverless timeouts).
 
   const [erc1155IncomingRes, erc1155OutgoingRes] = await Promise.all([
@@ -1813,7 +1837,7 @@ export async function GET(request: Request, context: { params: Promise<{ address
       return bv > av ? 1 : -1;
     });
 
-  return NextResponse.json({
+  const payload = {
     chain: "base",
     protocol: "sportfun",
     address: wallet,
@@ -1899,5 +1923,18 @@ export async function GET(request: Request, context: { params: Promise<{ address
       })),
       shareDeltaMismatchSamples,
     },
-  });
+  };
+
+  if (kvEnabled()) {
+    try {
+      const raw = JSON.stringify(payload);
+      if (raw.length < 900_000) {
+        await kvSetRaw(cacheKey, raw, cacheTtl);
+      }
+    } catch {
+      // ignore cache failures
+    }
+  }
+
+  return NextResponse.json(payload);
 }
