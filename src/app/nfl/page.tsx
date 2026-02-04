@@ -148,6 +148,7 @@ export default async function NflMarketPage({
     price_position?: string;
     price_team?: string;
     price_page?: string;
+    price_q?: string;
   }>;
 }) {
   const params = await searchParams;
@@ -159,6 +160,7 @@ export default async function NflMarketPage({
   const pricePositionFilter = pricePositionParam && pricePositionParam !== "ALL" ? pricePositionParam : undefined;
   const priceTeamFilter = priceTeamParam && priceTeamParam !== "ALL" ? priceTeamParam : undefined;
   const pricePageParam = parseNumber(params.price_page, 1, 1, 200);
+  const priceQuery = params.price_q?.trim().toLowerCase() ?? "";
 
   const snapshot = await getSportfunMarketSnapshot({
     sport: "nfl",
@@ -296,6 +298,10 @@ export default async function NflMarketPage({
     const team = row.team ?? (row.attributes ? extractTeam(row.attributes) : null);
     if (pricePositionFilter && (position ?? "").toUpperCase() !== pricePositionFilter) return false;
     if (priceTeamFilter && (team ?? "").toUpperCase() !== priceTeamFilter) return false;
+    if (priceQuery) {
+      const label = (row.name ?? `#${row.tokenIdDec}`).toLowerCase();
+      if (!label.includes(priceQuery)) return false;
+    }
     return true;
   });
   const pricePageSize = 50;
@@ -530,6 +536,15 @@ export default async function NflMarketPage({
               <input type="hidden" name="trendDays" value={String(trendDays)} />
               <input type="hidden" name="series" value={series} />
               <label className="flex flex-col gap-1">
+                <span>Search</span>
+                <input
+                  name="price_q"
+                  defaultValue={priceQuery}
+                  placeholder="Player name"
+                  className="min-w-[160px] rounded-md border border-black/10 bg-white px-2 py-1 text-xs text-black placeholder:text-zinc-400 dark:border-white/10 dark:bg-white/5 dark:text-white"
+                />
+              </label>
+              <label className="flex flex-col gap-1">
                 <span>Position</span>
                 <select
                   name="price_position"
@@ -628,6 +643,19 @@ export default async function NflMarketPage({
               </tbody>
             </table>
           </div>
+          <div className="border-t border-black/10 px-3 py-2 text-xs text-zinc-600 dark:border-white/10 dark:text-zinc-400">
+            <Link
+              className="hover:underline"
+              href={`/nfl/prices${buildQuery({
+                windowHours: String(windowHours),
+                position: pricePositionFilter ?? undefined,
+                team: priceTeamFilter ?? undefined,
+                q: priceQuery || undefined,
+              })}`}
+            >
+              Open full prices table →
+            </Link>
+          </div>
           <div className="flex items-center justify-between gap-3 border-t border-black/10 px-3 py-2 text-xs text-zinc-600 dark:border-white/10 dark:text-zinc-400">
             <Link
               href={`/nfl${buildQuery({
@@ -636,6 +664,7 @@ export default async function NflMarketPage({
                 series,
                 price_position: pricePositionFilter ?? undefined,
                 price_team: priceTeamFilter ?? undefined,
+                price_q: priceQuery || undefined,
                 price_page: String(Math.max(1, pricePageSafe - 1)),
               })}`}
               className={pricePageSafe > 1 ? "hover:underline" : "pointer-events-none opacity-40"}
@@ -652,6 +681,7 @@ export default async function NflMarketPage({
                 series,
                 price_position: pricePositionFilter ?? undefined,
                 price_team: priceTeamFilter ?? undefined,
+                price_q: priceQuery || undefined,
                 price_page: String(Math.min(priceTotalPages, pricePageSafe + 1)),
               })}`}
               className={pricePageSafe < priceTotalPages ? "hover:underline" : "pointer-events-none opacity-40"}
