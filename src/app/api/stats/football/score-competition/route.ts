@@ -8,6 +8,7 @@ const querySchema = z.object({
   season_id: z.coerce.number().int().min(1),
   limit: z.coerce.number().int().min(1).max(200).optional(),
   include_players: z.coerce.boolean().optional(),
+  recent: z.coerce.boolean().optional(),
 });
 
 async function mapWithConcurrency<T, R>(
@@ -38,6 +39,7 @@ export async function GET(request: Request) {
     season_id: url.searchParams.get("season_id"),
     limit: url.searchParams.get("limit") ?? undefined,
     include_players: url.searchParams.get("include_players") ?? undefined,
+    recent: url.searchParams.get("recent") ?? undefined,
   });
 
   const competitionTier = await getCompetitionTierById(query.competition_id);
@@ -48,7 +50,11 @@ export async function GET(request: Request) {
     return aDate.localeCompare(bDate);
   });
 
-  const limited = query.limit ? ordered.slice(0, query.limit) : ordered;
+  const limited = query.limit
+    ? query.recent
+      ? ordered.slice(-query.limit)
+      : ordered.slice(0, query.limit)
+    : ordered;
   const includePlayers = query.include_players ?? true;
 
   const scored = await mapWithConcurrency(limited, 2, async (match) => {

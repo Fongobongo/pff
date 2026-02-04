@@ -48,6 +48,7 @@ export async function fetchSoccerCompetitionScores(params: {
   competitionId: number;
   seasonId: number;
   limit?: number;
+  recent?: boolean;
 }): Promise<SoccerScoreCompetitionResponse> {
   const baseUrl = await getBaseUrl();
   const query = new URLSearchParams();
@@ -55,6 +56,7 @@ export async function fetchSoccerCompetitionScores(params: {
   query.set("season_id", String(params.seasonId));
   if (params.limit) query.set("limit", String(params.limit));
   query.set("include_players", "1");
+  if (params.recent) query.set("recent", "1");
 
   const res = await fetch(`${baseUrl}/api/stats/football/score-competition?${query.toString()}`, {
     next: { revalidate: 3600 },
