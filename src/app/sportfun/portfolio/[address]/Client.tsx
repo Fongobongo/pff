@@ -640,12 +640,18 @@ export default function SportfunPortfolioClient({ address }: { address: string }
   async function runMetadataScan() {
     setFullScanLoading(true);
     setFullScanError(null);
+    const current = data;
+    if (!current) {
+      setFullScanError("No data loaded yet.");
+      setFullScanLoading(false);
+      return;
+    }
     try {
       const next = await getJson<SportfunPortfolioResponse>(
         buildRequestUrl({
-          scanMode: data.query?.scanMode ?? "default",
-          maxPages: data.query?.maxPages ?? 10,
-          maxActivity: data.query?.maxActivity ?? 150,
+          scanMode: current.query?.scanMode ?? "default",
+          maxPages: current.query?.maxPages ?? 10,
+          maxActivity: current.query?.maxActivity ?? 150,
           includeTrades: false,
           includePrices: false,
           includeMetadata: true,

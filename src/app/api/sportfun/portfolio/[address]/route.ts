@@ -1702,12 +1702,16 @@ export async function GET(request: Request, context: { params: Promise<{ address
         flow.spentUsdc += -currencyDelta;
       } else {
         // Wallet received shares without paying (gift) OR we failed to map the cost.
-        const initiator = item.counterparty?.initiator ?? "";
-        const recipient = item.counterparty?.recipient ?? "";
-        const isGift = recipient === walletLc && initiator !== walletLc;
+        if (item.itemKind === "trade") {
+          const initiator = item.counterparty?.initiator ?? "";
+          const recipient = item.counterparty?.recipient ?? "";
+          const isGift = recipient === walletLc && initiator !== walletLc;
 
-        if (isGift) {
-          giftBuyCount++;
+          if (isGift) {
+            giftBuyCount++;
+          } else {
+            costBasisUnknownTradeCount++;
+          }
         } else {
           costBasisUnknownTradeCount++;
         }
