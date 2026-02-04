@@ -24,6 +24,19 @@ type ScheduleResponse = {
   }>;
 };
 
+type TeamStats = {
+  games: number;
+  pointsFor: number;
+  pointsAgainst: number;
+};
+
+type TeamMetrics = {
+  games: number;
+  pointsForAvg: number;
+  pointsAgainstAvg: number;
+  defenseRank?: number;
+};
+
 function buildQuery(params: Record<string, string | undefined>) {
   const query = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
@@ -32,6 +45,11 @@ function buildQuery(params: Record<string, string | undefined>) {
   }
   const qs = query.toString();
   return qs ? `?${qs}` : "";
+}
+
+function formatNumber(value?: number, digits = 1): string {
+  if (value === undefined || Number.isNaN(value)) return "—";
+  return value.toFixed(digits);
 }
 
 export default async function NflMatchupsPage({
@@ -69,8 +87,55 @@ export default async function NflMatchupsPage({
       ? data.rows.filter((row) => row.week === resolvedWeek)
       : data.rows;
 
+  const scoringRows = data.rows.filter((row) => {
+    if (row.awayScore === undefined || row.homeScore === undefined) return false;
+    if (!row.week) return false;
+    if (resolvedWeek !== undefined && row.week > resolvedWeek) return false;
+    return true;
+  });
+
+  const teamStats = new Map<string, TeamStats>();
+  for (const game of scoringRows) {
+    if (!game.awayTeam || !game.homeTeam) continue;
+    const away = game.awayTeam.toUpperCase();
+    const home = game.homeTeam.toUpperCase();
+    const awayScore = game.awayScore ?? 0;
+    const homeScore = game.homeScore ?? 0;
+
+    const awayEntry = teamStats.get(away) ?? { games: 0, pointsFor: 0, pointsAgainst: 0 };
+    awayEntry.games += 1;
+    awayEntry.pointsFor += awayScore;
+    awayEntry.pointsAgainst += homeScore;
+    teamStats.set(away, awayEntry);
+
+    const homeEntry = teamStats.get(home) ?? { games: 0, pointsFor: 0, pointsAgainst: 0 };
+    homeEntry.games += 1;
+    homeEntry.pointsFor += homeScore;
+    homeEntry.pointsAgainst += awayScore;
+    teamStats.set(home, homeEntry);
+  }
+
+  const metrics = new Map<string, TeamMetrics>();
+  for (const [team, stats] of teamStats.entries()) {
+    metrics.set(team, {
+      games: stats.games,
+      pointsForAvg: stats.games ? stats.pointsFor / stats.games : 0,
+      pointsAgainstAvg: stats.games ? stats.pointsAgainst / stats.games : 0,
+      defenseRank: undefined,
+    });
+  }
+
+  const defenseRanks = Array.from(metrics.entries())
+    .sort((a, b) => a[1].pointsAgainstAvg - b[1].pointsAgainstAvg)
+    .map(([team]) => team);
+
+  defenseRanks.forEach((team, idx) => {
+    const entry = metrics.get(team);
+    if (entry) entry.defenseRank = idx + 1;
+  });
+
   return (
-    <NflPageShell title="NFL matchups" description="Schedule and results from nflverse.">
+    <NflPageShell title="NFL matchups" description="Schedule, results, and implied points from nflverse history.">
       <section className="mt-6 flex flex-wrap gap-3">
         {SAMPLE_SEASONS.map((year) => (
           <Link
@@ -116,6 +181,13 @@ export default async function NflMatchupsPage({
         ))}
       </section>
 
+      <section className="mt-6 text-sm text-zinc-600 dark:text-zinc-400">
+        <p>
+          Off/Def averages use completed games through week {resolvedWeek ?? "—"}. Implied points are modeled from a
+          team’s scoring average plus opponent points allowed.
+        </p>
+      </section>
+
       <section className="mt-8">
         <div className="overflow-hidden rounded-xl border border-black/10 bg-white dark:border-white/10 dark:bg-white/5">
           <table className="w-full text-left text-sm">
@@ -124,31 +196,72 @@ export default async function NflMatchupsPage({
                 <th className="px-3 py-2">Week</th>
                 <th className="px-3 py-2">Away</th>
                 <th className="px-3 py-2">Home</th>
+                <th className="px-3 py-2">Away Off Avg</th>
+                <th className="px-3 py-2">Away Def Avg</th>
+                <th className="px-3 py-2">Away Def Rank</th>
+                <th className="px-3 py-2">Away Implied</th>
+                <th className="px-3 py-2">Home Off Avg</th>
+                <th className="px-3 py-2">Home Def Avg</th>
+                <th className="px-3 py-2">Home Def Rank</th>
+                <th className="px-3 py-2">Home Implied</th>
                 <th className="px-3 py-2">Score</th>
                 <th className="px-3 py-2">Date</th>
                 <th className="px-3 py-2">Stadium</th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((game) => (
-                <tr key={game.gameId} className="border-t border-black/10 dark:border-white/10">
-                  <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{game.week ?? "—"}</td>
-                  <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{game.awayTeam ?? "—"}</td>
-                  <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{game.homeTeam ?? "—"}</td>
-                  <td className="px-3 py-2 text-black dark:text-white">
-                    {game.awayScore !== undefined && game.homeScore !== undefined
-                      ? `${game.awayScore} - ${game.homeScore}`
-                      : "—"}
-                  </td>
-                  <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
-                    {game.gameday ?? "—"} {game.weekday ? `(${game.weekday})` : ""} {game.gametime ?? ""}
-                  </td>
-                  <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{game.stadium ?? "—"}</td>
-                </tr>
-              ))}
+              {rows.map((game) => {
+                const awayMetrics = game.awayTeam ? metrics.get(game.awayTeam.toUpperCase()) : undefined;
+                const homeMetrics = game.homeTeam ? metrics.get(game.homeTeam.toUpperCase()) : undefined;
+                const awayImplied =
+                  awayMetrics && homeMetrics
+                    ? (awayMetrics.pointsForAvg + homeMetrics.pointsAgainstAvg) / 2
+                    : undefined;
+                const homeImplied =
+                  homeMetrics && awayMetrics
+                    ? (homeMetrics.pointsForAvg + awayMetrics.pointsAgainstAvg) / 2
+                    : undefined;
+
+                return (
+                  <tr key={game.gameId} className="border-t border-black/10 dark:border-white/10">
+                    <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{game.week ?? "—"}</td>
+                    <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{game.awayTeam ?? "—"}</td>
+                    <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{game.homeTeam ?? "—"}</td>
+                    <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
+                      {formatNumber(awayMetrics?.pointsForAvg)}
+                    </td>
+                    <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
+                      {formatNumber(awayMetrics?.pointsAgainstAvg)}
+                    </td>
+                    <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
+                      {awayMetrics?.defenseRank ? `#${awayMetrics.defenseRank}` : "—"}
+                    </td>
+                    <td className="px-3 py-2 text-black dark:text-white">{formatNumber(awayImplied)}</td>
+                    <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
+                      {formatNumber(homeMetrics?.pointsForAvg)}
+                    </td>
+                    <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
+                      {formatNumber(homeMetrics?.pointsAgainstAvg)}
+                    </td>
+                    <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
+                      {homeMetrics?.defenseRank ? `#${homeMetrics.defenseRank}` : "—"}
+                    </td>
+                    <td className="px-3 py-2 text-black dark:text-white">{formatNumber(homeImplied)}</td>
+                    <td className="px-3 py-2 text-black dark:text-white">
+                      {game.awayScore !== undefined && game.homeScore !== undefined
+                        ? `${game.awayScore} - ${game.homeScore}`
+                        : "—"}
+                    </td>
+                    <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
+                      {game.gameday ?? "—"} {game.weekday ? `(${game.weekday})` : ""} {game.gametime ?? ""}
+                    </td>
+                    <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{game.stadium ?? "—"}</td>
+                  </tr>
+                );
+              })}
               {rows.length === 0 ? (
                 <tr>
-                  <td className="px-3 py-4 text-zinc-600 dark:text-zinc-400" colSpan={6}>
+                  <td className="px-3 py-4 text-zinc-600 dark:text-zinc-400" colSpan={14}>
                     No games for this selection.
                   </td>
                 </tr>
