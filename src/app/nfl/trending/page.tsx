@@ -42,6 +42,39 @@ const SPLIT_MODE_OPTIONS = [
   { key: "away", label: "Away only" },
 ] as const;
 
+const PRESET_OPTIONS = [
+  {
+    key: "wr-usage",
+    label: "WR usage",
+    params: {
+      position: "WR",
+      sort: "usage_score",
+      min_targets: "6",
+      min_target_share: "18",
+      min_wopr: "0.45",
+    },
+  },
+  {
+    key: "rb-workload",
+    label: "RB workload",
+    params: {
+      position: "RB",
+      sort: "touches_l3",
+      min_touches: "12",
+      min_targets: "2",
+    },
+  },
+  {
+    key: "qb-efficiency",
+    label: "QB volume",
+    params: {
+      position: "QB",
+      sort: "season",
+      min_games: "4",
+    },
+  },
+] as const;
+
 const SORT_OPTIONS = [
   { key: "l3", label: "L3 Avg FPts" },
   { key: "season", label: "Season FPPG" },
@@ -65,6 +98,8 @@ const SORT_OPTIONS = [
   { key: "catch_rate", label: "Catch %" },
   { key: "ypt", label: "Yards/Target" },
   { key: "usage_score", label: "Usage Score" },
+  { key: "usage_trend", label: "Usage Trend" },
+  { key: "usage_share", label: "Usage Share" },
   { key: "home_l3", label: "Home L3" },
   { key: "away_l3", label: "Away L3" },
   { key: "home_avg", label: "Home FPPG" },
@@ -312,6 +347,8 @@ export default async function NflTrendingPage({
     min_ypt?: string;
     split_mode?: string;
     min_usage?: string;
+    min_usage_trend?: string;
+    min_usage_share?: string;
   }>;
 }) {
   const params = await searchParams;
@@ -340,6 +377,8 @@ export default async function NflTrendingPage({
   const minYpt = parseNumber(params.min_ypt, 0, 0, 50);
   const splitMode = SPLIT_MODE_OPTIONS.find((opt) => opt.key === params.split_mode)?.key ?? "all";
   const minUsage = parseNumber(params.min_usage, -5, -10, 10);
+  const minUsageTrend = parseNumber(params.min_usage_trend, -5, -10, 10);
+  const minUsageShare = parseNumber(params.min_usage_share, -5, -10, 10);
 
   const [snapshot, weeklyData, schedule] = await Promise.all([
     getSportfunMarketSnapshot({ sport: "nfl", windowHours: 24, trendDays: 30, maxTokens: 500 }),
@@ -777,6 +816,14 @@ export default async function NflTrendingPage({
     filtered = filtered.filter((row) => (row.usageScore ?? -Infinity) >= minUsage);
   }
 
+  if (minUsageTrend > -5) {
+    filtered = filtered.filter((row) => (row.usageTrendScore ?? -Infinity) >= minUsageTrend);
+  }
+
+  if (minUsageShare > -5) {
+    filtered = filtered.filter((row) => (row.usageShareScore ?? -Infinity) >= minUsageShare);
+  }
+
   const sorted = filtered.slice().sort((a, b) => {
     switch (sort) {
       case "trend":
@@ -821,6 +868,10 @@ export default async function NflTrendingPage({
         return (b.l3YardsPerTarget ?? -Infinity) - (a.l3YardsPerTarget ?? -Infinity);
       case "usage_score":
         return (b.usageScore ?? -Infinity) - (a.usageScore ?? -Infinity);
+      case "usage_trend":
+        return (b.usageTrendScore ?? -Infinity) - (a.usageTrendScore ?? -Infinity);
+      case "usage_share":
+        return (b.usageShareScore ?? -Infinity) - (a.usageShareScore ?? -Infinity);
       case "home_l3":
         return (b.homeL3Avg ?? -Infinity) - (a.homeL3Avg ?? -Infinity);
       case "away_l3":
@@ -854,6 +905,26 @@ export default async function NflTrendingPage({
       description="L3 fantasy trends with positional ranks and opponent deltas."
     >
       <form className="mt-6 flex flex-wrap items-end gap-3" method="GET">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs text-zinc-500 dark:text-zinc-400">Presets</span>
+          {PRESET_OPTIONS.map((preset) => (
+            <Link
+              key={preset.key}
+              className="rounded-full border border-black/10 bg-white px-3 py-1 text-xs text-black hover:bg-zinc-50 dark:border-white/10 dark:bg-white/5 dark:text-white dark:hover:bg-white/10"
+              href={`/nfl/trending${buildQuery({
+                season: String(season),
+                season_type: seasonType,
+                week: String(viewWeek),
+                lookback: String(lookback),
+                rank_mode: rankMode,
+                split_mode: splitMode,
+                ...preset.params,
+              })}`}
+            >
+              {preset.label}
+            </Link>
+          ))}
+        </div>
         <label className="text-xs text-zinc-600 dark:text-zinc-400">
           Search
           <input
@@ -1149,6 +1220,26 @@ export default async function NflTrendingPage({
             className="mt-1 block w-20 rounded-md border border-black/10 bg-white px-3 py-2 text-sm text-black placeholder:text-zinc-400 dark:border-white/10 dark:bg-white/5 dark:text-white"
           />
         </label>
+        <label className="text-xs text-zinc-600 dark:text-zinc-400">
+          Min usage trend
+          <input
+            type="number"
+            name="min_usage_trend"
+            step={0.1}
+            defaultValue={minUsageTrend > -5 ? minUsageTrend : ""}
+            className="mt-1 block w-24 rounded-md border border-black/10 bg-white px-3 py-2 text-sm text-black placeholder:text-zinc-400 dark:border-white/10 dark:bg-white/5 dark:text-white"
+          />
+        </label>
+        <label className="text-xs text-zinc-600 dark:text-zinc-400">
+          Min usage share
+          <input
+            type="number"
+            name="min_usage_share"
+            step={0.1}
+            defaultValue={minUsageShare > -5 ? minUsageShare : ""}
+            className="mt-1 block w-24 rounded-md border border-black/10 bg-white px-3 py-2 text-sm text-black placeholder:text-zinc-400 dark:border-white/10 dark:bg-white/5 dark:text-white"
+          />
+        </label>
         <label className="flex items-center gap-2 text-xs text-zinc-600 dark:text-zinc-400">
           <input
             type="checkbox"
@@ -1212,7 +1303,7 @@ export default async function NflTrendingPage({
 
       <section className="mt-8">
         <div className="overflow-x-auto rounded-xl border border-black/10 bg-white dark:border-white/10 dark:bg-white/5">
-          <table className="w-full min-w-[2500px] text-left text-sm">
+          <table className="w-full min-w-[2600px] text-left text-sm">
             <thead className="bg-zinc-100 text-xs uppercase tracking-wide text-zinc-500 dark:bg-white/10 dark:text-zinc-400">
               <tr>
                 <th className="px-3 py-2">Player</th>
@@ -1227,6 +1318,8 @@ export default async function NflTrendingPage({
                 <th className="px-3 py-2">Home L3</th>
                 <th className="px-3 py-2">Away L3</th>
                 <th className="px-3 py-2">Usage Score</th>
+                <th className="px-3 py-2">Usage Trend</th>
+                <th className="px-3 py-2">Usage Share</th>
                 <th className="px-3 py-2">L3 Targets</th>
                 <th className="px-3 py-2">L3 Touches</th>
                 <th className="px-3 py-2">L3 Yards</th>
@@ -1286,6 +1379,16 @@ export default async function NflTrendingPage({
                       className={`px-3 py-2 ${row.usageScore !== undefined && row.usageScore >= 0 ? "text-emerald-500" : "text-rose-500"}`}
                     >
                       {row.usageScore !== undefined ? row.usageScore.toFixed(2) : "—"}
+                    </td>
+                    <td
+                      className={`px-3 py-2 ${row.usageTrendScore !== undefined && row.usageTrendScore >= 0 ? "text-emerald-500" : "text-rose-500"}`}
+                    >
+                      {row.usageTrendScore !== undefined ? row.usageTrendScore.toFixed(2) : "—"}
+                    </td>
+                    <td
+                      className={`px-3 py-2 ${row.usageShareScore !== undefined && row.usageShareScore >= 0 ? "text-emerald-500" : "text-rose-500"}`}
+                    >
+                      {row.usageShareScore !== undefined ? row.usageShareScore.toFixed(2) : "—"}
                     </td>
                     <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
                       {row.l3Targets !== undefined ? formatNumber(row.l3Targets) : "—"}
@@ -1374,7 +1477,7 @@ export default async function NflTrendingPage({
               })}
               {sorted.length === 0 ? (
                 <tr>
-                  <td className="px-3 py-4 text-zinc-600 dark:text-zinc-400" colSpan={38}>
+                  <td className="px-3 py-4 text-zinc-600 dark:text-zinc-400" colSpan={41}>
                     No players match the filters.
                   </td>
                 </tr>
