@@ -1,22 +1,9 @@
 import Image from "next/image";
-import { getBaseUrl } from "@/lib/serverBaseUrl";
 import NflPageShell from "../_components/NflPageShell";
-
-type TeamsResponse = {
-  rows: Array<{
-    teamAbbr: string;
-    teamName: string;
-    conference?: string;
-    division?: string;
-    logoEspn?: string;
-    logoSquared?: string;
-  }>;
-};
+import { fetchNflTeams, type NflTeamsResponse } from "@/lib/stats/nflverse";
 
 export default async function NflTeamsPage() {
-  const baseUrl = await getBaseUrl();
-  const res = await fetch(`${baseUrl}/api/stats/nfl/teams`, { next: { revalidate: 86400 } });
-  const data = (await res.json()) as TeamsResponse;
+  const data = (await fetchNflTeams()) as NflTeamsResponse;
 
   return (
     <NflPageShell title="NFL teams" description="Team reference from nflverse data.">
