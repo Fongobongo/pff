@@ -1,4 +1,4 @@
-import { getBaseUrl } from "@/lib/serverBaseUrl";
+import { footballDataFetch } from "@/lib/footballdata";
 import SoccerPageShell from "../_components/SoccerPageShell";
 
 const LEAGUES = [
@@ -18,8 +18,8 @@ type MatchRow = {
   score?: { fullTime?: { home?: number | null; away?: number | null } };
 };
 
-type MatchesResponse = {
-  pageMatches?: MatchRow[];
+type FootballDataMatchesResponse = {
+  matches?: MatchRow[];
 };
 
 function formatDate(iso?: string): string {
@@ -34,7 +34,6 @@ function toDateParam(date: Date): string {
 }
 
 export default async function SoccerMatchesPage() {
-  const baseUrl = await getBaseUrl();
   const today = new Date();
   const end = new Date();
   end.setDate(today.getDate() + 7);
@@ -43,18 +42,20 @@ export default async function SoccerMatchesPage() {
 
   const results = await Promise.all(
     LEAGUES.map(async (league) => {
-      const query = new URLSearchParams({
-        competition: league.code,
-        dateFrom,
-        dateTo,
-        status: "SCHEDULED",
-        page_size: "50",
-      });
-      const res = await fetch(`${baseUrl}/api/football-data/matches?${query.toString()}`, {
-        next: { revalidate: 300 },
-      });
-      const data = (await res.json()) as MatchesResponse;
-      return { league, matches: data.pageMatches ?? [] };
+      try {
+        const data = await footballDataFetch<FootballDataMatchesResponse>(
+          `/competitions/${league.code}/matches`,
+          {
+            dateFrom,
+            dateTo,
+            status: "SCHEDULED",
+          },
+          300
+        );
+        return { league, matches: (data.matches ?? []).slice(0, 50) };
+      } catch {
+        return { league, matches: [] };
+      }
     })
   );
 
