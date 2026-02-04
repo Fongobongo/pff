@@ -211,6 +211,17 @@ export default async function NflMarketPage({
   const gainersCount = snapshot.tokens.filter((t) => (t.priceChange24hPercent ?? 0) > 0).length;
   const losersCount = snapshot.tokens.filter((t) => (t.priceChange24hPercent ?? 0) < 0).length;
   const neutralCount = Math.max(0, snapshot.tokens.length - gainersCount - losersCount);
+  const inactiveTokens = snapshot.tokens.filter((t) => t.trades24h === 0);
+  const inactiveCount = inactiveTokens.length;
+  const inactiveTop = inactiveTokens
+    .slice()
+    .sort((a, b) => {
+      const aPrice = BigInt(a.currentPriceUsdcRaw ?? "0");
+      const bPrice = BigInt(b.currentPriceUsdcRaw ?? "0");
+      if (aPrice === bPrice) return a.tokenIdDec.localeCompare(b.tokenIdDec);
+      return bPrice > aPrice ? 1 : -1;
+    })
+    .slice(0, 12);
   const sentiment =
     gainersCount > losersCount ? "Bullish" : losersCount > gainersCount ? "Bearish" : "Neutral";
 
@@ -317,6 +328,11 @@ export default async function NflMarketPage({
           <div className="mt-2 text-2xl font-semibold text-black dark:text-white">{snapshot.summary.activeTokens24h}</div>
         </div>
         <div className="rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-white/5">
+          <div className="text-xs uppercase tracking-wide text-zinc-500 dark:text-zinc-400">Inactive (24h)</div>
+          <div className="mt-2 text-2xl font-semibold text-black dark:text-white">{inactiveCount}</div>
+          <div className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">No trades in the last {windowHours}h</div>
+        </div>
+        <div className="rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-white/5">
           <div className="text-xs uppercase tracking-wide text-zinc-500 dark:text-zinc-400">Trades (24h)</div>
           <div className="mt-2 text-2xl font-semibold text-black dark:text-white">{snapshot.summary.trades24h}</div>
         </div>
@@ -404,6 +420,51 @@ export default async function NflMarketPage({
               </div>
             ))}
           </div>
+        </div>
+      </section>
+
+      <section className="mt-8">
+        <div className="overflow-hidden rounded-xl border border-black/10 bg-white dark:border-white/10 dark:bg-white/5">
+          <div className="border-b border-black/10 px-3 py-2 text-xs uppercase tracking-wide text-zinc-500 dark:border-white/10 dark:text-zinc-400">
+            Inactive tokens (no trades in {windowHours}h)
+          </div>
+          <table className="w-full text-left text-sm">
+            <thead className="bg-zinc-100 text-xs uppercase tracking-wide text-zinc-500 dark:bg-white/10 dark:text-zinc-400">
+              <tr>
+                <th className="px-3 py-2">Player</th>
+                <th className="px-3 py-2">Pos</th>
+                <th className="px-3 py-2">Price</th>
+                <th className="px-3 py-2">Supply</th>
+                <th className="px-3 py-2">Last trade</th>
+              </tr>
+            </thead>
+            <tbody>
+              {inactiveTop.map((row) => {
+                const position = row.attributes ? extractPosition(row.attributes) : null;
+                const supply = row.attributes ? extractSupply(row.attributes) : null;
+                return (
+                  <tr key={row.tokenIdDec} className="border-t border-black/10 dark:border-white/10">
+                    <td className="px-3 py-2 text-black dark:text-white">{row.name ?? `#${row.tokenIdDec}`}</td>
+                    <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{position ?? "—"}</td>
+                    <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{formatUsd(row.currentPriceUsdcRaw)}</td>
+                    <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
+                      {supply !== null ? supply.toLocaleString() : "—"}
+                    </td>
+                    <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
+                      {row.lastTradeAt ? formatDate(row.lastTradeAt) : "—"}
+                    </td>
+                  </tr>
+                );
+              })}
+              {inactiveTop.length === 0 ? (
+                <tr>
+                  <td className="px-3 py-4 text-zinc-600 dark:text-zinc-400" colSpan={5}>
+                    No inactive tokens in the current window.
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
         </div>
       </section>
 

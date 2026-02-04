@@ -643,7 +643,7 @@ export async function getSportfunMarketSnapshot(params: {
   const windowHours = params.windowHours ?? DEFAULT_WINDOW_HOURS;
   const trendDays = params.trendDays ?? DEFAULT_TREND_DAYS;
   const maxTokens = params.maxTokens ?? 250;
-  const metadataLimit = params.metadataLimit ?? 500;
+  const metadataLimit = params.metadataLimit ?? maxTokens;
 
   const cacheKey = `sportfun:market:${params.sport}:${windowHours}:${trendDays}:${maxTokens}`;
   return withCache(cacheKey, 120, async () => {
@@ -656,6 +656,16 @@ export async function getSportfunMarketSnapshot(params: {
 
       const events = await getTradeEvents({ sport: params.sport, fromBlock: trendFromBlock, toBlock: latest });
       const tokenAgg = normalizeTokenAgg(events, windowStart);
+      const lastTradeByToken = new Map<string, { ts: number; price?: bigint }>();
+      for (const event of events) {
+        const current = lastTradeByToken.get(event.tokenIdDec);
+        if (!current || event.timestampMs > current.ts) {
+          lastTradeByToken.set(event.tokenIdDec, {
+            ts: event.timestampMs,
+            price: event.priceUsdcPerShareRaw,
+          });
+        }
+      }
 
       const tokenIds = await getTokenUniverse(params.sport, TOKEN_UNIVERSE_DAYS);
       const tokenIdBigInts = tokenIds.map((id) => BigInt(id));
@@ -667,6 +677,8 @@ export async function getSportfunMarketSnapshot(params: {
       const tokens = tokenIds
         .map((tokenIdDec) => {
           const agg = tokenAgg.get(tokenIdDec);
+          const lastTrade = lastTradeByToken.get(tokenIdDec);
+          const lastTradeAt = agg?.lastTs ?? lastTrade?.ts;
           const currentPrice = priceMap.get(tokenIdDec);
           const firstPrice = agg?.firstPrice;
           const lastPrice = agg?.lastPrice;
@@ -688,7 +700,7 @@ export async function getSportfunMarketSnapshot(params: {
             priceChange24hPercent: priceChangePct !== undefined ? priceChangePct * 100 : undefined,
             volume24hSharesRaw: agg ? agg.volumeSharesRaw.toString(10) : "0",
             trades24h: agg ? agg.trades : 0,
-            lastTradeAt: agg?.lastTs ? new Date(agg.lastTs).toISOString() : undefined,
+            lastTradeAt: lastTradeAt ? new Date(lastTradeAt).toISOString() : undefined,
           } as SportfunMarketToken;
         })
         .sort((a, b) => {
