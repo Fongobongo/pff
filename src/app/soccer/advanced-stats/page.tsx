@@ -2,6 +2,8 @@ import Link from "next/link";
 import SoccerPageShell from "../_components/SoccerPageShell";
 import { SOCCER_COMPETITIONS, fetchSoccerCompetitionScores } from "@/lib/soccerStats";
 
+const LIMIT_OPTIONS = [20, 50, 100, 200];
+
 function buildQuery(params: Record<string, string | undefined>) {
   const query = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
@@ -28,6 +30,14 @@ type PlayerAgg = {
   assists: number;
   xg: number;
   xa: number;
+  xgxa: number;
+  minutes: number;
+  shotsOnTarget: number;
+  bigChancesCreated: number;
+  passesOppHalf: number;
+  tackles: number;
+  interceptions: number;
+  savesInsideBox: number;
 };
 
 export default async function SoccerAdvancedStatsPage({
@@ -39,7 +49,7 @@ export default async function SoccerAdvancedStatsPage({
   const competitionId = Number(params.competition ?? SOCCER_COMPETITIONS[0].id);
   const seasonId = Number(params.season ?? SOCCER_COMPETITIONS[0].seasonId);
   const limit = Number(params.limit ?? "20");
-  const safeLimit = Number.isFinite(limit) ? Math.max(4, Math.min(60, limit)) : 20;
+  const safeLimit = Number.isFinite(limit) ? Math.max(4, Math.min(200, limit)) : 20;
 
   const data = await fetchSoccerCompetitionScores({
     competitionId,
@@ -65,6 +75,14 @@ export default async function SoccerAdvancedStatsPage({
         assists: 0,
         xg: 0,
         xa: 0,
+        xgxa: 0,
+        minutes: 0,
+        shotsOnTarget: 0,
+        bigChancesCreated: 0,
+        passesOppHalf: 0,
+        tackles: 0,
+        interceptions: 0,
+        savesInsideBox: 0,
       };
       entry.games += 1;
       entry.totalPoints += score;
@@ -73,6 +91,14 @@ export default async function SoccerAdvancedStatsPage({
       entry.assists += toNumber(player.stats?.assists);
       entry.xg += toNumber(player.xg);
       entry.xa += toNumber(player.xa);
+      entry.xgxa += toNumber(player.xg) + toNumber(player.xa);
+      entry.minutes += toNumber(player.minutesPlayed);
+      entry.shotsOnTarget += toNumber(player.stats?.shots_on_target);
+      entry.bigChancesCreated += toNumber(player.stats?.big_chances_created);
+      entry.passesOppHalf += toNumber(player.stats?.accurate_passes_opponents_half);
+      entry.tackles += toNumber(player.stats?.successful_tackles);
+      entry.interceptions += toNumber(player.stats?.interceptions);
+      entry.savesInsideBox += toNumber(player.stats?.saves_inside_box);
       totals.set(player.playerId, entry);
     }
   }
@@ -83,6 +109,13 @@ export default async function SoccerAdvancedStatsPage({
   const topAssists = players.slice().sort((a, b) => b.assists - a.assists).slice(0, 10);
   const topXg = players.slice().sort((a, b) => b.xg - a.xg).slice(0, 10);
   const topXa = players.slice().sort((a, b) => b.xa - a.xa).slice(0, 10);
+  const topXgXa = players.slice().sort((a, b) => b.xgxa - a.xgxa).slice(0, 10);
+  const topShots = players.slice().sort((a, b) => b.shotsOnTarget - a.shotsOnTarget).slice(0, 10);
+  const topChances = players.slice().sort((a, b) => b.bigChancesCreated - a.bigChancesCreated).slice(0, 10);
+  const topPasses = players.slice().sort((a, b) => b.passesOppHalf - a.passesOppHalf).slice(0, 10);
+  const topTackles = players.slice().sort((a, b) => b.tackles - a.tackles).slice(0, 10);
+  const topInterceptions = players.slice().sort((a, b) => b.interceptions - a.interceptions).slice(0, 10);
+  const topSaves = players.slice().sort((a, b) => b.savesInsideBox - a.savesInsideBox).slice(0, 10);
 
   const currentCompetition = SOCCER_COMPETITIONS.find(
     (item) => item.id === competitionId && item.seasonId === seasonId
@@ -110,9 +143,30 @@ export default async function SoccerAdvancedStatsPage({
         ))}
       </section>
 
+      <section className="mt-4 flex flex-wrap gap-2">
+        {LIMIT_OPTIONS.map((value) => (
+          <Link
+            key={value}
+            className={`rounded-full border px-3 py-1 text-xs ${
+              value === safeLimit
+                ? "border-black bg-black text-white dark:border-white dark:bg-white dark:text-black"
+                : "border-black/10 bg-white text-black hover:bg-zinc-50 dark:border-white/10 dark:bg-white/5 dark:text-white dark:hover:bg-white/10"
+            }`}
+            href={`/soccer/advanced-stats${buildQuery({
+              competition: String(competitionId),
+              season: String(seasonId),
+              limit: String(value),
+            })}`}
+          >
+            {value} matches
+          </Link>
+        ))}
+      </section>
+
       <section className="mt-4 text-sm text-zinc-600 dark:text-zinc-400">
         <p>
-          Showing {safeLimit} matches · {currentCompetition?.label ?? "Competition"}. Stats include goals, assists, xG, xA, and fantasy scoring.
+          Showing {safeLimit} matches · {currentCompetition?.label ?? "Competition"}. Stats include goals, assists, xG, xA,
+          and fantasy scoring.
         </p>
       </section>
 
@@ -188,7 +242,165 @@ export default async function SoccerAdvancedStatsPage({
                 ))}
               </ul>
             </div>
+            <div>
+              <div className="text-xs uppercase tracking-wide text-zinc-500 dark:text-zinc-400">xG + xA</div>
+              <ul className="mt-2 space-y-1">
+                {topXgXa.map((row) => (
+                  <li key={`xgxa-${row.playerId}`} className="text-black dark:text-white">
+                    {row.playerName} · {row.xgxa.toFixed(2)}
+                  </li>
+                ))}
+              </ul>
+            </div>
           </div>
+        </div>
+      </section>
+
+      <section className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-3">
+        <div className="overflow-hidden rounded-xl border border-black/10 bg-white dark:border-white/10 dark:bg-white/5">
+          <div className="border-b border-black/10 px-3 py-2 text-xs uppercase tracking-wide text-zinc-500 dark:border-white/10 dark:text-zinc-400">
+            Shots on target leaders
+          </div>
+          <table className="w-full text-left text-sm">
+            <thead className="bg-zinc-100 text-xs uppercase tracking-wide text-zinc-500 dark:bg-white/10 dark:text-zinc-400">
+              <tr>
+                <th className="px-3 py-2">Player</th>
+                <th className="px-3 py-2">Team</th>
+                <th className="px-3 py-2">SOT</th>
+              </tr>
+            </thead>
+            <tbody>
+              {topShots.map((row) => (
+                <tr key={`sot-${row.playerId}`} className="border-t border-black/10 dark:border-white/10">
+                  <td className="px-3 py-2 text-black dark:text-white">{row.playerName}</td>
+                  <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{row.teamName ?? "—"}</td>
+                  <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{row.shotsOnTarget}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="overflow-hidden rounded-xl border border-black/10 bg-white dark:border-white/10 dark:bg-white/5">
+          <div className="border-b border-black/10 px-3 py-2 text-xs uppercase tracking-wide text-zinc-500 dark:border-white/10 dark:text-zinc-400">
+            Big chances created
+          </div>
+          <table className="w-full text-left text-sm">
+            <thead className="bg-zinc-100 text-xs uppercase tracking-wide text-zinc-500 dark:bg-white/10 dark:text-zinc-400">
+              <tr>
+                <th className="px-3 py-2">Player</th>
+                <th className="px-3 py-2">Team</th>
+                <th className="px-3 py-2">Chances</th>
+              </tr>
+            </thead>
+            <tbody>
+              {topChances.map((row) => (
+                <tr key={`chance-${row.playerId}`} className="border-t border-black/10 dark:border-white/10">
+                  <td className="px-3 py-2 text-black dark:text-white">{row.playerName}</td>
+                  <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{row.teamName ?? "—"}</td>
+                  <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{row.bigChancesCreated}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="overflow-hidden rounded-xl border border-black/10 bg-white dark:border-white/10 dark:bg-white/5">
+          <div className="border-b border-black/10 px-3 py-2 text-xs uppercase tracking-wide text-zinc-500 dark:border-white/10 dark:text-zinc-400">
+            Pass volume (opp half)
+          </div>
+          <table className="w-full text-left text-sm">
+            <thead className="bg-zinc-100 text-xs uppercase tracking-wide text-zinc-500 dark:bg-white/10 dark:text-zinc-400">
+              <tr>
+                <th className="px-3 py-2">Player</th>
+                <th className="px-3 py-2">Team</th>
+                <th className="px-3 py-2">Passes</th>
+              </tr>
+            </thead>
+            <tbody>
+              {topPasses.map((row) => (
+                <tr key={`passes-${row.playerId}`} className="border-t border-black/10 dark:border-white/10">
+                  <td className="px-3 py-2 text-black dark:text-white">{row.playerName}</td>
+                  <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{row.teamName ?? "—"}</td>
+                  <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{row.passesOppHalf}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-3">
+        <div className="overflow-hidden rounded-xl border border-black/10 bg-white dark:border-white/10 dark:bg-white/5">
+          <div className="border-b border-black/10 px-3 py-2 text-xs uppercase tracking-wide text-zinc-500 dark:border-white/10 dark:text-zinc-400">
+            Tackles leaders
+          </div>
+          <table className="w-full text-left text-sm">
+            <thead className="bg-zinc-100 text-xs uppercase tracking-wide text-zinc-500 dark:bg-white/10 dark:text-zinc-400">
+              <tr>
+                <th className="px-3 py-2">Player</th>
+                <th className="px-3 py-2">Team</th>
+                <th className="px-3 py-2">Tackles</th>
+              </tr>
+            </thead>
+            <tbody>
+              {topTackles.map((row) => (
+                <tr key={`tackle-${row.playerId}`} className="border-t border-black/10 dark:border-white/10">
+                  <td className="px-3 py-2 text-black dark:text-white">{row.playerName}</td>
+                  <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{row.teamName ?? "—"}</td>
+                  <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{row.tackles}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="overflow-hidden rounded-xl border border-black/10 bg-white dark:border-white/10 dark:bg-white/5">
+          <div className="border-b border-black/10 px-3 py-2 text-xs uppercase tracking-wide text-zinc-500 dark:border-white/10 dark:text-zinc-400">
+            Interceptions leaders
+          </div>
+          <table className="w-full text-left text-sm">
+            <thead className="bg-zinc-100 text-xs uppercase tracking-wide text-zinc-500 dark:bg-white/10 dark:text-zinc-400">
+              <tr>
+                <th className="px-3 py-2">Player</th>
+                <th className="px-3 py-2">Team</th>
+                <th className="px-3 py-2">INT</th>
+              </tr>
+            </thead>
+            <tbody>
+              {topInterceptions.map((row) => (
+                <tr key={`interception-${row.playerId}`} className="border-t border-black/10 dark:border-white/10">
+                  <td className="px-3 py-2 text-black dark:text-white">{row.playerName}</td>
+                  <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{row.teamName ?? "—"}</td>
+                  <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{row.interceptions}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="overflow-hidden rounded-xl border border-black/10 bg-white dark:border-white/10 dark:bg-white/5">
+          <div className="border-b border-black/10 px-3 py-2 text-xs uppercase tracking-wide text-zinc-500 dark:border-white/10 dark:text-zinc-400">
+            Saves inside box (GK)
+          </div>
+          <table className="w-full text-left text-sm">
+            <thead className="bg-zinc-100 text-xs uppercase tracking-wide text-zinc-500 dark:bg-white/10 dark:text-zinc-400">
+              <tr>
+                <th className="px-3 py-2">Player</th>
+                <th className="px-3 py-2">Team</th>
+                <th className="px-3 py-2">Saves</th>
+              </tr>
+            </thead>
+            <tbody>
+              {topSaves.map((row) => (
+                <tr key={`save-${row.playerId}`} className="border-t border-black/10 dark:border-white/10">
+                  <td className="px-3 py-2 text-black dark:text-white">{row.playerName}</td>
+                  <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{row.teamName ?? "—"}</td>
+                  <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{row.savesInsideBox}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </section>
 
