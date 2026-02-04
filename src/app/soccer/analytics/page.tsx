@@ -2,7 +2,7 @@ import Link from "next/link";
 import SoccerPageShell from "../_components/SoccerPageShell";
 import { SOCCER_COMPETITIONS, fetchSoccerCompetitionScores } from "@/lib/soccerStats";
 
-const LIMIT_OPTIONS = [20, 50, 100, 200];
+const LIMIT_OPTIONS = [20, 50, 100, 200, 380];
 
 function buildQuery(params: Record<string, string | undefined>) {
   const query = new URLSearchParams();
@@ -41,7 +41,7 @@ export default async function SoccerAnalyticsPage({
   const competitionId = Number(params.competition ?? SOCCER_COMPETITIONS[0].id);
   const seasonId = Number(params.season ?? SOCCER_COMPETITIONS[0].seasonId);
   const limit = Number(params.limit ?? "20");
-  const safeLimit = Number.isFinite(limit) ? Math.max(4, Math.min(200, limit)) : 20;
+  const safeLimit = Number.isFinite(limit) ? Math.max(4, Math.min(400, limit)) : 20;
   const positionFilter = params.position?.toUpperCase();
   const teamFilter = params.team?.toUpperCase();
 

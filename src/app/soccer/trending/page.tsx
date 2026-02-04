@@ -22,7 +22,7 @@ const FORM_SORT_OPTIONS = [
   { key: "l3_chances", label: "L3 Chances" },
 ] as const;
 
-const LIMIT_OPTIONS = [20, 50, 100, 200];
+const LIMIT_OPTIONS = [20, 50, 100, 200, 380];
 
 function parseNumber(value: string | undefined, fallback: number, min: number, max: number): number {
   if (!value) return fallback;
@@ -145,7 +145,7 @@ export default async function SoccerTrendingPage({
   const sort = SORT_OPTIONS.find((opt) => opt.key === params.sort)?.key ?? "volume";
   const competitionId = Number(params.competition ?? SOCCER_COMPETITIONS[0].id);
   const seasonId = Number(params.season ?? SOCCER_COMPETITIONS[0].seasonId);
-  const limit = parseNumber(params.limit, 50, 4, 200);
+  const limit = parseNumber(params.limit, 50, 4, 400);
   const positionFilter = params.position?.toUpperCase();
   const formSort = FORM_SORT_OPTIONS.find((opt) => opt.key === params.form_sort)?.key ?? "l3_fpts";
   const minMinutes = parseNumber(params.min_minutes, 0, 0, 270);

@@ -6,7 +6,7 @@ import { scoreFootball } from "@/lib/stats/football";
 const querySchema = z.object({
   competition_id: z.coerce.number().int().min(1),
   season_id: z.coerce.number().int().min(1),
-  limit: z.coerce.number().int().min(1).max(200).optional(),
+  limit: z.coerce.number().int().min(1).max(400).optional(),
   include_players: z.coerce.boolean().optional(),
   recent: z.coerce.boolean().optional(),
 });
