@@ -806,6 +806,7 @@ export default async function NflMarketPage({
                         series,
                         price_position: pricePositionFilter ?? undefined,
                         price_team: priceTeamFilter ?? undefined,
+                        price_activity: priceActivity ?? undefined,
                         price_q: priceQuery || undefined,
                         price_sort: priceSort === "price_desc" ? "price_asc" : "price_desc",
                       })}`}
@@ -822,6 +823,7 @@ export default async function NflMarketPage({
                         series,
                         price_position: pricePositionFilter ?? undefined,
                         price_team: priceTeamFilter ?? undefined,
+                        price_activity: priceActivity ?? undefined,
                         price_q: priceQuery || undefined,
                         price_sort: priceSort === "market_cap_desc" ? "market_cap_asc" : "market_cap_desc",
                       })}`}
@@ -838,6 +840,24 @@ export default async function NflMarketPage({
                         series,
                         price_position: pricePositionFilter ?? undefined,
                         price_team: priceTeamFilter ?? undefined,
+                        price_activity: priceActivity ?? undefined,
+                        price_q: priceQuery || undefined,
+                        price_sort: priceSort === "supply_desc" ? "supply_asc" : "supply_desc",
+                      })}`}
+                      className="hover:underline"
+                    >
+                      Supply
+                    </Link>
+                  </th>
+                  <th className="px-3 py-2">
+                    <Link
+                      href={`/nfl${buildQuery({
+                        windowHours: String(windowHours),
+                        trendDays: String(trendDays),
+                        series,
+                        price_position: pricePositionFilter ?? undefined,
+                        price_team: priceTeamFilter ?? undefined,
+                        price_activity: priceActivity ?? undefined,
                         price_q: priceQuery || undefined,
                         price_sort: priceSort === "change_desc" ? "change_asc" : "change_desc",
                       })}`}
@@ -854,6 +874,7 @@ export default async function NflMarketPage({
                         series,
                         price_position: pricePositionFilter ?? undefined,
                         price_team: priceTeamFilter ?? undefined,
+                        price_activity: priceActivity ?? undefined,
                         price_q: priceQuery || undefined,
                         price_sort: "volume_desc",
                       })}`}
@@ -870,6 +891,7 @@ export default async function NflMarketPage({
                         series,
                         price_position: pricePositionFilter ?? undefined,
                         price_team: priceTeamFilter ?? undefined,
+                        price_activity: priceActivity ?? undefined,
                         price_q: priceQuery || undefined,
                         price_sort: "trades_desc",
                       })}`}
@@ -895,6 +917,9 @@ export default async function NflMarketPage({
                       <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
                         {marketCap !== undefined ? formatUsdValue(marketCap) : "—"}
                       </td>
+                      <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
+                        {supply !== null && supply !== undefined ? supply.toLocaleString() : "—"}
+                      </td>
                       <td
                         className={`px-3 py-2 ${
                           (row.priceChange24hPercent ?? 0) >= 0 ? "text-emerald-500" : "text-rose-500"
@@ -914,7 +939,7 @@ export default async function NflMarketPage({
                 })}
                 {pricePageRows.length === 0 ? (
                   <tr>
-                    <td className="px-3 py-4 text-zinc-600 dark:text-zinc-400" colSpan={8}>
+                    <td className="px-3 py-4 text-zinc-600 dark:text-zinc-400" colSpan={9}>
                       No token prices available.
                     </td>
                   </tr>
@@ -931,6 +956,7 @@ export default async function NflMarketPage({
                 team: priceTeamFilter ?? undefined,
                 activity: priceActivity ?? undefined,
                 q: priceQuery || undefined,
+                sort: priceSort,
               })}`}
             >
               Open full prices table →
