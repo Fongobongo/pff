@@ -36,6 +36,12 @@ const HOME_AWAY_OPTIONS = [
   { key: "away", label: "Away" },
 ] as const;
 
+const SPLIT_MODE_OPTIONS = [
+  { key: "all", label: "All games" },
+  { key: "home", label: "Home only" },
+  { key: "away", label: "Away only" },
+] as const;
+
 const SORT_OPTIONS = [
   { key: "l3", label: "L3 Avg FPts" },
   { key: "season", label: "Season FPPG" },
@@ -295,6 +301,7 @@ export default async function NflTrendingPage({
     min_wopr?: string;
     min_catch?: string;
     min_ypt?: string;
+    split_mode?: string;
   }>;
 }) {
   const params = await searchParams;
@@ -321,6 +328,7 @@ export default async function NflTrendingPage({
   const minWopr = parseNumber(params.min_wopr, 0, 0, 1);
   const minCatch = parseNumber(params.min_catch, 0, 0, 100);
   const minYpt = parseNumber(params.min_ypt, 0, 0, 50);
+  const splitMode = SPLIT_MODE_OPTIONS.find((opt) => opt.key === params.split_mode)?.key ?? "all";
 
   const [snapshot, weeklyData, schedule] = await Promise.all([
     getSportfunMarketSnapshot({ sport: "nfl", windowHours: 24, trendDays: 30, maxTokens: 500 }),
@@ -466,12 +474,19 @@ export default async function NflTrendingPage({
 
   const rows: TrendRow[] = Array.from(players.values()).map((entry) => {
     entry.weeks.sort((a, b) => a.week - b.week);
-    const lastOpp = entry.weeks.length ? entry.weeks[entry.weeks.length - 1].opponent : undefined;
-    const last3 = entry.weeks.slice(-TREND_WEEKS);
-    const prev3 = entry.weeks.slice(-TREND_WEEKS * 2, -TREND_WEEKS);
+    const filteredWeeks =
+      splitMode === "home"
+        ? entry.weeks.filter((w) => w.homeAway === "HOME")
+        : splitMode === "away"
+          ? entry.weeks.filter((w) => w.homeAway === "AWAY")
+          : entry.weeks;
 
-    const total = entry.weeks.reduce((acc, val) => acc + val.score, 0);
-    entry.games = entry.weeks.length;
+    const lastOpp = filteredWeeks.length ? filteredWeeks[filteredWeeks.length - 1].opponent : undefined;
+    const last3 = filteredWeeks.slice(-TREND_WEEKS);
+    const prev3 = filteredWeeks.slice(-TREND_WEEKS * 2, -TREND_WEEKS);
+
+    const total = filteredWeeks.reduce((acc, val) => acc + val.score, 0);
+    entry.games = filteredWeeks.length;
     entry.seasonAvg = entry.games ? total / entry.games : 0;
 
     const homeWeeks = entry.weeks.filter((w) => w.homeAway === "HOME");
@@ -833,6 +848,20 @@ export default async function NflTrendingPage({
           </select>
         </label>
         <label className="text-xs text-zinc-600 dark:text-zinc-400">
+          Split mode
+          <select
+            name="split_mode"
+            defaultValue={splitMode}
+            className="mt-1 block w-28 rounded-md border border-black/10 bg-white px-3 py-2 text-sm text-black dark:border-white/10 dark:bg-white/5 dark:text-white"
+          >
+            {SPLIT_MODE_OPTIONS.map((opt) => (
+              <option key={opt.key} value={opt.key}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="text-xs text-zinc-600 dark:text-zinc-400">
           Rank mode
           <select
             name="rank_mode"
@@ -1033,8 +1062,8 @@ export default async function NflTrendingPage({
       <section className="mt-4 text-sm text-zinc-600 dark:text-zinc-400">
         <p>
           Window: last {TREND_WEEKS} games within the last {lookback} weeks through week {viewWeek}. Rank mode:{" "}
-          {rankMode === "all" ? "overall" : "position"}. Opp Δ compares opponent allowed vs league average over last{" "}
-          {OPP_WINDOW_WEEKS} weeks. Consistency uses L3 standard deviation.
+          {rankMode === "all" ? "overall" : "position"}. Split mode: {splitMode}. Opp Δ compares opponent allowed vs league
+          average over last {OPP_WINDOW_WEEKS} weeks. Consistency uses L3 standard deviation.
         </p>
       </section>
 
