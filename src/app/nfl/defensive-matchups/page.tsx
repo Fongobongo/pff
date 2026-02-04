@@ -43,7 +43,7 @@ function scoreValue(row: ScoreWeekRow): number {
 export default async function NflDefensiveMatchupsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ season?: string; week?: string; season_type?: string }>;
+  searchParams: Promise<{ season?: string; week?: string; season_type?: string; sort_pos?: string }>;
 }) {
   const params = await searchParams;
   const rawSeason = Number(params.season ?? "2023");
@@ -51,6 +51,9 @@ export default async function NflDefensiveMatchupsPage({
   const seasonType = (params.season_type ?? "REG").toUpperCase();
   const rawWeek = params.week ? Number(params.week) : undefined;
   const requestedWeek = rawWeek !== undefined && Number.isFinite(rawWeek) ? rawWeek : undefined;
+  const sortPos = POSITIONS.includes((params.sort_pos ?? "") as (typeof POSITIONS)[number])
+    ? (params.sort_pos as (typeof POSITIONS)[number])
+    : "team";
 
   const baseUrl = await getBaseUrl();
   const scheduleRes = await fetch(
@@ -93,7 +96,18 @@ export default async function NflDefensiveMatchupsPage({
     return { team, averages };
   });
 
-  const sortedRows = defenseRows.slice().sort((a, b) => a.team.localeCompare(b.team));
+  const rankByPos = new Map<string, Map<string, number>>();
+  for (const pos of POSITIONS) {
+    const sorted = defenseRows.slice().sort((a, b) => b.averages[pos] - a.averages[pos]);
+    const rankMap = new Map<string, number>();
+    sorted.forEach((row, idx) => rankMap.set(row.team, idx + 1));
+    rankByPos.set(pos, rankMap);
+  }
+
+  const sortedRows = defenseRows.slice().sort((a, b) => {
+    if (sortPos === "team") return a.team.localeCompare(b.team);
+    return b.averages[sortPos] - a.averages[sortPos];
+  });
 
   const matchupLeaders = POSITIONS.map((pos) => {
     const sorted = defenseRows.slice().sort((a, b) => b.averages[pos] - a.averages[pos]);
@@ -105,7 +119,7 @@ export default async function NflDefensiveMatchupsPage({
   });
 
   return (
-    <NflPageShell title="NFL defensive matchups" description="Fantasy points allowed by defense and position.">
+    <NflPageShell title="NFL defensive matchups" description="Fantasy points allowed by defense and position with ranks.">
       <section className="mt-6 flex flex-wrap gap-3">
         {SAMPLE_SEASONS.map((year) => (
           <Link
@@ -115,7 +129,12 @@ export default async function NflDefensiveMatchupsPage({
                 ? "border-black bg-black text-white dark:border-white dark:bg-white dark:text-black"
                 : "border-black/10 bg-white text-black hover:bg-zinc-50 dark:border-white/10 dark:bg-white/5 dark:text-white dark:hover:bg-white/10"
             }`}
-            href={`/nfl/defensive-matchups${buildQuery({ season: String(year), week: params.week, season_type: seasonType })}`}
+            href={`/nfl/defensive-matchups${buildQuery({
+              season: String(year),
+              week: params.week,
+              season_type: seasonType,
+              sort_pos: params.sort_pos,
+            })}`}
           >
             {year}
           </Link>
@@ -128,7 +147,12 @@ export default async function NflDefensiveMatchupsPage({
                 ? "border-black bg-black text-white dark:border-white dark:bg-white dark:text-black"
                 : "border-black/10 bg-white text-black hover:bg-zinc-50 dark:border-white/10 dark:bg-white/5 dark:text-white dark:hover:bg-white/10"
             }`}
-            href={`/nfl/defensive-matchups${buildQuery({ season: String(season), week: params.week, season_type: type })}`}
+            href={`/nfl/defensive-matchups${buildQuery({
+              season: String(season),
+              week: params.week,
+              season_type: type,
+              sort_pos: params.sort_pos,
+            })}`}
           >
             {type}
           </Link>
@@ -144,12 +168,44 @@ export default async function NflDefensiveMatchupsPage({
                 ? "border-black bg-black text-white dark:border-white dark:bg-white dark:text-black"
                 : "border-black/10 bg-white text-black hover:bg-zinc-50 dark:border-white/10 dark:bg-white/5 dark:text-white dark:hover:bg-white/10"
             }`}
-            href={`/nfl/defensive-matchups${buildQuery({ season: String(season), week: String(wk), season_type: seasonType })}`}
+            href={`/nfl/defensive-matchups${buildQuery({
+              season: String(season),
+              week: String(wk),
+              season_type: seasonType,
+              sort_pos: params.sort_pos,
+            })}`}
           >
             Week {wk}
           </Link>
         ))}
       </section>
+
+      <form className="mt-4 flex flex-wrap items-end gap-3" method="GET">
+        <input type="hidden" name="season" value={season} />
+        <input type="hidden" name="season_type" value={seasonType} />
+        <input type="hidden" name="week" value={week} />
+        <label className="text-xs text-zinc-600 dark:text-zinc-400">
+          Sort by
+          <select
+            name="sort_pos"
+            defaultValue={sortPos}
+            className="mt-1 block w-36 rounded-md border border-black/10 bg-white px-3 py-2 text-sm text-black dark:border-white/10 dark:bg-white/5 dark:text-white"
+          >
+            <option value="team">Team</option>
+            {POSITIONS.map((pos) => (
+              <option key={pos} value={pos}>
+                {pos} allowed
+              </option>
+            ))}
+          </select>
+        </label>
+        <button
+          type="submit"
+          className="rounded-md border border-black/10 bg-black px-4 py-2 text-sm text-white hover:bg-zinc-800 dark:border-white/10 dark:bg-white dark:text-black dark:hover:bg-zinc-200"
+        >
+          Apply
+        </button>
+      </form>
 
       <section className="mt-8">
         <div className="overflow-hidden rounded-xl border border-black/10 bg-white dark:border-white/10 dark:bg-white/5">
@@ -171,11 +227,14 @@ export default async function NflDefensiveMatchupsPage({
               {sortedRows.map((row) => (
                 <tr key={row.team} className="border-t border-black/10 dark:border-white/10">
                   <td className="px-3 py-2 text-black dark:text-white">{row.team}</td>
-                  {POSITIONS.map((pos) => (
-                    <td key={pos} className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
-                      {row.averages[pos].toFixed(1)}
-                    </td>
-                  ))}
+                  {POSITIONS.map((pos) => {
+                    const rank = rankByPos.get(pos)?.get(row.team);
+                    return (
+                      <td key={pos} className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
+                        {row.averages[pos].toFixed(1)} {rank ? `(#${rank})` : ""}
+                      </td>
+                    );
+                  })}
                 </tr>
               ))}
               {sortedRows.length === 0 ? (
