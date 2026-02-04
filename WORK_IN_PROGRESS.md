@@ -14,20 +14,33 @@
   - Identify free-tier data sources and constraints.
   - Build ingestion endpoints + caching for stat feeds.
   - Add per-sport scoring tests to validate normalization.
-- NFL parity plan (from nfl-fun.vercel.app gap list):
-  - **Stage 0**: confirm scope (full parity vs stubs) and definition of “done”.
-  - **Stage 1**: add UI shells + navigation for missing routes:
-    - `/nfl/players`, `/nfl/teams`, `/nfl/standings`, `/nfl/portfolio`, `/nfl/token`
-    - `/nfl/trending`, `/nfl/analytics`, `/nfl/advanced-stats`
-    - `/nfl/opportunities`, `/nfl/matchups`, `/nfl/defensive-matchups`
-    - `/nfl/tournament-summary`, `/nfl/tournament-matrix`
-  - **Stage 2**: add core NFL data APIs (players/teams/standings/schedule) and wire to pages.
-  - **Stage 3**: derive advanced pages (trending/analytics/matchups/opportunities).
-  - **Stage 4**: tournament summary + matrix (aggregates from weekly stats + scoring).
-  - **Stage 5**: portfolio/token pages (pending source confirmation).
+- NFL parity plan (nfl-fun.vercel.app):
+  - **1) Market Overview (NFL)** — расширить рынок до уровня nfl-fun:
+    - Market Cap (оценка по supply/metadata), Market Sentiment (bullish/bearish), Price Range/Spread.
+    - Trend‑фильтры All/Gainers/Losers.
+    - Position Breakdown (QB/RB/WR/TE/etc) с долей и средней динамикой.
+  - **2) Players** — карточка/таблица как на nfl-fun:
+    - Фильтр по позиции и режимы Season Stats / Weekly Stats.
+    - Колонки: FPts, FPPG, Proj, L3 Avg, Avg Rank, TP Rate, Total TP, TP/Price и др.
+  - **3) Trending** — L3‑метрики и тренд‑скор:
+    - L3 Avg FPts, L3 Avg Rank, TP Rate L3, Trend, Opp Δ.
+    - Фильтры по позиции/тренду/оппонентам.
+  - **4) Advanced Stats** — вкладки и метрики:
+    - Efficiency, Volume, Red Zone, Advanced, Tournament.
+    - EPA, air yards, red‑zone usage, ceiling/floor/consistency.
+  - **5) Opportunities** — недельный usage‑трек:
+    - Targets/Rushes/Snaps по позициям и L3‑сводки.
+  - **6) Matchups** — расширить до matchup‑карточек:
+    - Implied points и defensive ranks vs позициям.
+  - **7) Analytics** — сравнение игроков + турнирная аналитика:
+    - Player compare, usage trends, contest‑аналитика.
+  - **8) Signals/Alerts** — отдельная страница:
+    - Market signals, алерты по резким изменениям.
+  - **9) Маппинг Sport.fun ↔ NFL игроки**:
+    - Привязка tokenId к player_id/позиции для сквозных таблиц.
 
 ## Status
-- Last updated: 2026-02-02
+- Last updated: 2026-02-04
 - Step 4 (Stats ingestion + scoring) started:
   - Added NFL + Football scoring library with normalized stat keys and result bonuses.
   - Added scoring API endpoints: `/api/stats/nfl/score` and `/api/stats/football/score`.
