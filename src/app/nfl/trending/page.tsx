@@ -24,6 +24,11 @@ const TREND_FILTERS = [
   { key: "down", label: "Fallers" },
 ] as const;
 
+const RANK_MODE_OPTIONS = [
+  { key: "pos", label: "Pos rank" },
+  { key: "all", label: "Overall rank" },
+] as const;
+
 const SORT_OPTIONS = [
   { key: "l3", label: "L3 Avg FPts" },
   { key: "trend", label: "Trend Δ" },
@@ -80,6 +85,14 @@ function average(values: number[]): number | undefined {
   return values.reduce((acc, val) => acc + val, 0) / values.length;
 }
 
+function standardDeviation(values: number[]): number | undefined {
+  if (!values.length) return undefined;
+  const mean = values.reduce((acc, val) => acc + val, 0) / values.length;
+  const variance =
+    values.reduce((acc, val) => acc + (val - mean) ** 2, 0) / values.length;
+  return Math.sqrt(variance);
+}
+
 function buildQuery(params: Record<string, string | undefined>) {
   const query = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
@@ -110,11 +123,14 @@ type TrendRow = {
   playerName: string;
   position?: string;
   team?: string;
+  seasonAvg: number;
   l3Avg: number;
   l3AvgRank?: number;
+  l3StdDev?: number;
   tpRateL3: number;
   trend?: number;
   oppDelta?: number;
+  oppRank?: number;
   lastOpp?: string;
   token?: TokenInfo;
   weeks: WeekScore[];
@@ -195,6 +211,7 @@ export default async function NflTrendingPage({
     trend?: string;
     opp?: string;
     q?: string;
+    rank_mode?: string;
   }>;
 }) {
   const params = await searchParams;
@@ -205,6 +222,7 @@ export default async function NflTrendingPage({
   const positionFilter = params.position?.toUpperCase();
   const oppFilter = params.opp?.toUpperCase();
   const q = params.q?.trim().toLowerCase() ?? "";
+  const rankMode = RANK_MODE_OPTIONS.find((opt) => opt.key === params.rank_mode)?.key ?? "pos";
 
   const [snapshot, weeklyData] = await Promise.all([
     getSportfunMarketSnapshot({ sport: "nfl", windowHours: 24, trendDays: 30, maxTokens: 500 }),
@@ -256,6 +274,23 @@ export default async function NflTrendingPage({
     leaguePosScores.set(pos, leagueList);
   }
 
+  const oppRankByPos = new Map<string, Map<string, number>>();
+  const oppBuckets = new Map<string, { opp: string; avg: number }[]>();
+  for (const [key, values] of oppPosScores.entries()) {
+    const [opp, pos] = key.split("|");
+    const avg = average(values);
+    if (!opp || !pos || avg === undefined) continue;
+    const list = oppBuckets.get(pos) ?? [];
+    list.push({ opp, avg });
+    oppBuckets.set(pos, list);
+  }
+  for (const [pos, list] of oppBuckets.entries()) {
+    list.sort((a, b) => b.avg - a.avg);
+    const rankMap = new Map<string, number>();
+    list.forEach((item, idx) => rankMap.set(item.opp, idx + 1));
+    oppRankByPos.set(pos, rankMap);
+  }
+
   const players = new Map<string, TrendRow>();
 
   for (const row of analysisRows) {
@@ -266,8 +301,10 @@ export default async function NflTrendingPage({
       playerName,
       position: row.position,
       team: row.team,
+      seasonAvg: 0,
       l3Avg: 0,
       l3AvgRank: undefined,
+      l3StdDev: undefined,
       tpRateL3: 0,
       weeks: [],
       token: tokenIndex.get(normalizeName(playerName)),
@@ -298,11 +335,18 @@ export default async function NflTrendingPage({
     const last3 = entry.weeks.slice(-TREND_WEEKS);
     const prev3 = entry.weeks.slice(-TREND_WEEKS * 2, -TREND_WEEKS);
 
+    const total = entry.weeks.reduce((acc, val) => acc + val.score, 0);
+    entry.seasonAvg = entry.weeks.length ? total / entry.weeks.length : 0;
+
     entry.l3Avg = last3.length ? last3.reduce((acc, val) => acc + val.score, 0) / last3.length : 0;
-    const l3RankValues = last3.map((w) => w.posRank).filter((v): v is number => Boolean(v));
+    const l3RankValues =
+      rankMode === "all"
+        ? last3.map((w) => w.rank).filter((v): v is number => Boolean(v))
+        : last3.map((w) => w.posRank).filter((v): v is number => Boolean(v));
     entry.l3AvgRank = l3RankValues.length
       ? l3RankValues.reduce((acc, val) => acc + val, 0) / l3RankValues.length
       : undefined;
+    entry.l3StdDev = standardDeviation(last3.map((w) => w.score));
 
     const pos = (entry.position ?? "UNK").toUpperCase();
     const threshold = TOP_THRESHOLDS[pos] ?? 24;
@@ -320,6 +364,7 @@ export default async function NflTrendingPage({
       if (oppAvg !== undefined && leagueAvg !== undefined) {
         entry.oppDelta = oppAvg - leagueAvg;
       }
+      entry.oppRank = oppRankByPos.get(pos)?.get(lastOpp);
     }
 
     return entry;
@@ -460,6 +505,20 @@ export default async function NflTrendingPage({
           </select>
         </label>
         <label className="text-xs text-zinc-600 dark:text-zinc-400">
+          Rank mode
+          <select
+            name="rank_mode"
+            defaultValue={rankMode}
+            className="mt-1 block w-28 rounded-md border border-black/10 bg-white px-3 py-2 text-sm text-black dark:border-white/10 dark:bg-white/5 dark:text-white"
+          >
+            {RANK_MODE_OPTIONS.map((opt) => (
+              <option key={opt.key} value={opt.key}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="text-xs text-zinc-600 dark:text-zinc-400">
           Opponent
           <select
             name="opp"
@@ -498,25 +557,28 @@ export default async function NflTrendingPage({
 
       <section className="mt-4 text-sm text-zinc-600 dark:text-zinc-400">
         <p>
-          Window: last {TREND_WEEKS} games through week {viewWeek}. Opp Δ compares opponent allowed vs league
-          average over last {OPP_WINDOW_WEEKS} weeks.
+          Window: last {TREND_WEEKS} games through week {viewWeek}. Rank mode: {rankMode === "all" ? "overall" : "position"}.
+          Opp Δ compares opponent allowed vs league average over last {OPP_WINDOW_WEEKS} weeks.
         </p>
       </section>
 
       <section className="mt-8">
         <div className="overflow-x-auto rounded-xl border border-black/10 bg-white dark:border-white/10 dark:bg-white/5">
-          <table className="w-full min-w-[980px] text-left text-sm">
+          <table className="w-full min-w-[1200px] text-left text-sm">
             <thead className="bg-zinc-100 text-xs uppercase tracking-wide text-zinc-500 dark:bg-white/10 dark:text-zinc-400">
               <tr>
                 <th className="px-3 py-2">Player</th>
                 <th className="px-3 py-2">Pos</th>
                 <th className="px-3 py-2">Team</th>
                 <th className="px-3 py-2">Price</th>
+                <th className="px-3 py-2">Season FPPG</th>
                 <th className="px-3 py-2">L3 Avg</th>
+                <th className="px-3 py-2">L3 Std</th>
                 <th className="px-3 py-2">L3 Avg Rank</th>
                 <th className="px-3 py-2">TP Rate L3</th>
                 <th className="px-3 py-2">Trend Δ</th>
                 <th className="px-3 py-2">Opp Δ</th>
+                <th className="px-3 py-2">Opp Rank</th>
                 <th className="px-3 py-2">Opp</th>
               </tr>
             </thead>
@@ -530,7 +592,13 @@ export default async function NflTrendingPage({
                     <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
                       {formatUsd(row.token?.currentPriceUsdcRaw)}
                     </td>
+                    <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
+                      {formatNumber(row.seasonAvg)}
+                    </td>
                     <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{formatNumber(row.l3Avg)}</td>
+                    <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
+                      {row.l3StdDev !== undefined ? formatNumber(row.l3StdDev) : "—"}
+                    </td>
                     <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{formatRank(row.l3AvgRank)}</td>
                     <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
                       {formatPercent(row.tpRateL3 * 100)}
@@ -545,13 +613,16 @@ export default async function NflTrendingPage({
                     >
                       {row.oppDelta !== undefined ? formatNumber(row.oppDelta) : "—"}
                     </td>
+                    <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
+                      {row.oppRank ? `#${row.oppRank}` : "—"}
+                    </td>
                     <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{row.lastOpp ?? "—"}</td>
                   </tr>
                 );
               })}
               {sorted.length === 0 ? (
                 <tr>
-                  <td className="px-3 py-4 text-zinc-600 dark:text-zinc-400" colSpan={10}>
+                  <td className="px-3 py-4 text-zinc-600 dark:text-zinc-400" colSpan={13}>
                     No players match the filters.
                   </td>
                 </tr>
@@ -563,8 +634,9 @@ export default async function NflTrendingPage({
 
       <section className="mt-6 text-sm text-zinc-600 dark:text-zinc-400">
         <p>
-          L3 Avg Rank uses positional ranks. TP Rate L3 counts top‑finish weeks vs positional thresholds. Prices come from
-          Sport.fun tokens when a name match exists.
+          L3 Avg Rank follows the selected rank mode. TP Rate L3 counts top‑finish weeks vs positional thresholds. Opp Rank
+          is relative to position over the last {OPP_WINDOW_WEEKS} weeks. Prices come from Sport.fun tokens when a name
+          match exists.
         </p>
       </section>
     </NflPageShell>
