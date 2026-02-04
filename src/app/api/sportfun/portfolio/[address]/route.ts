@@ -5,6 +5,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { alchemyRpc } from "@/lib/alchemy";
 import { shortenAddress } from "@/lib/format";
+import { withCache } from "@/lib/stats/cache";
 import {
   decodeAbiParameters,
   decodeEventLog,
@@ -74,11 +75,59 @@ type TxReceiptLog = {
 
 const ERC20_TRANSFER_TOPIC0 =
   "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+const SCAN_START_DATE_ISO = "2025-08-01T00:00:00Z";
+const SCAN_START_BLOCK_BUFFER = 500n;
 
 function topicToAddressLc(topic: Hex | undefined): string {
   const t = String(topic ?? "0x").toLowerCase().replace(/^0x/, "");
   // topics encode indexed addresses as 32-byte values; take the last 20 bytes.
   return `0x${t.slice(-40)}`;
+}
+
+function toHex(value: bigint): Hex {
+  return `0x${value.toString(16)}` as Hex;
+}
+
+async function getLatestBlock(): Promise<bigint> {
+  const result = await alchemyRpc("eth_blockNumber", []);
+  return BigInt(result);
+}
+
+async function getBlockTimestampMs(blockNumber: bigint): Promise<number> {
+  const block = await alchemyRpc("eth_getBlockByNumber", [toHex(blockNumber), false]);
+  const ts = Number(BigInt(block.timestamp));
+  return ts * 1000;
+}
+
+async function findBlockByTimestamp(targetMs: number): Promise<bigint> {
+  const latest = await getLatestBlock();
+  let low = 0n;
+  let high = latest;
+  let iter = 0;
+  while (low + 1n < high && iter < 40) {
+    iter += 1;
+    const mid = (low + high) / 2n;
+    const ts = await getBlockTimestampMs(mid);
+    if (ts < targetMs) {
+      low = mid;
+    } else {
+      high = mid;
+    }
+  }
+  return high;
+}
+
+async function getScanStartBlockHex(): Promise<string> {
+  const targetMs = Date.parse(SCAN_START_DATE_ISO);
+  if (!Number.isFinite(targetMs)) return "0x0";
+  const blockStr = await withCache(
+    `sportfun:scan-start-block:${SCAN_START_DATE_ISO}`,
+    60 * 60 * 24 * 30,
+    async () => (await findBlockByTimestamp(targetMs)).toString(10)
+  );
+  let block = BigInt(blockStr);
+  if (block > SCAN_START_BLOCK_BUFFER) block -= SCAN_START_BLOCK_BUFFER;
+  return toHex(block);
 }
 
 function decodeErc20DeltaFromReceipt(params: {
@@ -281,6 +330,7 @@ async function fetchTransfersForWallet(params: {
   maxCount: string;
   maxPages: number;
   deadlineMs?: number;
+  fromBlock?: string;
 }): Promise<TransfersPageResult> {
   const baseParams: {
     fromBlock: string;
@@ -291,7 +341,7 @@ async function fetchTransfersForWallet(params: {
     order: "desc";
     contractAddresses?: string[];
   } = {
-    fromBlock: "0x0",
+    fromBlock: params.fromBlock ?? "0x0",
     toBlock: "latest",
     category: [params.category],
     withMetadata: true,
@@ -885,6 +935,7 @@ export async function GET(request: Request, context: { params: Promise<{ address
   const walletLc = wallet.toLowerCase();
 
   const scanMode = q.scanMode ?? "default";
+  const scanStartBlock = await getScanStartBlockHex();
   const isVercel = Boolean(process.env.VERCEL);
   const budgetMs = scanMode === "full" ? (isVercel ? 9_000 : 20_000) : isVercel ? 7_000 : 10_000;
   const deadlineMs = Date.now() + budgetMs;
@@ -919,6 +970,7 @@ export async function GET(request: Request, context: { params: Promise<{ address
       maxCount,
       maxPages,
       deadlineMs,
+      fromBlock: scanStartBlock,
     }),
     fetchTransfersForWallet({
       address: wallet,
@@ -928,6 +980,7 @@ export async function GET(request: Request, context: { params: Promise<{ address
       maxCount,
       maxPages,
       deadlineMs,
+      fromBlock: scanStartBlock,
     }),
   ]);
 
@@ -1016,6 +1069,7 @@ export async function GET(request: Request, context: { params: Promise<{ address
       maxCount,
       maxPages,
       deadlineMs,
+      fromBlock: scanStartBlock,
     }),
     fetchTransfersForWallet({
       address: wallet,
@@ -1025,6 +1079,7 @@ export async function GET(request: Request, context: { params: Promise<{ address
       maxCount,
       maxPages,
       deadlineMs,
+      fromBlock: scanStartBlock,
     }),
   ]);
 
