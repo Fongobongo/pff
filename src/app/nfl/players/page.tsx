@@ -22,6 +22,14 @@ const TOP_THRESHOLDS: Record<string, number> = {
   DST: 12,
 };
 
+const TOP_MODE_OPTIONS = [
+  { key: "top12", label: "Top 12" },
+  { key: "top24", label: "Top 24" },
+  { key: "pos", label: "By position" },
+] as const;
+
+type TopMode = (typeof TOP_MODE_OPTIONS)[number]["key"];
+
 const SEASON_SORT_OPTIONS = [
   { key: "fpts", label: "FPts" },
   { key: "fppg", label: "FPPG" },
@@ -204,6 +212,7 @@ export default async function NflPlayersPage({
     season?: string;
     week?: string;
     season_type?: string;
+    top_mode?: string;
   }>;
 }) {
   const params = await searchParams;
@@ -215,6 +224,7 @@ export default async function NflPlayersPage({
   const sort = sortOptions.find((opt) => opt.key === params.sort)?.key ?? DEFAULT_SORT[view];
   const page = parseNumber(params.page, 1, 1, 9999);
   const positionFilter = params.position?.toUpperCase();
+  const topMode = TOP_MODE_OPTIONS.find((opt) => opt.key === params.top_mode)?.key ?? "pos";
 
   const [snapshot, weeklyData] = await Promise.all([
     getSportfunMarketSnapshot({ sport: "nfl", windowHours: 24, trendDays: 30, maxTokens: 500 }),
@@ -293,14 +303,24 @@ export default async function NflPlayersPage({
       : 0;
 
     const rankValues = entry.weeks.map((w) => w.rank).filter((v): v is number => Boolean(v));
+    const posRankValues = entry.weeks.map((w) => w.posRank).filter((v): v is number => Boolean(v));
     entry.avgRank = rankValues.length
       ? rankValues.reduce((acc, val) => acc + val, 0) / rankValues.length
       : undefined;
 
     const pos = (entry.position ?? "UNK").toUpperCase();
     const threshold = TOP_THRESHOLDS[pos] ?? 24;
-    entry.tpCount = entry.weeks.filter((w) => w.posRank && w.posRank <= threshold).length;
-    entry.tpRate = entry.games ? entry.tpCount / entry.games : 0;
+    const tpByPos = entry.weeks.filter((w) => w.posRank && w.posRank <= threshold).length;
+    const tpBy12 = entry.weeks.filter((w) => w.rank && w.rank <= 12).length;
+    const tpBy24 = entry.weeks.filter((w) => w.rank && w.rank <= 24).length;
+    const tpCount = topMode === "top12" ? tpBy12 : topMode === "top24" ? tpBy24 : tpByPos;
+    entry.tpCount = tpCount;
+    entry.tpRate = entry.games ? tpCount / entry.games : 0;
+    if (topMode === "pos") {
+      entry.avgRank = posRankValues.length
+        ? posRankValues.reduce((acc, val) => acc + val, 0) / posRankValues.length
+        : undefined;
+    }
 
     if (view === "weekly") {
       const weekRow = entry.weeks.find((w) => w.week === viewWeek);
@@ -451,6 +471,20 @@ export default async function NflPlayersPage({
           </select>
         </label>
         <label className="text-xs text-zinc-600 dark:text-zinc-400">
+          TP Mode
+          <select
+            name="top_mode"
+            defaultValue={topMode}
+            className="mt-1 block w-32 rounded-md border border-black/10 bg-white px-3 py-2 text-sm text-black dark:border-white/10 dark:bg-white/5 dark:text-white"
+          >
+            {TOP_MODE_OPTIONS.map((opt) => (
+              <option key={opt.key} value={opt.key}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="text-xs text-zinc-600 dark:text-zinc-400">
           Sort
           <select
             name="sort"
@@ -474,9 +508,9 @@ export default async function NflPlayersPage({
 
       <section className="mt-4 text-sm text-zinc-600 dark:text-zinc-400">
         <p>
-          Showing {pageRows.length} of {filtered.length} players · page {safePage} / {totalPages}. TP Rate = share
-          of weeks finishing inside positional top {TOP_THRESHOLDS.QB}/{TOP_THRESHOLDS.RB}/{TOP_THRESHOLDS.WR}/
-          {TOP_THRESHOLDS.TE}.
+          Showing {pageRows.length} of {filtered.length} players · page {safePage} / {totalPages}. TP Mode: {
+            topMode === "top12" ? "Top 12 overall" : topMode === "top24" ? "Top 24 overall" : "Position top"
+          }.
         </p>
       </section>
 
@@ -502,7 +536,9 @@ export default async function NflPlayersPage({
                   </>
                 )}
                 <th className="px-3 py-2">L3 Avg</th>
-                <th className="px-3 py-2">Avg Rank</th>
+                <th className="px-3 py-2">
+                  Avg Rank {topMode === "pos" ? "(Pos)" : "(All)"}
+                </th>
                 <th className="px-3 py-2">TP Rate</th>
                 <th className="px-3 py-2">TP Total</th>
                 <th className="px-3 py-2">TP/Price</th>
@@ -580,6 +616,7 @@ export default async function NflPlayersPage({
               season: String(season),
               week: view === "weekly" ? String(viewWeek) : undefined,
               season_type: seasonType,
+              top_mode: topMode,
             })}`}
           >
             {p}
