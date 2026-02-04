@@ -1,6 +1,6 @@
 import Link from "next/link";
 import SoccerPageShell from "../_components/SoccerPageShell";
-import { SOCCER_COMPETITIONS, fetchSoccerCompetitionScores } from "@/lib/soccerStats";
+import { SOCCER_COMPETITIONS, fetchSoccerCompetitionScores, getFeaturedSoccerCompetitions } from "@/lib/soccerStats";
 
 function buildQuery(params: Record<string, string | undefined>) {
   const query = new URLSearchParams();
@@ -80,28 +80,56 @@ export default async function SoccerTournamentMatrixPage({
   const selected = SOCCER_COMPETITIONS.find(
     (comp) => comp.id === competitionId && comp.seasonId === seasonId
   );
+  const featuredCompetitions = getFeaturedSoccerCompetitions({ id: competitionId, seasonId });
 
   return (
     <SoccerPageShell title="Soccer tournament matrix" description="Match-by-match fantasy scoring matrix.">
-      <section className="mt-6 flex flex-wrap gap-3">
-        {SOCCER_COMPETITIONS.map((comp) => (
-          <Link
-            key={`${comp.id}-${comp.seasonId}`}
-            className={`rounded-full border px-4 py-2 text-sm ${
-              comp.id === competitionId && comp.seasonId === seasonId
-                ? "border-black bg-black text-white dark:border-white dark:bg-white dark:text-black"
-                : "border-black/10 bg-white text-black hover:bg-zinc-50 dark:border-white/10 dark:bg-white/5 dark:text-white dark:hover:bg-white/10"
-            }`}
-            href={`/soccer/tournament-matrix${buildQuery({
-              competition: String(comp.id),
-              season: String(comp.seasonId),
-              limit: String(safeLimit),
-              top: String(top),
-            })}`}
-          >
-            {comp.label}
-          </Link>
-        ))}
+      <section className="mt-6 space-y-3">
+        <div className="flex flex-wrap gap-3">
+          {featuredCompetitions.map((comp) => (
+            <Link
+              key={`${comp.id}-${comp.seasonId}`}
+              className={`rounded-full border px-4 py-2 text-sm ${
+                comp.id === competitionId && comp.seasonId === seasonId
+                  ? "border-black bg-black text-white dark:border-white dark:bg-white dark:text-black"
+                  : "border-black/10 bg-white text-black hover:bg-zinc-50 dark:border-white/10 dark:bg-white/5 dark:text-white dark:hover:bg-white/10"
+              }`}
+              href={`/soccer/tournament-matrix${buildQuery({
+                competition: String(comp.id),
+                season: String(comp.seasonId),
+                limit: String(safeLimit),
+                top: String(top),
+              })}`}
+            >
+              {comp.label}
+            </Link>
+          ))}
+        </div>
+        <details className="rounded-xl border border-black/10 bg-white p-3 text-sm text-zinc-600 dark:border-white/10 dark:bg-white/5 dark:text-zinc-400">
+          <summary className="cursor-pointer text-xs uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+            All competitions
+          </summary>
+          <div className="mt-3 flex max-h-64 flex-wrap gap-2 overflow-y-auto">
+            {SOCCER_COMPETITIONS.map((comp) => (
+              <Link
+                key={`all-${comp.id}-${comp.seasonId}`}
+                className={`rounded-full border px-3 py-1 text-xs ${
+                  comp.id === competitionId && comp.seasonId === seasonId
+                    ? "border-black bg-black text-white dark:border-white dark:bg-white dark:text-black"
+                    : "border-black/10 bg-white text-black hover:bg-zinc-50 dark:border-white/10 dark:bg-white/5 dark:text-white dark:hover:bg-white/10"
+                }`}
+                href={`/soccer/tournament-matrix${buildQuery({
+                  competition: String(comp.id),
+                  season: String(comp.seasonId),
+                  limit: String(safeLimit),
+                  top: String(top),
+                })}`}
+              >
+                {comp.label}
+              </Link>
+            ))}
+          </div>
+        </details>
       </section>
 
       <form className="mt-6 flex flex-wrap items-end gap-3" method="GET">

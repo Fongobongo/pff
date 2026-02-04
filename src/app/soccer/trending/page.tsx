@@ -1,7 +1,7 @@
 import Link from "next/link";
 import SoccerPageShell from "../_components/SoccerPageShell";
 import { getSportfunMarketSnapshot, toUsdNumber } from "@/lib/sportfunMarket";
-import { SOCCER_COMPETITIONS, fetchSoccerCompetitionScores } from "@/lib/soccerStats";
+import { SOCCER_COMPETITIONS, fetchSoccerCompetitionScores, getFeaturedSoccerCompetitions } from "@/lib/soccerStats";
 
 const SORT_OPTIONS = [
   { key: "volume", label: "24h volume" },
@@ -282,6 +282,7 @@ export default async function SoccerTrendingPage({
   const currentCompetition = SOCCER_COMPETITIONS.find(
     (item) => item.id === competitionId && item.seasonId === seasonId
   );
+  const featuredCompetitions = getFeaturedSoccerCompetitions({ id: competitionId, seasonId });
 
   const sharedParams = {
     competition: String(competitionId),
@@ -388,29 +389,60 @@ export default async function SoccerTrendingPage({
         </p>
       </section>
 
-      <section className="mt-4 flex flex-wrap gap-3">
-        {SOCCER_COMPETITIONS.map((comp) => (
-          <Link
-            key={`${comp.id}-${comp.seasonId}`}
-            className={`rounded-full border px-3 py-2 text-xs ${
-              comp.id === competitionId && comp.seasonId === seasonId
-                ? "border-black bg-black text-white dark:border-white dark:bg-white dark:text-black"
-                : "border-black/10 bg-white text-black hover:bg-zinc-50 dark:border-white/10 dark:bg-white/5 dark:text-white dark:hover:bg-white/10"
-            }`}
-            href={`/soccer/trending${buildQuery({
-              ...marketParams,
-              competition: String(comp.id),
-              season: String(comp.seasonId),
-              limit: String(limit),
-              position: positionFilter,
-              form_sort: formSort,
-              min_minutes: minMinutes > 0 ? String(minMinutes) : undefined,
-              q: params.q,
-            })}`}
-          >
-            {comp.label}
-          </Link>
-        ))}
+      <section className="mt-4 space-y-3">
+        <div className="flex flex-wrap gap-3">
+          {featuredCompetitions.map((comp) => (
+            <Link
+              key={`${comp.id}-${comp.seasonId}`}
+              className={`rounded-full border px-3 py-2 text-xs ${
+                comp.id === competitionId && comp.seasonId === seasonId
+                  ? "border-black bg-black text-white dark:border-white dark:bg-white dark:text-black"
+                  : "border-black/10 bg-white text-black hover:bg-zinc-50 dark:border-white/10 dark:bg-white/5 dark:text-white dark:hover:bg-white/10"
+              }`}
+              href={`/soccer/trending${buildQuery({
+                ...marketParams,
+                competition: String(comp.id),
+                season: String(comp.seasonId),
+                limit: String(limit),
+                position: positionFilter,
+                form_sort: formSort,
+                min_minutes: minMinutes > 0 ? String(minMinutes) : undefined,
+                q: params.q,
+              })}`}
+            >
+              {comp.label}
+            </Link>
+          ))}
+        </div>
+        <details className="rounded-xl border border-black/10 bg-white p-3 text-sm text-zinc-600 dark:border-white/10 dark:bg-white/5 dark:text-zinc-400">
+          <summary className="cursor-pointer text-xs uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+            All competitions
+          </summary>
+          <div className="mt-3 flex max-h-64 flex-wrap gap-2 overflow-y-auto">
+            {SOCCER_COMPETITIONS.map((comp) => (
+              <Link
+                key={`all-${comp.id}-${comp.seasonId}`}
+                className={`rounded-full border px-3 py-1 text-xs ${
+                  comp.id === competitionId && comp.seasonId === seasonId
+                    ? "border-black bg-black text-white dark:border-white dark:bg-white dark:text-black"
+                    : "border-black/10 bg-white text-black hover:bg-zinc-50 dark:border-white/10 dark:bg-white/5 dark:text-white dark:hover:bg-white/10"
+                }`}
+                href={`/soccer/trending${buildQuery({
+                  ...marketParams,
+                  competition: String(comp.id),
+                  season: String(comp.seasonId),
+                  limit: String(limit),
+                  position: positionFilter,
+                  form_sort: formSort,
+                  min_minutes: minMinutes > 0 ? String(minMinutes) : undefined,
+                  q: params.q,
+                })}`}
+              >
+                {comp.label}
+              </Link>
+            ))}
+          </div>
+        </details>
       </section>
 
       <section className="mt-4 flex flex-wrap gap-2">

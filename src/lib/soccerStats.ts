@@ -78,6 +78,32 @@ export const SOCCER_COMPETITIONS = [
   { id: 72, seasonId: 30, label: "Women's World Cup 2019" },
 ] as const;
 
+export const SOCCER_FEATURED_COMPETITIONS = [
+  { id: 2, seasonId: 27, label: "Premier League 2015/2016" },
+  { id: 11, seasonId: 90, label: "La Liga 2020/2021" },
+  { id: 12, seasonId: 27, label: "Serie A 2015/2016" },
+  { id: 9, seasonId: 281, label: "1. Bundesliga 2023/2024" },
+  { id: 16, seasonId: 4, label: "Champions League 2018/2019" },
+  { id: 7, seasonId: 235, label: "Ligue 1 2022/2023" },
+  { id: 43, seasonId: 106, label: "FIFA World Cup 2022" },
+  { id: 55, seasonId: 282, label: "UEFA Euro 2024" },
+  { id: 223, seasonId: 282, label: "Copa America 2024" },
+  { id: 44, seasonId: 107, label: "Major League Soccer 2023" },
+  { id: 72, seasonId: 107, label: "Women's World Cup 2023" },
+  { id: 37, seasonId: 90, label: "FA Women's Super League 2020/2021" },
+] as const;
+
+export type SoccerCompetition = (typeof SOCCER_COMPETITIONS)[number];
+
+export function getFeaturedSoccerCompetitions(current?: { id: number; seasonId: number }): SoccerCompetition[] {
+  const featured = [...SOCCER_FEATURED_COMPETITIONS] as SoccerCompetition[];
+  if (!current) return featured;
+  const exists = featured.some((comp) => comp.id === current.id && comp.seasonId === current.seasonId);
+  if (exists) return featured;
+  const match = SOCCER_COMPETITIONS.find((comp) => comp.id === current.id && comp.seasonId === current.seasonId);
+  return match ? [match, ...featured] : featured;
+}
+
 export type SoccerScorePlayer = {
   playerId: number;
   playerName: string;
