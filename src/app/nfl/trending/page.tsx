@@ -55,6 +55,26 @@ const PRESET_OPTIONS = [
     },
   },
   {
+    key: "wr-air",
+    label: "WR air yards",
+    params: {
+      position: "WR",
+      sort: "air_yards_l3",
+      min_air: "60",
+      min_air_share: "25",
+    },
+  },
+  {
+    key: "wr-vertical",
+    label: "WR vertical",
+    params: {
+      position: "WR",
+      sort: "ypt",
+      min_ypt: "8",
+      min_air: "50",
+    },
+  },
+  {
     key: "rb-workload",
     label: "RB workload",
     params: {
@@ -65,12 +85,41 @@ const PRESET_OPTIONS = [
     },
   },
   {
+    key: "rb-receiving",
+    label: "RB receiving",
+    params: {
+      position: "RB",
+      sort: "target_share",
+      min_targets: "3",
+      min_target_share: "8",
+    },
+  },
+  {
     key: "qb-efficiency",
     label: "QB volume",
     params: {
       position: "QB",
       sort: "season",
       min_games: "4",
+    },
+  },
+  {
+    key: "qb-rush",
+    label: "QB rushing",
+    params: {
+      position: "QB",
+      sort: "touches_l3",
+      min_touches: "4",
+    },
+  },
+  {
+    key: "te-usage",
+    label: "TE usage",
+    params: {
+      position: "TE",
+      sort: "usage_score",
+      min_targets: "4",
+      min_target_share: "12",
     },
   },
 ] as const;
@@ -723,9 +772,27 @@ export default async function NflTrendingPage({
     const zAirShare = zScore(row.l3AirShare, stats.airShare.mean, stats.airShare.std);
     const zWopr = zScore(row.l3Wopr, stats.wopr.mean, stats.wopr.std);
 
-    row.usageTrendScore = (zTargets + zTouches + zAir) / 3;
-    row.usageShareScore = (zTargetShare + zAirShare + zWopr) / 3;
-    row.usageScore = row.usageTrendScore * 0.6 + row.usageShareScore * 0.4;
+    let trendScore = (zTargets + zTouches + zAir) / 3;
+    let shareScore = (zTargetShare + zAirShare + zWopr) / 3;
+    let usageScore = trendScore * 0.6 + shareScore * 0.4;
+
+    if (pos === "WR" || pos === "TE") {
+      trendScore = (zTargets + zAir) / 2;
+      shareScore = (zTargetShare + zAirShare + zWopr) / 3;
+      usageScore = trendScore * 0.55 + shareScore * 0.45;
+    } else if (pos === "RB") {
+      trendScore = (zTouches + zTargets) / 2;
+      shareScore = (zTargetShare + zWopr) / 2;
+      usageScore = trendScore * 0.65 + shareScore * 0.35;
+    } else if (pos === "QB") {
+      trendScore = zTouches;
+      shareScore = zTargetShare;
+      usageScore = trendScore * 0.7 + shareScore * 0.3;
+    }
+
+    row.usageTrendScore = trendScore;
+    row.usageShareScore = shareScore;
+    row.usageScore = usageScore;
   }
 
   const positions = Array.from(
@@ -1290,7 +1357,8 @@ export default async function NflTrendingPage({
         <div className="rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-white/5">
           <div className="text-xs uppercase tracking-wide text-zinc-500 dark:text-zinc-400">Usage focus</div>
           <div className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
-            L3 Targets, Touches, Yards, Air Yards are per-game across the last {TREND_WEEKS} games.
+            L3 Targets, Touches, Yards, Air Yards are per-game across the last {TREND_WEEKS} games. Usage Score is
+            position-weighted (WR/TE emphasize air + share; RB emphasizes touches; QB emphasizes rushes).
           </div>
         </div>
         <div className="rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-white/5">
