@@ -136,6 +136,7 @@ export default async function NflPricesPage({
     team?: string;
     q?: string;
     page?: string;
+    sort?: string;
   }>;
 }) {
   const params = await searchParams;
@@ -146,6 +147,7 @@ export default async function NflPricesPage({
   const teamFilter = teamParam && teamParam !== "ALL" ? teamParam : undefined;
   const queryText = params.q?.trim().toLowerCase() ?? "";
   const pageParam = parseNumber(params.page, 1, 1, 200);
+  const sortParam = params.sort ?? "price_desc";
 
   const snapshot = await getSportfunMarketSnapshot({
     sport: "nfl",
@@ -154,14 +156,7 @@ export default async function NflPricesPage({
     maxTokens: 250,
   });
 
-  const sorted = snapshot.tokens
-    .slice()
-    .sort((a, b) => {
-      const aPrice = BigInt(a.currentPriceUsdcRaw ?? "0");
-      const bPrice = BigInt(b.currentPriceUsdcRaw ?? "0");
-      if (aPrice === bPrice) return a.tokenIdDec.localeCompare(b.tokenIdDec);
-      return bPrice > aPrice ? 1 : -1;
-    });
+  const sorted = snapshot.tokens.slice();
 
   const positions = Array.from(
     new Set(
@@ -181,7 +176,7 @@ export default async function NflPricesPage({
     )
   ).sort();
 
-  const filtered = sorted.filter((row) => {
+  const filteredBase = sorted.filter((row) => {
     const position = row.position ?? (row.attributes ? extractPosition(row.attributes) : null);
     const team = row.team ?? (row.attributes ? extractTeam(row.attributes) : null);
     if (positionFilter && (position ?? "").toUpperCase() !== positionFilter) return false;
@@ -193,9 +188,49 @@ export default async function NflPricesPage({
     return true;
   });
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const sortedFiltered = filteredBase.slice().sort((a, b) => {
+    const aPrice = BigInt(a.currentPriceUsdcRaw ?? "0");
+    const bPrice = BigInt(b.currentPriceUsdcRaw ?? "0");
+    const aChange = a.priceChange24hPercent ?? 0;
+    const bChange = b.priceChange24hPercent ?? 0;
+    const aVolume = BigInt(a.volume24hSharesRaw ?? "0");
+    const bVolume = BigInt(b.volume24hSharesRaw ?? "0");
+    const aTrades = a.trades24h ?? 0;
+    const bTrades = b.trades24h ?? 0;
+    const aSupply = a.supply ?? (a.attributes ? extractSupply(a.attributes) : null) ?? 0;
+    const bSupply = b.supply ?? (b.attributes ? extractSupply(b.attributes) : null) ?? 0;
+    const aPriceNum = a.currentPriceUsdcRaw ? toUsdNumber(a.currentPriceUsdcRaw) : 0;
+    const bPriceNum = b.currentPriceUsdcRaw ? toUsdNumber(b.currentPriceUsdcRaw) : 0;
+    const aMarketCap = aSupply && aPriceNum ? aSupply * aPriceNum : 0;
+    const bMarketCap = bSupply && bPriceNum ? bSupply * bPriceNum : 0;
+
+    switch (sortParam) {
+      case "price_asc":
+        if (aPrice === bPrice) return a.tokenIdDec.localeCompare(b.tokenIdDec);
+        return aPrice > bPrice ? 1 : -1;
+      case "change_desc":
+        return bChange - aChange;
+      case "change_asc":
+        return aChange - bChange;
+      case "market_cap_desc":
+        return bMarketCap - aMarketCap;
+      case "market_cap_asc":
+        return aMarketCap - bMarketCap;
+      case "volume_desc":
+        if (aVolume === bVolume) return 0;
+        return bVolume > aVolume ? 1 : -1;
+      case "trades_desc":
+        return bTrades - aTrades;
+      case "price_desc":
+      default:
+        if (aPrice === bPrice) return a.tokenIdDec.localeCompare(b.tokenIdDec);
+        return bPrice > aPrice ? 1 : -1;
+    }
+  });
+
+  const totalPages = Math.max(1, Math.ceil(sortedFiltered.length / PAGE_SIZE));
   const page = Math.min(totalPages, Math.max(1, pageParam));
-  const rows = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const rows = sortedFiltered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   const buildExportCsv = () => {
     const header = [
@@ -213,7 +248,7 @@ export default async function NflPricesPage({
     ];
 
     const lines = [header.join(",")];
-    for (const row of filtered) {
+    for (const row of sortedFiltered) {
       const position = row.position ?? (row.attributes ? extractPosition(row.attributes) : null);
       const team = row.team ?? (row.attributes ? extractTeam(row.attributes) : null);
       const supply = row.supply ?? (row.attributes ? extractSupply(row.attributes) : null);
@@ -281,24 +316,25 @@ export default async function NflPricesPage({
             />
           </label>
           <div className="flex items-center gap-2">
-            {["QB", "RB", "WR", "TE", "K", "DST"].map((pos) => (
-              <Link
-                key={pos}
-                className={`rounded-full border px-3 py-1 text-[11px] uppercase ${
-                  positionFilter === pos
-                    ? "border-black bg-black text-white dark:border-white dark:bg-white dark:text-black"
-                    : "border-black/10 bg-white text-black hover:bg-zinc-50 dark:border-white/10 dark:bg-white/5 dark:text-white dark:hover:bg-white/10"
-                }`}
-                href={`/nfl/prices${buildQuery({
-                  windowHours: String(windowHours),
-                  position: pos,
-                  team: teamFilter ?? undefined,
-                  q: queryText || undefined,
-                })}`}
-              >
-                {pos}
-              </Link>
-            ))}
+                {["QB", "RB", "WR", "TE", "K", "DST"].map((pos) => (
+                  <Link
+                    key={pos}
+                    className={`rounded-full border px-3 py-1 text-[11px] uppercase ${
+                      positionFilter === pos
+                        ? "border-black bg-black text-white dark:border-white dark:bg-white dark:text-black"
+                        : "border-black/10 bg-white text-black hover:bg-zinc-50 dark:border-white/10 dark:bg-white/5 dark:text-white dark:hover:bg-white/10"
+                    }`}
+                    href={`/nfl/prices${buildQuery({
+                      windowHours: String(windowHours),
+                      position: pos,
+                      team: teamFilter ?? undefined,
+                      q: queryText || undefined,
+                      sort: sortParam,
+                    })}`}
+                  >
+                    {pos}
+                  </Link>
+                ))}
           </div>
           <label className="flex flex-col gap-1 text-xs text-zinc-600 dark:text-zinc-400">
             <span>Position</span>
@@ -330,6 +366,23 @@ export default async function NflPricesPage({
               ))}
             </select>
           </label>
+          <label className="flex flex-col gap-1 text-xs text-zinc-600 dark:text-zinc-400">
+            <span>Sort</span>
+            <select
+              name="sort"
+              defaultValue={sortParam}
+              className="rounded-md border border-black/10 bg-white px-2 py-1 text-xs text-black dark:border-white/10 dark:bg-white/5 dark:text-white"
+            >
+              <option value="price_desc">Price ↓</option>
+              <option value="price_asc">Price ↑</option>
+              <option value="market_cap_desc">Market cap ↓</option>
+              <option value="market_cap_asc">Market cap ↑</option>
+              <option value="change_desc">Δ 24h ↓</option>
+              <option value="change_asc">Δ 24h ↑</option>
+              <option value="volume_desc">Volume ↓</option>
+              <option value="trades_desc">Trades ↓</option>
+            </select>
+          </label>
           <button
             type="submit"
             className="rounded-md border border-black/10 bg-black px-3 py-1 text-xs text-white hover:bg-zinc-800 dark:border-white/10 dark:bg-white dark:text-black dark:hover:bg-zinc-200"
@@ -349,10 +402,10 @@ export default async function NflPricesPage({
           >
             Export CSV
           </a>
-          <div className="ml-auto text-xs text-zinc-500 dark:text-zinc-400">
-            {filtered.length} tokens · page {page} / {totalPages}
-          </div>
-        </form>
+            <div className="ml-auto text-xs text-zinc-500 dark:text-zinc-400">
+              {sortedFiltered.length} tokens · page {page} / {totalPages}
+            </div>
+          </form>
       </section>
 
       <section className="mt-6">
@@ -422,6 +475,7 @@ export default async function NflPricesPage({
                 position: positionFilter ?? undefined,
                 team: teamFilter ?? undefined,
                 q: queryText || undefined,
+                sort: sortParam,
                 page: String(Math.max(1, page - 1)),
               })}`}
               className={page > 1 ? "hover:underline" : "pointer-events-none opacity-40"}
@@ -437,6 +491,7 @@ export default async function NflPricesPage({
                 position: positionFilter ?? undefined,
                 team: teamFilter ?? undefined,
                 q: queryText || undefined,
+                sort: sortParam,
                 page: String(Math.min(totalPages, page + 1)),
               })}`}
               className={page < totalPages ? "hover:underline" : "pointer-events-none opacity-40"}

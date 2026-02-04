@@ -544,6 +544,28 @@ export default async function NflMarketPage({
                   className="min-w-[160px] rounded-md border border-black/10 bg-white px-2 py-1 text-xs text-black placeholder:text-zinc-400 dark:border-white/10 dark:bg-white/5 dark:text-white"
                 />
               </label>
+              <div className="flex items-center gap-2">
+                {["QB", "RB", "WR", "TE", "K", "DST"].map((pos) => (
+                  <Link
+                    key={pos}
+                    className={`rounded-full border px-3 py-1 text-[11px] uppercase ${
+                      pricePositionFilter === pos
+                        ? "border-black bg-black text-white dark:border-white dark:bg-white dark:text-black"
+                        : "border-black/10 bg-white text-black hover:bg-zinc-50 dark:border-white/10 dark:bg-white/5 dark:text-white dark:hover:bg-white/10"
+                    }`}
+                    href={`/nfl${buildQuery({
+                      windowHours: String(windowHours),
+                      trendDays: String(trendDays),
+                      series,
+                      price_position: pos,
+                      price_team: priceTeamFilter ?? undefined,
+                      price_q: priceQuery || undefined,
+                    })}`}
+                  >
+                    {pos}
+                  </Link>
+                ))}
+              </div>
               <label className="flex flex-col gap-1">
                 <span>Position</span>
                 <select
