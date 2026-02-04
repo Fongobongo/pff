@@ -47,6 +47,17 @@ function formatDate(iso?: string): string {
   return d.toLocaleString();
 }
 
+function formatUsdValue(value?: number): string {
+  if (value === undefined || Number.isNaN(value)) return "—";
+  const abs = Math.abs(value);
+  if (abs >= 1e9) return `$${(value / 1e9).toFixed(2)}B`;
+  if (abs >= 1e6) return `$${(value / 1e6).toFixed(2)}M`;
+  if (abs >= 1e3) return `$${(value / 1e3).toFixed(2)}K`;
+  if (abs >= 1) return `$${value.toFixed(2)}`;
+  if (abs >= 0.01) return `$${value.toFixed(4)}`;
+  return `$${value.toFixed(6)}`;
+}
+
 function normalizePosition(raw: string): string {
   const value = raw.trim().toUpperCase();
   if (value.includes("QUARTERBACK") || value === "QB") return "QB";
@@ -86,6 +97,23 @@ function extractPosition(attributes: unknown): string | null {
 function extractTeam(attributes: unknown): string | null {
   const raw = extractAttributeValue(attributes, (key) => key.includes("team") || key.includes("club"));
   if (typeof raw === "string" && raw.trim()) return raw.trim();
+  return null;
+}
+
+function extractSupply(attributes: unknown): number | null {
+  const raw = extractAttributeValue(
+    attributes,
+    (key) => key.includes("supply") || key.includes("shares") || key.includes("outstanding")
+  );
+  if (raw === undefined || raw === null) return null;
+  if (typeof raw === "number" && Number.isFinite(raw)) return raw > 1e12 ? raw / 1e18 : raw;
+  if (typeof raw === "string") {
+    const cleaned = raw.replace(/,/g, "").trim();
+    if (!cleaned) return null;
+    const parsed = Number(cleaned);
+    if (!Number.isFinite(parsed)) return null;
+    return parsed > 1e12 ? parsed / 1e18 : parsed;
+  }
   return null;
 }
 
@@ -169,6 +197,54 @@ export default async function NflPricesPage({
   const page = Math.min(totalPages, Math.max(1, pageParam));
   const rows = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
+  const buildExportCsv = () => {
+    const header = [
+      "tokenId",
+      "player",
+      "position",
+      "team",
+      "price_usd",
+      "price_change_24h_pct",
+      "volume_shares_24h",
+      "trades_24h",
+      "last_trade_at",
+      "supply",
+      "market_cap",
+    ];
+
+    const lines = [header.join(",")];
+    for (const row of filtered) {
+      const position = row.position ?? (row.attributes ? extractPosition(row.attributes) : null);
+      const team = row.team ?? (row.attributes ? extractTeam(row.attributes) : null);
+      const supply = row.supply ?? (row.attributes ? extractSupply(row.attributes) : null);
+      const price = row.currentPriceUsdcRaw ? toUsdNumber(row.currentPriceUsdcRaw) : undefined;
+      const marketCap = supply && price ? supply * price : undefined;
+      lines.push(
+        [
+          row.tokenIdDec,
+          `"${String(row.name ?? `#${row.tokenIdDec}`).replaceAll('"', '""')}"`,
+          position ?? "",
+          team ?? "",
+          price ?? "",
+          row.priceChange24hPercent ?? "",
+          row.volume24hSharesRaw ?? "0",
+          row.trades24h ?? 0,
+          row.lastTradeAt ?? "",
+          supply ?? "",
+          marketCap ?? "",
+        ].join(",")
+      );
+    }
+
+    return lines.join("\n");
+  };
+
+  const exportCsvHref = () => {
+    const csv = buildExportCsv();
+    const data = encodeURIComponent(csv);
+    return `data:text/csv;charset=utf-8,${data}`;
+  };
+
   return (
     <NflPageShell title="NFL prices" description="Full price tape with filters and pagination.">
       <section className="mt-6 flex flex-wrap gap-3">
@@ -204,6 +280,26 @@ export default async function NflPricesPage({
               className="min-w-[160px] rounded-md border border-black/10 bg-white px-2 py-1 text-xs text-black placeholder:text-zinc-400 dark:border-white/10 dark:bg-white/5 dark:text-white"
             />
           </label>
+          <div className="flex items-center gap-2">
+            {["QB", "RB", "WR", "TE", "K", "DST"].map((pos) => (
+              <Link
+                key={pos}
+                className={`rounded-full border px-3 py-1 text-[11px] uppercase ${
+                  positionFilter === pos
+                    ? "border-black bg-black text-white dark:border-white dark:bg-white dark:text-black"
+                    : "border-black/10 bg-white text-black hover:bg-zinc-50 dark:border-white/10 dark:bg-white/5 dark:text-white dark:hover:bg-white/10"
+                }`}
+                href={`/nfl/prices${buildQuery({
+                  windowHours: String(windowHours),
+                  position: pos,
+                  team: teamFilter ?? undefined,
+                  q: queryText || undefined,
+                })}`}
+              >
+                {pos}
+              </Link>
+            ))}
+          </div>
           <label className="flex flex-col gap-1 text-xs text-zinc-600 dark:text-zinc-400">
             <span>Position</span>
             <select
@@ -246,6 +342,13 @@ export default async function NflPricesPage({
           >
             Reset
           </Link>
+          <a
+            href={exportCsvHref()}
+            download={`nfl-prices-${windowHours}h.csv`}
+            className="text-xs text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white"
+          >
+            Export CSV
+          </a>
           <div className="ml-auto text-xs text-zinc-500 dark:text-zinc-400">
             {filtered.length} tokens · page {page} / {totalPages}
           </div>
@@ -262,6 +365,7 @@ export default async function NflPricesPage({
                   <th className="px-3 py-2">Pos</th>
                   <th className="px-3 py-2">Team</th>
                   <th className="px-3 py-2">Price</th>
+                  <th className="px-3 py-2">Market cap</th>
                   <th className="px-3 py-2">Δ (24h)</th>
                   <th className="px-3 py-2">Volume</th>
                   <th className="px-3 py-2">Trades</th>
@@ -272,12 +376,18 @@ export default async function NflPricesPage({
                 {rows.map((row) => {
                   const position = row.position ?? (row.attributes ? extractPosition(row.attributes) : null);
                   const team = row.team ?? (row.attributes ? extractTeam(row.attributes) : null);
+                  const supply = row.supply ?? (row.attributes ? extractSupply(row.attributes) : null);
+                  const price = row.currentPriceUsdcRaw ? toUsdNumber(row.currentPriceUsdcRaw) : undefined;
+                  const marketCap = supply && price ? supply * price : undefined;
                   return (
                     <tr key={row.tokenIdDec} className="border-t border-black/10 dark:border-white/10">
                       <td className="px-3 py-2 text-black dark:text-white">{row.name ?? `#${row.tokenIdDec}`}</td>
                       <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{position ?? "—"}</td>
                       <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{team ?? "—"}</td>
                       <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{formatUsd(row.currentPriceUsdcRaw)}</td>
+                      <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
+                        {marketCap !== undefined ? formatUsdValue(marketCap) : "—"}
+                      </td>
                       <td
                         className={`px-3 py-2 ${
                           (row.priceChange24hPercent ?? 0) >= 0 ? "text-emerald-500" : "text-rose-500"
@@ -297,7 +407,7 @@ export default async function NflPricesPage({
                 })}
                 {rows.length === 0 ? (
                   <tr>
-                    <td className="px-3 py-4 text-zinc-600 dark:text-zinc-400" colSpan={8}>
+                    <td className="px-3 py-4 text-zinc-600 dark:text-zinc-400" colSpan={9}>
                       No tokens match the filters.
                     </td>
                   </tr>
