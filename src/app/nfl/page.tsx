@@ -667,8 +667,8 @@ export default async function NflMarketPage({
           <div className="border-b border-black/10 px-3 py-2 text-xs uppercase tracking-wide text-zinc-500 dark:border-white/10 dark:text-zinc-400">
             Current prices
           </div>
-          <div className="border-b border-black/10 px-3 py-3 text-xs text-zinc-600 dark:border-white/10 dark:text-zinc-400">
-            <form className="flex flex-wrap items-end gap-3" method="get">
+          <div className="border-b border-black/10 px-0 text-xs text-zinc-600 dark:border-white/10 dark:text-zinc-400">
+            <form className="sticky top-0 z-10 flex flex-wrap items-end gap-3 border-b border-black/10 bg-white px-3 py-3 dark:border-white/10 dark:bg-black" method="get">
               <input type="hidden" name="windowHours" value={String(windowHours)} />
               <input type="hidden" name="trendDays" value={String(trendDays)} />
               <input type="hidden" name="series" value={series} />
@@ -812,7 +812,7 @@ export default async function NflMarketPage({
                       })}`}
                       className="hover:underline"
                     >
-                      Price
+                      Price {priceSort === "price_desc" ? "↓" : priceSort === "price_asc" ? "↑" : ""}
                     </Link>
                   </th>
                   <th className="px-3 py-2">
@@ -829,7 +829,7 @@ export default async function NflMarketPage({
                       })}`}
                       className="hover:underline"
                     >
-                      Market cap
+                      Market cap {priceSort === "market_cap_desc" ? "↓" : priceSort === "market_cap_asc" ? "↑" : ""}
                     </Link>
                   </th>
                   <th className="px-3 py-2">
@@ -846,7 +846,7 @@ export default async function NflMarketPage({
                       })}`}
                       className="hover:underline"
                     >
-                      Supply
+                      Supply {priceSort === "supply_desc" ? "↓" : priceSort === "supply_asc" ? "↑" : ""}
                     </Link>
                   </th>
                   <th className="px-3 py-2">
@@ -863,7 +863,7 @@ export default async function NflMarketPage({
                       })}`}
                       className="hover:underline"
                     >
-                      Δ (24h)
+                      Δ (24h) {priceSort === "change_desc" ? "↓" : priceSort === "change_asc" ? "↑" : ""}
                     </Link>
                   </th>
                   <th className="px-3 py-2">
@@ -880,7 +880,7 @@ export default async function NflMarketPage({
                       })}`}
                       className="hover:underline"
                     >
-                      Volume
+                      Volume {priceSort === "volume_desc" ? "↓" : ""}
                     </Link>
                   </th>
                   <th className="px-3 py-2">
@@ -897,7 +897,7 @@ export default async function NflMarketPage({
                       })}`}
                       className="hover:underline"
                     >
-                      Trades
+                      Trades {priceSort === "trades_desc" ? "↓" : ""}
                     </Link>
                   </th>
                   <th className="px-3 py-2">Last trade</th>
