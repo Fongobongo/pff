@@ -96,6 +96,7 @@ type TokenAgg = {
 const DEFAULT_WINDOW_HOURS = 24;
 const DEFAULT_TREND_DAYS = 30;
 const TOKEN_UNIVERSE_DAYS = 180;
+const TOKEN_UNIVERSE_START_MS = Date.UTC(2025, 7, 1);
 const LOG_CHUNK_BLOCKS = 2500n;
 const CACHE_DIR = path.join(process.cwd(), ".cache", "sportfun", "market");
 
@@ -598,7 +599,7 @@ async function getTokenUniverse(sport: SportfunMarketSport, days: number): Promi
   if (cache && cacheFresh) return cache.tokenIds;
 
   const latest = await getLatestBlock();
-  const fromTs = Date.now() - days * 24 * 60 * 60 * 1000;
+  const fromTs = Math.min(Date.now() - days * 24 * 60 * 60 * 1000, TOKEN_UNIVERSE_START_MS);
   const fromBlock = await findBlockByTimestamp(fromTs);
   const events = await getTradeEvents({ sport, fromBlock, toBlock: latest });
   const tradeTokenIds = events.map((e) => e.tokenIdDec);
@@ -710,9 +711,9 @@ export async function getSportfunMarketSnapshot(params: {
   const windowHours = params.windowHours ?? DEFAULT_WINDOW_HOURS;
   const trendDays = params.trendDays ?? DEFAULT_TREND_DAYS;
   const maxTokens = params.maxTokens ?? 250;
-  const metadataLimit = params.metadataLimit ?? maxTokens;
+  const metadataLimit = params.metadataLimit ?? Math.max(maxTokens, 500);
 
-  const cacheKey = `sportfun:market:${params.sport}:${windowHours}:${trendDays}:${maxTokens}`;
+  const cacheKey = `sportfun:market:${params.sport}:${windowHours}:${trendDays}:${maxTokens}:${metadataLimit}`;
   return withCache(cacheKey, 120, async () => {
     const now = Date.now();
     try {
@@ -777,7 +778,13 @@ export async function getSportfunMarketSnapshot(params: {
           return bPrice > aPrice ? 1 : -1;
         });
 
-      const metadataTargets = tokens.slice(0, Math.min(tokens.length, metadataLimit)).map((t) => t.tokenIdDec);
+      const metadataPool = [
+        ...tokens.filter((t) => t.trades24h === 0),
+        ...tokens.filter((t) => t.trades24h > 0),
+      ];
+      const metadataTargets = metadataPool
+        .slice(0, Math.min(tokens.length, metadataLimit))
+        .map((t) => t.tokenIdDec);
       const meta = await mapLimit(metadataTargets, 6, async (tokenIdDec) => {
         const tokenId = BigInt(tokenIdDec);
         const contractAddress = contracts[0].playerToken;
