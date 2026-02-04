@@ -9,10 +9,12 @@
 ## Next
 - Expand soccer leaderboards (xG/xA, assists, defenders) across more competitions.
 - Improve Sport.fun token universe coverage (inactive tokens, promotions-only IDs).
-- Run `npm run build` + smoke checks on core pages (NFL/Soccer/Sport.fun).
 
 ## Status
 - Last updated: 2026-02-04
+- Build + smoke checks completed:
+  - `npm run build`
+  - `next start` smoke: `/nfl`, `/nfl/prices`
 - Step 4 (Stats ingestion + scoring) completed:
   - Added NFL + Football scoring library with normalized stat keys and result bonuses.
   - Added scoring API endpoints: `/api/stats/nfl/score` and `/api/stats/football/score`.
