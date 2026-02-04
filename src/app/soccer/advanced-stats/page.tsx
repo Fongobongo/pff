@@ -26,6 +26,8 @@ type PlayerAgg = {
   totalRounded: number;
   goals: number;
   assists: number;
+  xg: number;
+  xa: number;
 };
 
 export default async function SoccerAdvancedStatsPage({
@@ -36,8 +38,8 @@ export default async function SoccerAdvancedStatsPage({
   const params = await searchParams;
   const competitionId = Number(params.competition ?? SOCCER_COMPETITIONS[0].id);
   const seasonId = Number(params.season ?? SOCCER_COMPETITIONS[0].seasonId);
-  const limit = Number(params.limit ?? "12");
-  const safeLimit = Number.isFinite(limit) ? Math.max(4, Math.min(30, limit)) : 12;
+  const limit = Number(params.limit ?? "20");
+  const safeLimit = Number.isFinite(limit) ? Math.max(4, Math.min(60, limit)) : 20;
 
   const data = await fetchSoccerCompetitionScores({
     competitionId,
@@ -61,12 +63,16 @@ export default async function SoccerAdvancedStatsPage({
         totalRounded: 0,
         goals: 0,
         assists: 0,
+        xg: 0,
+        xa: 0,
       };
       entry.games += 1;
       entry.totalPoints += score;
       entry.totalRounded += totalRounded;
       entry.goals += toNumber(player.stats?.goals);
       entry.assists += toNumber(player.stats?.assists);
+      entry.xg += toNumber(player.xg);
+      entry.xa += toNumber(player.xa);
       totals.set(player.playerId, entry);
     }
   }
@@ -75,6 +81,8 @@ export default async function SoccerAdvancedStatsPage({
   const topFantasy = players.slice().sort((a, b) => b.totalPoints - a.totalPoints).slice(0, 15);
   const topGoals = players.slice().sort((a, b) => b.goals - a.goals).slice(0, 10);
   const topAssists = players.slice().sort((a, b) => b.assists - a.assists).slice(0, 10);
+  const topXg = players.slice().sort((a, b) => b.xg - a.xg).slice(0, 10);
+  const topXa = players.slice().sort((a, b) => b.xa - a.xa).slice(0, 10);
 
   const currentCompetition = SOCCER_COMPETITIONS.find(
     (item) => item.id === competitionId && item.seasonId === seasonId
@@ -104,7 +112,7 @@ export default async function SoccerAdvancedStatsPage({
 
       <section className="mt-4 text-sm text-zinc-600 dark:text-zinc-400">
         <p>
-          Showing {safeLimit} matches · {currentCompetition?.label ?? "Competition"}. Stats include goals, assists, and fantasy scoring.
+          Showing {safeLimit} matches · {currentCompetition?.label ?? "Competition"}. Stats include goals, assists, xG, xA, and fantasy scoring.
         </p>
       </section>
 
@@ -137,7 +145,7 @@ export default async function SoccerAdvancedStatsPage({
 
         <div className="overflow-hidden rounded-xl border border-black/10 bg-white dark:border-white/10 dark:bg-white/5">
           <div className="border-b border-black/10 px-3 py-2 text-xs uppercase tracking-wide text-zinc-500 dark:border-white/10 dark:text-zinc-400">
-            Goals & assists leaders
+            Goals, assists, xG, xA leaders
           </div>
           <div className="grid grid-cols-1 gap-4 p-4 text-sm md:grid-cols-2">
             <div>
@@ -156,6 +164,26 @@ export default async function SoccerAdvancedStatsPage({
                 {topAssists.map((row) => (
                   <li key={`assist-${row.playerId}`} className="text-black dark:text-white">
                     {row.playerName} · {row.assists}
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div>
+              <div className="text-xs uppercase tracking-wide text-zinc-500 dark:text-zinc-400">xG</div>
+              <ul className="mt-2 space-y-1">
+                {topXg.map((row) => (
+                  <li key={`xg-${row.playerId}`} className="text-black dark:text-white">
+                    {row.playerName} · {row.xg.toFixed(2)}
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div>
+              <div className="text-xs uppercase tracking-wide text-zinc-500 dark:text-zinc-400">xA</div>
+              <ul className="mt-2 space-y-1">
+                {topXa.map((row) => (
+                  <li key={`xa-${row.playerId}`} className="text-black dark:text-white">
+                    {row.playerName} · {row.xa.toFixed(2)}
                   </li>
                 ))}
               </ul>

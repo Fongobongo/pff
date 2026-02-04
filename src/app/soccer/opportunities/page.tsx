@@ -30,8 +30,8 @@ export default async function SoccerOpportunitiesPage({
   const params = await searchParams;
   const competitionId = Number(params.competition ?? SOCCER_COMPETITIONS[0].id);
   const seasonId = Number(params.season ?? SOCCER_COMPETITIONS[0].seasonId);
-  const limit = Number(params.limit ?? "12");
-  const safeLimit = Number.isFinite(limit) ? Math.max(4, Math.min(30, limit)) : 12;
+  const limit = Number(params.limit ?? "20");
+  const safeLimit = Number.isFinite(limit) ? Math.max(4, Math.min(60, limit)) : 20;
 
   const data = await fetchSoccerCompetitionScores({
     competitionId,

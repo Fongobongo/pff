@@ -12,6 +12,10 @@ function buildQuery(params: Record<string, string | undefined>) {
   return qs ? `?${qs}` : "";
 }
 
+function toNumber(value: number | undefined): number {
+  return Number(value ?? 0) || 0;
+}
+
 export default async function SoccerAnalyticsPage({
   searchParams,
 }: {
@@ -20,8 +24,8 @@ export default async function SoccerAnalyticsPage({
   const params = await searchParams;
   const competitionId = Number(params.competition ?? SOCCER_COMPETITIONS[0].id);
   const seasonId = Number(params.season ?? SOCCER_COMPETITIONS[0].seasonId);
-  const limit = Number(params.limit ?? "12");
-  const safeLimit = Number.isFinite(limit) ? Math.max(4, Math.min(30, limit)) : 12;
+  const limit = Number(params.limit ?? "20");
+  const safeLimit = Number.isFinite(limit) ? Math.max(4, Math.min(60, limit)) : 20;
 
   const data = await fetchSoccerCompetitionScores({
     competitionId,
@@ -32,6 +36,10 @@ export default async function SoccerAnalyticsPage({
   const scores: number[] = [];
   const positionMap = new Map<string, { count: number; total: number; max: number }>();
   const teamMap = new Map<string, { count: number; total: number; max: number }>();
+  const leaderMap = new Map<
+    number,
+    { playerName: string; teamName?: string; xg: number; xa: number; assists: number }
+  >();
 
   for (const match of data.matches ?? []) {
     for (const player of match.players ?? []) {
@@ -52,6 +60,18 @@ export default async function SoccerAnalyticsPage({
       teamEntry.total += score;
       teamEntry.max = Math.max(teamEntry.max, score);
       teamMap.set(team, teamEntry);
+
+      const leader = leaderMap.get(player.playerId) ?? {
+        playerName: player.playerName,
+        teamName: player.teamName,
+        xg: 0,
+        xa: 0,
+        assists: 0,
+      };
+      leader.xg += toNumber(player.xg);
+      leader.xa += toNumber(player.xa);
+      leader.assists += toNumber(player.stats?.assists);
+      leaderMap.set(player.playerId, leader);
     }
   }
 
@@ -80,6 +100,11 @@ export default async function SoccerAnalyticsPage({
     count: entry.count,
   }));
   teams.sort((a, b) => b.avg - a.avg);
+
+  const leaders = Array.from(leaderMap.values());
+  const topXg = leaders.slice().sort((a, b) => b.xg - a.xg).slice(0, 8);
+  const topXa = leaders.slice().sort((a, b) => b.xa - a.xa).slice(0, 8);
+  const topAssists = leaders.slice().sort((a, b) => b.assists - a.assists).slice(0, 8);
 
   const currentCompetition = SOCCER_COMPETITIONS.find(
     (item) => item.id === competitionId && item.seasonId === seasonId
@@ -179,6 +204,39 @@ export default async function SoccerAnalyticsPage({
               ))}
             </tbody>
           </table>
+        </div>
+      </section>
+
+      <section className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-3">
+        <div className="rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-white/5">
+          <div className="text-xs uppercase tracking-wide text-zinc-500 dark:text-zinc-400">xG leaders</div>
+          <ul className="mt-3 space-y-1 text-sm">
+            {topXg.map((row, idx) => (
+              <li key={`xg-${row.playerName}-${idx}`} className="text-black dark:text-white">
+                {row.playerName} · {row.xg.toFixed(2)}
+              </li>
+            ))}
+          </ul>
+        </div>
+        <div className="rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-white/5">
+          <div className="text-xs uppercase tracking-wide text-zinc-500 dark:text-zinc-400">xA leaders</div>
+          <ul className="mt-3 space-y-1 text-sm">
+            {topXa.map((row, idx) => (
+              <li key={`xa-${row.playerName}-${idx}`} className="text-black dark:text-white">
+                {row.playerName} · {row.xa.toFixed(2)}
+              </li>
+            ))}
+          </ul>
+        </div>
+        <div className="rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-white/5">
+          <div className="text-xs uppercase tracking-wide text-zinc-500 dark:text-zinc-400">Assist leaders</div>
+          <ul className="mt-3 space-y-1 text-sm">
+            {topAssists.map((row, idx) => (
+              <li key={`assist-${row.playerName}-${idx}`} className="text-black dark:text-white">
+                {row.playerName} · {row.assists}
+              </li>
+            ))}
+          </ul>
         </div>
       </section>
     </SoccerPageShell>

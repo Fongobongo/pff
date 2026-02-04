@@ -37,8 +37,8 @@ export default async function SoccerTournamentMatrixPage({
   const params = await searchParams;
   const competitionId = Number(params.competition ?? SOCCER_COMPETITIONS[0].id);
   const seasonId = Number(params.season ?? SOCCER_COMPETITIONS[0].seasonId);
-  const limit = Number(params.limit ?? "8");
-  const safeLimit = Number.isFinite(limit) ? Math.max(4, Math.min(20, limit)) : 8;
+  const limit = Number(params.limit ?? "12");
+  const safeLimit = Number.isFinite(limit) ? Math.max(4, Math.min(30, limit)) : 12;
   const top = Math.min(100, Math.max(10, Number(params.top ?? "25") || 25));
 
   const data = await fetchSoccerCompetitionScores({
