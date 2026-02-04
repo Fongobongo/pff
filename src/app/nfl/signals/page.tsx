@@ -1,4 +1,3 @@
-import Link from "next/link";
 import NflPageShell from "../_components/NflPageShell";
 import { getSportfunMarketSnapshot, toUsdNumber } from "@/lib/sportfunMarket";
 import { buildNflTokenPlayerIndex } from "@/lib/sportfunPlayerMap";

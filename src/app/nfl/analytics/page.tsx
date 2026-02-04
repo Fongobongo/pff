@@ -97,7 +97,7 @@ export default async function NflAnalyticsPage({
   const scores = data.rows.map(scoreValue).sort((a, b) => a - b);
   const totalPlayers = scores.length;
   const sum = scores.reduce((acc, val) => acc + val, 0);
-  const average = totalPlayers ? sum / totalPlayers : 0;
+  const averageScore = totalPlayers ? sum / totalPlayers : 0;
   const median =
     totalPlayers === 0
       ? 0
@@ -312,7 +312,7 @@ export default async function NflAnalyticsPage({
         </div>
         <div className="rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-white/5">
           <div className="text-xs uppercase tracking-wide text-zinc-500 dark:text-zinc-400">Average score</div>
-          <div className="mt-2 text-2xl font-semibold text-black dark:text-white">{average.toFixed(2)}</div>
+          <div className="mt-2 text-2xl font-semibold text-black dark:text-white">{averageScore.toFixed(2)}</div>
         </div>
         <div className="rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-white/5">
           <div className="text-xs uppercase tracking-wide text-zinc-500 dark:text-zinc-400">Median score</div>
