@@ -2,14 +2,13 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { shortenAddress } from "@/lib/format";
 import { getSportfunNameOverride, getSportfunSportLabel } from "@/lib/sportfunNames";
 
 type SortKey = "value" | "pnl" | "spent" | "shares";
 
-
-type SportfunPortfolioResponse = {
+type SportfunPortfolioSnapshot = {
   chain: string;
   protocol: string;
   address: string;
@@ -22,6 +21,8 @@ type SportfunPortfolioResponse = {
     includePrices?: boolean;
     includeReceipts?: boolean;
     includeUri?: boolean;
+    includeMetadata?: boolean;
+    metadataLimit?: number;
   };
   summary: {
     erc1155TransferCount: number;
@@ -153,7 +154,19 @@ type SportfunPortfolioResponse = {
   };
 };
 
-type ActivityItem = SportfunPortfolioResponse["activity"][number];
+type SportfunPortfolioStatusResponse = {
+  status?: "pending" | "running" | "completed" | "failed";
+  jobId?: string;
+  error?: string;
+  snapshot?: SportfunPortfolioSnapshot;
+};
+
+type SportfunPortfolioResponse = SportfunPortfolioSnapshot & SportfunPortfolioStatusResponse;
+
+type SportfunPortfolioApiResponse = SportfunPortfolioResponse | SportfunPortfolioStatusResponse;
+
+type ActivityItem = SportfunPortfolioSnapshot["activity"][number];
+type PortfolioStatus = NonNullable<SportfunPortfolioStatusResponse["status"]>;
 
 function makeTokenKey(contractAddress?: string, tokenIdDec?: string): string | null {
   if (!contractAddress || !tokenIdDec) return null;
@@ -255,6 +268,8 @@ export default function SportfunPortfolioClient({ address }: { address: string }
   const [fullScanLoading, setFullScanLoading] = useState(false);
   const [fullScanError, setFullScanError] = useState<string | null>(null);
   const [fullScanAttempts, setFullScanAttempts] = useState<number[]>([]);
+  const [fullScanStatus, setFullScanStatus] = useState<PortfolioStatus | null>(null);
+  const [fullScanJobId, setFullScanJobId] = useState<string | null>(null);
 
   const decimals = data?.assumptions.usdc.decimals ?? 6;
   const tokenLabelMap = useMemo(() => {
@@ -316,6 +331,8 @@ export default function SportfunPortfolioClient({ address }: { address: string }
       includeUri?: boolean;
       metadataLimit?: number;
       activityCursor?: number;
+      mode?: "sync" | "async";
+      jobId?: string;
     }) => {
       const query = new URLSearchParams();
       query.set("scanMode", params.scanMode);
@@ -328,9 +345,53 @@ export default function SportfunPortfolioClient({ address }: { address: string }
       query.set("includePrices", params.includePrices ? "1" : "0");
       query.set("includeMetadata", params.includeMetadata ? "1" : "0");
       query.set("includeUri", params.includeUri ? "1" : "0");
+      if (params.mode) query.set("mode", params.mode);
+      if (params.jobId) query.set("jobId", params.jobId);
       return `/api/sportfun/portfolio/${address}?${query.toString()}`;
     };
   }, [address]);
+
+  const fullScanParams = useMemo(
+    () => ({
+      scanMode: "full" as const,
+      maxPages: 100,
+      maxActivity: 200,
+      includeTrades: true,
+      includePrices: true,
+      includeMetadata: false,
+    }),
+    []
+  );
+
+  const applySnapshot = useCallback((next: SportfunPortfolioSnapshot) => {
+    setData(next);
+    const cursor = next.summary.nextActivityCursor;
+    setActivityCursor(cursor ?? null);
+    setActivityDone(!cursor);
+  }, []);
+
+  const applyApiResponse = useCallback((next: SportfunPortfolioApiResponse) => {
+    const hasStatus = "status" in next && Boolean(next.status);
+    if (hasStatus && next.status) {
+      setFullScanStatus(next.status);
+      if (next.status === "failed" && next.error) {
+        setFullScanError(next.error);
+      }
+    }
+    if ("jobId" in next && next.jobId) {
+      setFullScanJobId(next.jobId);
+    }
+    if ("chain" in next) {
+      if (!hasStatus) {
+        setFullScanStatus("completed");
+      }
+      applySnapshot(next);
+      return;
+    }
+    if ("snapshot" in next && next.snapshot) {
+      applySnapshot(next.snapshot);
+    }
+  }, [applySnapshot]);
 
   useEffect(() => {
     let cancelled = false;
@@ -345,7 +406,6 @@ export default function SportfunPortfolioClient({ address }: { address: string }
 
       // Quick scan first so the UI is responsive, then optionally run a deeper scan.
       const caps = [3, 6, 10];
-      let last: SportfunPortfolioResponse | null = null;
 
       for (const pages of caps) {
         if (cancelled) return;
@@ -361,16 +421,9 @@ export default function SportfunPortfolioClient({ address }: { address: string }
         );
         if (cancelled) return;
 
-        last = next;
-        setData(next);
+        applySnapshot(next);
 
         if (!next.summary.scanIncomplete) break;
-      }
-
-      if (last) {
-        const cursor = last.summary.nextActivityCursor;
-        setActivityCursor(cursor ?? null);
-        setActivityDone(!cursor);
       }
 
       setLoading(false);
@@ -385,7 +438,36 @@ export default function SportfunPortfolioClient({ address }: { address: string }
     return () => {
       cancelled = true;
     };
-  }, [buildRequestUrl]);
+  }, [applySnapshot, buildRequestUrl]);
+
+  useEffect(() => {
+    if (!fullScanJobId) return;
+    if (!fullScanStatus || fullScanStatus === "completed" || fullScanStatus === "failed") return;
+
+    let cancelled = false;
+
+    const poll = async () => {
+      try {
+        const next = await getJson<SportfunPortfolioApiResponse>(
+          buildRequestUrl({ ...fullScanParams, mode: "async", jobId: fullScanJobId }),
+          20000
+        );
+        if (cancelled) return;
+        applyApiResponse(next);
+      } catch (err: unknown) {
+        if (cancelled) return;
+        setFullScanError(err instanceof Error ? err.message : String(err));
+      }
+    };
+
+    const interval = setInterval(poll, 5000);
+    poll();
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [applyApiResponse, buildRequestUrl, fullScanJobId, fullScanParams, fullScanStatus]);
 
   useEffect(() => {
     if (!data) return;
@@ -446,7 +528,7 @@ export default function SportfunPortfolioClient({ address }: { address: string }
 
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [activityCursor, activityDone, activityLoading, data, requestActivityPageUrl]);
+  }, [activityCursor, activityDone, activityLoading, data, buildRequestUrl]);
 
   const positions = useMemo(() => data?.analytics?.positionsByToken ?? [], [data?.analytics?.positionsByToken]);
 
@@ -538,37 +620,18 @@ export default function SportfunPortfolioClient({ address }: { address: string }
   async function runFullScan() {
     setFullScanLoading(true);
     setFullScanError(null);
-    setFullScanAttempts([]);
+    setFullScanAttempts([fullScanParams.maxPages]);
+    setFullScanStatus("pending");
+    setFullScanJobId(null);
     try {
-      const caps = [20, 50, 100];
-      let last: SportfunPortfolioResponse | null = null;
-
-      for (const pages of caps) {
-        setFullScanAttempts((x) => [...x, pages]);
-        const next = await getJson<SportfunPortfolioResponse>(
-          buildRequestUrl({
-            scanMode: "full",
-            maxPages: pages,
-            maxActivity: 200,
-            includeTrades: true,
-            includePrices: true,
-            includeMetadata: false,
-          }),
-          30000
-        );
-
-        last = next;
-        setData(next);
-        if (!next.summary.scanIncomplete) break;
-      }
-
-      if (last) {
-        const cursor = last.summary.nextActivityCursor;
-        setActivityCursor(cursor ?? null);
-        setActivityDone(!cursor);
-      }
+      const next = await getJson<SportfunPortfolioApiResponse>(
+        buildRequestUrl({ ...fullScanParams, mode: "async" }),
+        20000
+      );
+      applyApiResponse(next);
     } catch (err: unknown) {
       setFullScanError(err instanceof Error ? err.message : String(err));
+      setFullScanStatus("failed");
     } finally {
       setFullScanLoading(false);
     }
@@ -591,7 +654,7 @@ export default function SportfunPortfolioClient({ address }: { address: string }
         }),
         25000
       );
-      setData(next);
+      applySnapshot(next);
     } catch (err: unknown) {
       setFullScanError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -653,6 +716,16 @@ export default function SportfunPortfolioClient({ address }: { address: string }
       .map((sport) => ({ value: sport, label: sport.toUpperCase() })),
   ];
 
+  const fullScanStatusLabel =
+    fullScanStatus === "failed"
+      ? "failed"
+      : fullScanStatus === "completed"
+        ? "completed"
+        : fullScanStatus
+          ? "processing"
+          : null;
+  const fullScanBusy = fullScanLoading || fullScanStatus === "pending" || fullScanStatus === "running";
+
   return (
     <main className="mx-auto max-w-6xl p-6">
       <div className="flex items-center justify-between gap-4">
@@ -663,12 +736,19 @@ export default function SportfunPortfolioClient({ address }: { address: string }
             Auto-scan attempts: {attemptPages.length ? attemptPages.join(" → ") : "—"}
             {data.summary.scanIncomplete || data.summary.activityTruncated ? " (still incomplete)" : ""}
             {fullScanAttempts.length ? ` · full scan: ${fullScanAttempts.join(" → ")}` : ""}
-            {fullScanLoading ? " · full scan running…" : ""}
+            {fullScanStatusLabel ? ` · full scan ${fullScanStatusLabel}` : ""}
+            {fullScanLoading && !fullScanStatusLabel ? " · starting full scan…" : ""}
           </p>
           {data.summary.scanStart?.fromDate ? (
             <p className="mt-1 text-xs text-gray-500">
               Scan start: {new Date(data.summary.scanStart.fromDate).toLocaleDateString()} · block{" "}
               {data.summary.scanStart.fromBlock ?? "—"}
+            </p>
+          ) : null}
+          {fullScanStatus ? (
+            <p className="mt-1 text-xs text-amber-400">
+              Full scan status: {fullScanStatus === "failed" ? "failed" : fullScanStatus === "completed" ? "completed" : "processing"}
+              {fullScanJobId ? ` · job ${fullScanJobId.slice(0, 8)}…` : ""}
             </p>
           ) : null}
           {fullScanError ? <p className="mt-1 text-xs text-rose-400">Full scan failed: {fullScanError}</p> : null}
@@ -677,9 +757,9 @@ export default function SportfunPortfolioClient({ address }: { address: string }
           <button
             className="rounded-md border border-white/10 bg-white/10 px-3 py-1 text-sm text-white hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-60"
             onClick={runFullScan}
-            disabled={fullScanLoading}
+            disabled={fullScanBusy}
           >
-            {fullScanLoading ? "Running full scan…" : "Run full scan"}
+            {fullScanBusy ? "Full scan processing…" : "Run full scan"}
           </button>
           <button
             className="rounded-md border border-white/10 bg-white/10 px-3 py-1 text-sm text-white hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-60"

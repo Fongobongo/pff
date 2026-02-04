@@ -6,7 +6,7 @@ import crypto from "node:crypto";
 import { alchemyRpc } from "@/lib/alchemy";
 import { shortenAddress } from "@/lib/format";
 import { withCache } from "@/lib/stats/cache";
-import { kvEnabled, kvGetJson, kvSetRaw } from "@/lib/kv";
+import { kvEnabled, kvGetJson, kvSetJson, kvSetRaw } from "@/lib/kv";
 import {
   decodeAbiParameters,
   decodeEventLog,
@@ -48,6 +48,8 @@ const querySchema = z.object({
   includeUri: z.string().optional(),
   includeMetadata: z.string().optional(),
   metadataLimit: z.coerce.number().int().min(1).max(200).optional(),
+  mode: z.enum(["sync", "async"]).optional(),
+  jobId: z.string().optional(),
   // Higher caps + best-effort full history scan (may still truncate if it risks timeouts).
   scanMode: z.enum(["default", "full"]).optional(),
 });
@@ -938,9 +940,8 @@ export async function GET(request: Request, context: { params: Promise<{ address
   const scanMode = q.scanMode ?? "default";
   const scanStartBlock = await getScanStartBlockHex();
   const isVercel = Boolean(process.env.VERCEL);
-  const budgetMs = scanMode === "full" ? (isVercel ? 9_000 : 20_000) : isVercel ? 7_000 : 10_000;
-  const deadlineMs = Date.now() + budgetMs;
-  const hasTime = (minMs: number) => Date.now() < deadlineMs - minMs;
+  const deadlineMs = scanMode === "full" ? undefined : Date.now() + (isVercel ? 7_000 : 10_000);
+  const hasTime = (minMs: number) => (deadlineMs ? Date.now() < deadlineMs - minMs : true);
 
   const includeTrades = parseBool(q.includeTrades, true);
   const includePrices = parseBool(q.includePrices, true);
@@ -975,15 +976,8 @@ export async function GET(request: Request, context: { params: Promise<{ address
   ].join(":");
   const cacheKey = `sportfun:portfolio:${sha1Hex(cacheKeyRaw)}`;
   const cacheTtl = scanMode === "full" ? 900 : 300;
-  if (kvEnabled()) {
-    const cached = await kvGetJson<unknown>(cacheKey);
-    if (cached) {
-      return NextResponse.json(cached);
-    }
-  }
 
-  // Best-effort deadline (helps avoid serverless timeouts).
-
+  async function buildPayload() {
   const [erc1155IncomingRes, erc1155OutgoingRes] = await Promise.all([
     fetchTransfersForWallet({
       address: wallet,
@@ -1925,11 +1919,136 @@ export async function GET(request: Request, context: { params: Promise<{ address
     },
   };
 
+  return payload;
+  }
+
+  const mode = q.mode ?? (scanMode === "full" ? "async" : "sync");
+  const jobIdParam = q.jobId;
+  const snapshotKey = `sportfun:portfolio:snapshot:${walletLc}`;
+  const jobIndexKey = `sportfun:portfolio:job-index:${walletLc}:${cacheKey}`;
+  const jobTtl = 60 * 30;
+  const snapshotTtl = 60 * 60;
+
+  type PortfolioJobStatus = "pending" | "running" | "completed" | "failed";
+  type PortfolioJob = {
+    id: string;
+    status: PortfolioJobStatus;
+    createdAt: string;
+    startedAt?: string;
+    finishedAt?: string;
+    error?: string;
+    cacheKey: string;
+    snapshotKey: string;
+  };
+
+  const latestSnapshot = kvEnabled() ? await kvGetJson<unknown>(snapshotKey) : null;
+
+  const jobKey = (id: string) => `sportfun:portfolio:job:${id}`;
+  const readJob = async (jobId: string) => {
+    if (!kvEnabled()) return null;
+    return kvGetJson<PortfolioJob>(jobKey(jobId));
+  };
+  const writeJob = async (job: PortfolioJob) => {
+    if (!kvEnabled()) return false;
+    return kvSetJson(jobKey(job.id), job, jobTtl);
+  };
+
+  const respondWithStatus = (job: PortfolioJob | null, jobId?: string) => {
+    return NextResponse.json({
+      status: job?.status ?? "pending",
+      jobId: jobId ?? job?.id,
+      error: job?.error,
+      snapshot: latestSnapshot ?? undefined,
+    });
+  };
+
+  if (mode === "async" || jobIdParam) {
+    if (!kvEnabled()) {
+      const payload = await buildPayload();
+      return NextResponse.json(payload);
+    }
+
+    if (jobIdParam) {
+      const job = await readJob(jobIdParam);
+      if (!job) {
+        return respondWithStatus(null, jobIdParam);
+      }
+      if (job.status === "completed") {
+        const cached = await kvGetJson<Record<string, unknown>>(job.cacheKey);
+        if (cached) {
+          return NextResponse.json({ ...cached, status: "completed", jobId: job.id });
+        }
+      }
+      return respondWithStatus(job, job.id);
+    }
+
+    const cached = await kvGetJson<Record<string, unknown>>(cacheKey);
+    if (cached) {
+      return NextResponse.json({ ...cached, status: "completed" });
+    }
+
+    const existingJobMeta = await kvGetJson<{ jobId: string }>(jobIndexKey);
+    if (existingJobMeta?.jobId) {
+      const existingJob = await readJob(existingJobMeta.jobId);
+      if (existingJob) {
+        return respondWithStatus(existingJob, existingJob.id);
+      }
+    }
+
+    const jobId = crypto.randomUUID();
+    const job: PortfolioJob = {
+      id: jobId,
+      status: "pending",
+      createdAt: new Date().toISOString(),
+      cacheKey,
+      snapshotKey,
+    };
+    await kvSetJson(jobIndexKey, { jobId }, jobTtl);
+    await writeJob(job);
+
+    const runJob = async () => {
+      await writeJob({ ...job, status: "running", startedAt: new Date().toISOString() });
+      try {
+        const payload = await buildPayload();
+        try {
+          const raw = JSON.stringify(payload);
+          if (raw.length < 900_000) {
+            await kvSetRaw(cacheKey, raw, cacheTtl);
+            await kvSetRaw(snapshotKey, raw, snapshotTtl);
+          }
+        } catch {
+          // ignore cache failures
+        }
+        await writeJob({ ...job, status: "completed", finishedAt: new Date().toISOString() });
+      } catch (err: unknown) {
+        await writeJob({
+          ...job,
+          status: "failed",
+          error: err instanceof Error ? err.message : String(err),
+          finishedAt: new Date().toISOString(),
+        });
+      }
+    };
+
+    void runJob();
+    return respondWithStatus(job, jobId);
+  }
+
+  if (kvEnabled()) {
+    const cached = await kvGetJson<unknown>(cacheKey);
+    if (cached) {
+      return NextResponse.json(cached);
+    }
+  }
+
+  const payload = await buildPayload();
+
   if (kvEnabled()) {
     try {
       const raw = JSON.stringify(payload);
       if (raw.length < 900_000) {
         await kvSetRaw(cacheKey, raw, cacheTtl);
+        await kvSetRaw(snapshotKey, raw, snapshotTtl);
       }
     } catch {
       // ignore cache failures
