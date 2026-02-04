@@ -10,7 +10,6 @@ const SERIES_OPTIONS = [
   { key: "losers", label: "Losers" },
 ] as const;
 
-type TrendSeries = (typeof SERIES_OPTIONS)[number]["key"];
 
 function parseNumber(value: string | undefined, fallback: number, min: number, max: number): number {
   if (!value) return fallback;

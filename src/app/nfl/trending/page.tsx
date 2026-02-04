@@ -263,6 +263,10 @@ type WeekScore = {
     receivingYards?: number;
     passingYards?: number;
     airYards?: number;
+    targetShare?: number;
+    airYardsShare?: number;
+    wopr?: number;
+    racr?: number;
   };
 };
 

@@ -166,17 +166,19 @@ export default async function NflOpportunitiesPage({
     { next: { revalidate: 3600 } }
   );
   const schedule = (await scheduleRes.json()) as ScheduleResponse;
-  const weeks = schedule.weeks.length ? schedule.weeks : [1];
+  const sanitizedWeeks = schedule.weeks.filter((wk) => wk >= 1);
+  const weeks = sanitizedWeeks.length ? sanitizedWeeks : [1];
   const resolvedWeek = requestedWeek && weeks.includes(requestedWeek) ? requestedWeek : weeks[weeks.length - 1];
-  const prevWeekCandidates = weeks.filter((wk) => wk < resolvedWeek);
+  const safeResolvedWeek = resolvedWeek >= 1 ? resolvedWeek : 1;
+  const prevWeekCandidates = weeks.filter((wk) => wk >= 1 && wk < safeResolvedWeek);
   const prevWeek = prevWeekCandidates.length ? prevWeekCandidates[prevWeekCandidates.length - 1] : undefined;
-  const availableWeeks = weeks.filter((wk) => wk <= resolvedWeek);
+  const availableWeeks = weeks.filter((wk) => wk <= safeResolvedWeek);
   const windowWeeks = availableWeeks.slice(-lookback);
   const windowWeekSet = new Set(windowWeeks);
 
   const currentQuery = new URLSearchParams();
   currentQuery.set("season", String(season));
-  currentQuery.set("week", String(resolvedWeek));
+  currentQuery.set("week", String(safeResolvedWeek));
   if (seasonType) currentQuery.set("season_type", seasonType);
 
   const prevQuery = new URLSearchParams();
@@ -433,7 +435,7 @@ export default async function NflOpportunitiesPage({
           <Link
             key={wk}
             className={`rounded-full border px-3 py-1 text-xs ${
-              wk === resolvedWeek
+              wk === safeResolvedWeek
                 ? "border-black bg-black text-white dark:border-white dark:bg-white dark:text-black"
                 : "border-black/10 bg-white text-black hover:bg-zinc-50 dark:border-white/10 dark:bg-white/5 dark:text-white dark:hover:bg-white/10"
             }`}
@@ -452,7 +454,7 @@ export default async function NflOpportunitiesPage({
       <form className="mt-6 flex flex-wrap items-end gap-3" method="GET">
         <input type="hidden" name="season" value={season} />
         <input type="hidden" name="season_type" value={seasonType} />
-        <input type="hidden" name="week" value={resolvedWeek} />
+        <input type="hidden" name="week" value={safeResolvedWeek} />
         <label className="text-xs text-zinc-600 dark:text-zinc-400">
           Search
           <input
@@ -560,7 +562,7 @@ export default async function NflOpportunitiesPage({
 
       <section className="mt-6 text-sm text-zinc-600 dark:text-zinc-400">
         <p>
-          Usage trends track the last {TREND_WEEKS} games inside a {lookback}-week window through week {resolvedWeek}.
+          Usage trends track the last {TREND_WEEKS} games inside a {lookback}-week window through week {safeResolvedWeek}.
           Usage Trend blends target, touch, and air-yard deltas.
         </p>
       </section>
@@ -625,7 +627,7 @@ export default async function NflOpportunitiesPage({
 
       <section className="mt-6 text-sm text-zinc-600 dark:text-zinc-400">
         <p>
-          Showing players in the top {TOP_LIMIT} of week {resolvedWeek} who were outside top{" "}
+          Showing players in the top {TOP_LIMIT} of week {safeResolvedWeek} who were outside top{" "}
           {PREV_RANK_THRESHOLD} the week before.
         </p>
       </section>

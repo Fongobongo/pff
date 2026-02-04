@@ -14,7 +14,7 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const query = querySchema.parse({
     season: url.searchParams.get("season"),
-    week: url.searchParams.get("week"),
+    week: url.searchParams.get("week") ?? undefined,
     season_type: url.searchParams.get("season_type") ?? undefined,
     player_id: url.searchParams.get("player_id") ?? undefined,
   });

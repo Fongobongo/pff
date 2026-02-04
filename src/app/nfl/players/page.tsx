@@ -28,7 +28,6 @@ const TOP_MODE_OPTIONS = [
   { key: "pos", label: "By position" },
 ] as const;
 
-type TopMode = (typeof TOP_MODE_OPTIONS)[number]["key"];
 
 const SEASON_SORT_OPTIONS = [
   { key: "fpts", label: "FPts" },
