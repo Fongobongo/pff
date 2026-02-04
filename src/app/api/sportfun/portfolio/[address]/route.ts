@@ -884,6 +884,10 @@ export async function GET(request: Request, context: { params: Promise<{ address
   const walletLc = wallet.toLowerCase();
 
   const scanMode = q.scanMode ?? "default";
+  const isVercel = Boolean(process.env.VERCEL);
+  const budgetMs = scanMode === "full" ? (isVercel ? 9_000 : 20_000) : isVercel ? 7_000 : 10_000;
+  const deadlineMs = Date.now() + budgetMs;
+  const hasTime = (minMs: number) => Date.now() < deadlineMs - minMs;
 
   const includeTrades = parseBool(q.includeTrades, true);
   const includePrices = parseBool(q.includePrices, true);
@@ -902,8 +906,6 @@ export async function GET(request: Request, context: { params: Promise<{ address
   const activityCursor = q.activityCursor ? Number(q.activityCursor) : 0;
 
   // Best-effort deadline (helps avoid serverless timeouts).
-  // In full mode we prefer correctness; use maxPages to bound work.
-  const deadlineMs = scanMode === "full" ? undefined : Date.now() + 7_000;
 
   const [erc1155IncomingRes, erc1155OutgoingRes] = await Promise.all([
     fetchTransfersForWallet({
@@ -1171,7 +1173,8 @@ export async function GET(request: Request, context: { params: Promise<{ address
   >();
   const usdcDeltaReceiptByHash = new Map<string, bigint>();
 
-  if (includeTrades || includeReceipts) {
+  const shouldDecodeTrades = (includeTrades || includeReceipts) && hasTime(2500);
+  if (shouldDecodeTrades) {
     const hashes = activity.map((a) => a.hash);
 
     const receipts = await mapLimit(hashes, 4, async (h) => {
@@ -1214,7 +1217,8 @@ export async function GET(request: Request, context: { params: Promise<{ address
   // Prices / valuation via FDFPair.getPrices(tokenIds).
   const priceByHoldingKey = new Map<string, { priceUsdcPerShareRaw: bigint; valueUsdcRaw: bigint }>();
 
-  if (includePrices && holdings.length > 0) {
+  const shouldIncludePrices = includePrices && hasTime(2000);
+  if (shouldIncludePrices && holdings.length > 0) {
     const holdingsByContract = new Map<string, Array<{ tokenIdDec: string; balanceRaw: bigint }>>();
 
     for (const h of holdings) {
@@ -1276,7 +1280,8 @@ export async function GET(request: Request, context: { params: Promise<{ address
   const uriByKey = new Map<string, { uri?: string; error?: string }>();
   const metadataByKey = new Map<string, { metadata?: TokenMetadata; error?: string }>();
 
-  if (includeUri) {
+  const shouldIncludeUri = includeUri && hasTime(1500);
+  if (shouldIncludeUri) {
     await mapLimit(holdings, 8, async (h) => {
       const key = `${h.contractAddress}:${h.tokenIdHex}`;
       try {
@@ -1295,7 +1300,8 @@ export async function GET(request: Request, context: { params: Promise<{ address
     });
   }
 
-  if (includeMetadata) {
+  const shouldIncludeMetadata = includeMetadata && shouldIncludeUri && hasTime(1500);
+  if (shouldIncludeMetadata) {
     await mapLimit(holdings, 6, async (h) => {
       const key = `${h.contractAddress}:${h.tokenIdHex}`;
       const uri = uriByKey.get(key)?.uri;
@@ -1442,6 +1448,16 @@ export async function GET(request: Request, context: { params: Promise<{ address
     | ({ itemKind: "trade" } & DecodedTradeItem & { txHash: string; timestamp?: string })
     | ({ itemKind: "promotion" } & DecodedPromotionItem & { txHash: string; timestamp?: string })
     | {
+        itemKind: "inferred_trade";
+        kind: "buy" | "sell";
+        playerToken: string;
+        tokenIdDec: string;
+        walletShareDeltaRaw: string;
+        walletCurrencyDeltaRaw: string;
+        txHash: string;
+        timestamp?: string;
+      }
+    | {
         itemKind: "transfer";
         transferKind: "transfer_in" | "transfer_out";
         reason: "erc1155_unexplained_delta";
@@ -1470,6 +1486,21 @@ export async function GET(request: Request, context: { params: Promise<{ address
 
     for (const p of decoded?.promotions ?? []) {
       ledger.push({ itemKind: "promotion", ...p, txHash: a.hash, timestamp: a.timestamp });
+    }
+
+    if (!decoded?.trades?.length && a.inferred?.kind && a.inferred.kind !== "unknown") {
+      if (a.inferred.contractAddress && a.inferred.tokenIdDec && a.inferred.shareDeltaRaw) {
+        ledger.push({
+          itemKind: "inferred_trade",
+          kind: a.inferred.kind,
+          playerToken: a.inferred.contractAddress,
+          tokenIdDec: a.inferred.tokenIdDec,
+          walletShareDeltaRaw: a.inferred.shareDeltaRaw,
+          walletCurrencyDeltaRaw: a.usdcDeltaRaw,
+          txHash: a.hash,
+          timestamp: a.timestamp,
+        });
+      }
     }
 
     for (const r of a.reconciledTransfers ?? []) {
@@ -1581,6 +1612,7 @@ export async function GET(request: Request, context: { params: Promise<{ address
     }
 
     const currencyDelta = BigInt(item.walletCurrencyDeltaRaw);
+    const isDecodedTrade = item.itemKind === "trade";
 
     if (shareDelta > 0n) {
       // Buy.
@@ -1623,9 +1655,11 @@ export async function GET(request: Request, context: { params: Promise<{ address
           sellNoProceedsCount++;
         }
 
-        const economicProceeds = BigInt(item.currencyRaw);
-        if (economicProceeds > 0n) {
-          realizedPnlEconomicUsdcRaw += economicProceeds - costBasisSold;
+        if (isDecodedTrade) {
+          const economicProceeds = BigInt(item.currencyRaw);
+          if (economicProceeds > 0n) {
+            realizedPnlEconomicUsdcRaw += economicProceeds - costBasisSold;
+          }
         }
       }
     }

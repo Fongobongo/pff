@@ -185,10 +185,21 @@ function activityHasToken(activity: ActivityItem, key: string): boolean {
   return false;
 }
 
-async function getJson<T>(url: string): Promise<T> {
-  const res = await fetch(url, { cache: "no-store" });
-  if (!res.ok) throw new Error(`Request failed: ${res.status} ${res.statusText}`);
-  return res.json();
+async function getJson<T>(url: string, timeoutMs = 20000): Promise<T> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { cache: "no-store", signal: controller.signal });
+    if (!res.ok) throw new Error(`Request failed: ${res.status} ${res.statusText}`);
+    return res.json();
+  } catch (err: unknown) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      throw new Error("Request timed out. Try again or reduce scan depth.");
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 const DISPLAY_DECIMALS = 5;
@@ -237,6 +248,9 @@ export default function SportfunPortfolioClient({ address }: { address: string }
   const [sortDir, setSortDir] = useState<"desc" | "asc">("desc");
   const [sportFilter, setSportFilter] = useState<string>("all");
   const [activityTokenFilter, setActivityTokenFilter] = useState<string>("all");
+  const [fullScanLoading, setFullScanLoading] = useState(false);
+  const [fullScanError, setFullScanError] = useState<string | null>(null);
+  const [fullScanAttempts, setFullScanAttempts] = useState<number[]>([]);
 
   const decimals = data?.assumptions.usdc.decimals ?? 6;
   const tokenLabelMap = useMemo(() => {
@@ -287,15 +301,29 @@ export default function SportfunPortfolioClient({ address }: { address: string }
     return `/sportfun/portfolio/${address}/token/${contractAddress}/${tokenIdDec}`;
   }
 
-  const requestUrl = useMemo(() => {
-    // Start modest, then the effect will auto-increase until complete.
-    return (maxPages: number) =>
-      `/api/sportfun/portfolio/${address}?scanMode=full&maxPages=${maxPages}&maxCount=0x3e8&maxActivity=300&includeTrades=1&includePrices=1&includeMetadata=1`;
-  }, [address]);
-
-  const requestActivityPageUrl = useMemo(() => {
-    return (cursor: number) =>
-      `/api/sportfun/portfolio/${address}?scanMode=full&maxPages=200&maxCount=0x3e8&maxActivity=300&activityCursor=${cursor}&includeTrades=1&includePrices=0&includeUri=0`;
+  const buildRequestUrl = useMemo(() => {
+    return (params: {
+      scanMode: "default" | "full";
+      maxPages: number;
+      maxActivity: number;
+      includeTrades?: boolean;
+      includePrices?: boolean;
+      includeMetadata?: boolean;
+      includeUri?: boolean;
+      activityCursor?: number;
+    }) => {
+      const query = new URLSearchParams();
+      query.set("scanMode", params.scanMode);
+      query.set("maxPages", String(params.maxPages));
+      query.set("maxCount", "0x3e8");
+      query.set("maxActivity", String(params.maxActivity));
+      if (params.activityCursor !== undefined) query.set("activityCursor", String(params.activityCursor));
+      query.set("includeTrades", params.includeTrades ? "1" : "0");
+      query.set("includePrices", params.includePrices ? "1" : "0");
+      query.set("includeMetadata", params.includeMetadata ? "1" : "0");
+      query.set("includeUri", params.includeUri ? "1" : "0");
+      return `/api/sportfun/portfolio/${address}?${query.toString()}`;
+    };
   }, [address]);
 
   useEffect(() => {
@@ -309,16 +337,22 @@ export default function SportfunPortfolioClient({ address }: { address: string }
       setActivityDone(false);
       setActivityTokenFilter("all");
 
-      // Auto-expand until we stop seeing pageKeys / truncation.
-      // With caching enabled on the API, re-runs mostly fetch only new pages.
-      const caps = [50, 100, 200];
+      // Quick scan first so the UI is responsive, then optionally run a deeper scan.
+      const caps = [3, 6, 10];
       let last: SportfunPortfolioResponse | null = null;
 
       for (const pages of caps) {
         if (cancelled) return;
         setAttemptPages((x) => [...x, pages]);
 
-        const next = await getJson<SportfunPortfolioResponse>(requestUrl(pages));
+        const next = await getJson<SportfunPortfolioResponse>(
+          buildRequestUrl({
+            scanMode: "default",
+            maxPages: pages,
+            maxActivity: 150,
+            includePrices: true,
+          })
+        );
         if (cancelled) return;
 
         last = next;
@@ -345,7 +379,7 @@ export default function SportfunPortfolioClient({ address }: { address: string }
     return () => {
       cancelled = true;
     };
-  }, [requestUrl]);
+  }, [buildRequestUrl]);
 
   useEffect(() => {
     if (!data) return;
@@ -362,7 +396,15 @@ export default function SportfunPortfolioClient({ address }: { address: string }
         if (!activityCursor || activityLoading || activityDone) return;
 
         setActivityLoading(true);
-        getJson<SportfunPortfolioResponse>(requestActivityPageUrl(activityCursor))
+        getJson<SportfunPortfolioResponse>(
+          buildRequestUrl({
+            scanMode: data.query?.scanMode ?? "default",
+            maxPages: data.query?.maxPages ?? 10,
+            maxActivity: data.query?.maxActivity ?? 150,
+            activityCursor,
+            includeTrades: Boolean(data.query?.includeTrades),
+          })
+        )
           .then((next) => {
             setData((prev) => {
               if (!prev) return next;
@@ -487,6 +529,45 @@ export default function SportfunPortfolioClient({ address }: { address: string }
     );
   }
 
+  async function runFullScan() {
+    setFullScanLoading(true);
+    setFullScanError(null);
+    setFullScanAttempts([]);
+    try {
+      const caps = [20, 50, 100];
+      let last: SportfunPortfolioResponse | null = null;
+
+      for (const pages of caps) {
+        setFullScanAttempts((x) => [...x, pages]);
+        const next = await getJson<SportfunPortfolioResponse>(
+          buildRequestUrl({
+            scanMode: "full",
+            maxPages: pages,
+            maxActivity: 200,
+            includeTrades: true,
+            includePrices: true,
+            includeMetadata: true,
+          }),
+          30000
+        );
+
+        last = next;
+        setData(next);
+        if (!next.summary.scanIncomplete) break;
+      }
+
+      if (last) {
+        const cursor = last.summary.nextActivityCursor;
+        setActivityCursor(cursor ?? null);
+        setActivityDone(!cursor);
+      }
+    } catch (err: unknown) {
+      setFullScanError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setFullScanLoading(false);
+    }
+  }
+
   function exportPositionsCsv() {
     const header = [
       "playerName",
@@ -550,9 +631,19 @@ export default function SportfunPortfolioClient({ address }: { address: string }
           <p className="mt-1 text-xs text-gray-500">
             Auto-scan attempts: {attemptPages.length ? attemptPages.join(" → ") : "—"}
             {data.summary.scanIncomplete || data.summary.activityTruncated ? " (still incomplete)" : ""}
+            {fullScanAttempts.length ? ` · full scan: ${fullScanAttempts.join(" → ")}` : ""}
+            {fullScanLoading ? " · full scan running…" : ""}
           </p>
+          {fullScanError ? <p className="mt-1 text-xs text-rose-400">Full scan failed: {fullScanError}</p> : null}
         </div>
         <div className="flex items-center gap-4">
+          <button
+            className="rounded-md border border-white/10 bg-white/10 px-3 py-1 text-sm text-white hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-60"
+            onClick={runFullScan}
+            disabled={fullScanLoading}
+          >
+            {fullScanLoading ? "Running full scan…" : "Run full scan"}
+          </button>
           <Link className="text-sm text-blue-400 hover:underline" href={`/base/${address}`}>
             Base wallet
           </Link>
