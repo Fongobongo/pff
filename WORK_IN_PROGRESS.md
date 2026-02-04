@@ -1,30 +1,28 @@
 # Work in Progress
 
 ## Now
-- **Step 4 (Stats ingestion + scoring):** NFL + Football ingestion endpoints exist, plus match-to-score + competition scoring for football. Mapping coverage improved with heuristics; remaining gaps are mostly niche GK actions not present in open data.
-  - NFL weekly + player detail pages live; football fixtures/standings (football-data.org) wired with caching + pagination.
-  - Tournament summary endpoint added for football competitions; NFL player filters wired in UI.
-  - Tournament summary defaults to all matches with async job tracking + CSV export (DB-backed when configured).
-  - football-data.org tier mapping overrides exposed via config UI; fixtures can map to score-from-match.
-  - Added fixtures → score-from-match UI and improved team matching heuristics (score-based fallback + tie-breaks + league aliases).
+- **Step 5 (Soccer analytics + market expansion):** Expand StatsBomb competition coverage for soccer pages and improve Sport.fun market breadth (include inactive tokens + richer metadata).
+  - Add more competitions/seasons to the soccer analytics selectors.
+  - Enrich market snapshot with more metadata for low-activity tokens.
+  - Revisit sport summary pages after competition expansion.
 
 ## Next
-- Stats ingestion:
-  - Confirm scoring matrices vs provider field mapping (NFL + Football).
-  - Identify free-tier data sources and constraints.
-  - Build ingestion endpoints + caching for stat feeds.
-  - Add per-sport scoring tests to validate normalization.
+- Expand soccer leaderboards (xG/xA, assists, defenders) across more competitions.
+- Improve Sport.fun token universe coverage (inactive tokens, promotions-only IDs).
+- Run `npm run build` + smoke checks on core pages (NFL/Soccer/Sport.fun).
 
 ## Status
 - Last updated: 2026-02-04
-- Step 4 (Stats ingestion + scoring) started:
+- Step 4 (Stats ingestion + scoring) completed:
   - Added NFL + Football scoring library with normalized stat keys and result bonuses.
   - Added scoring API endpoints: `/api/stats/nfl/score` and `/api/stats/football/score`.
   - Added ingestion endpoints for NFL weekly stats and StatsBomb open data.
-  - Added basic scoring tests.
+  - Added basic scoring tests + provider coverage checks.
   - Added football match-to-score endpoint and expanded StatsBomb mapping coverage.
   - Added NFL score-week endpoint and football competition scoring endpoint.
   - Added football-data.org fixtures/standings endpoints and basic NFL/football pages.
+- Step 5 (Soccer analytics + market expansion) started:
+  - Adding more StatsBomb competitions to soccer analytics pages.
 - Step 3 (Sport.fun portfolio) completed:
   - Activity pagination + cursors to avoid large receipt decode bursts.
   - Decoded-receipt cache (memory + disk) for speed and rate-limit relief.
