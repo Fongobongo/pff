@@ -64,6 +64,7 @@ const SORT_OPTIONS = [
   { key: "racr", label: "RACR" },
   { key: "catch_rate", label: "Catch %" },
   { key: "ypt", label: "Yards/Target" },
+  { key: "usage_score", label: "Usage Score" },
   { key: "home_l3", label: "Home L3" },
   { key: "away_l3", label: "Away L3" },
   { key: "home_avg", label: "Home FPPG" },
@@ -128,6 +129,11 @@ function standardDeviation(values: number[]): number | undefined {
   const variance =
     values.reduce((acc, val) => acc + (val - mean) ** 2, 0) / values.length;
   return Math.sqrt(variance);
+}
+
+function zScore(value: number | undefined, mean: number, std: number): number {
+  if (value === undefined || Number.isNaN(value) || std === 0) return 0;
+  return (value - mean) / std;
 }
 
 function buildQuery(params: Record<string, string | undefined>) {
@@ -200,6 +206,9 @@ type TrendRow = {
   l3Racr?: number;
   l3CatchRate?: number;
   l3YardsPerTarget?: number;
+  usageTrendScore?: number;
+  usageShareScore?: number;
+  usageScore?: number;
   tpRateL3: number;
   trend?: number;
   oppDelta?: number;
@@ -302,6 +311,7 @@ export default async function NflTrendingPage({
     min_catch?: string;
     min_ypt?: string;
     split_mode?: string;
+    min_usage?: string;
   }>;
 }) {
   const params = await searchParams;
@@ -329,6 +339,7 @@ export default async function NflTrendingPage({
   const minCatch = parseNumber(params.min_catch, 0, 0, 100);
   const minYpt = parseNumber(params.min_ypt, 0, 0, 50);
   const splitMode = SPLIT_MODE_OPTIONS.find((opt) => opt.key === params.split_mode)?.key ?? "all";
+  const minUsage = parseNumber(params.min_usage, -5, -10, 10);
 
   const [snapshot, weeklyData, schedule] = await Promise.all([
     getSportfunMarketSnapshot({ sport: "nfl", windowHours: 24, trendDays: 30, maxTokens: 500 }),
@@ -583,6 +594,101 @@ export default async function NflTrendingPage({
     return entry;
   });
 
+  const usageByPos = new Map<
+    string,
+    {
+      targetsDelta: number[];
+      touchesDelta: number[];
+      airDelta: number[];
+      targetShare: number[];
+      airShare: number[];
+      wopr: number[];
+    }
+  >();
+
+  for (const row of rows) {
+    const pos = (row.position ?? "UNK").toUpperCase();
+    const entry = usageByPos.get(pos) ?? {
+      targetsDelta: [],
+      touchesDelta: [],
+      airDelta: [],
+      targetShare: [],
+      airShare: [],
+      wopr: [],
+    };
+    if (row.l3TargetsDelta !== undefined) entry.targetsDelta.push(row.l3TargetsDelta);
+    if (row.l3TouchesDelta !== undefined) entry.touchesDelta.push(row.l3TouchesDelta);
+    if (row.l3AirYardsDelta !== undefined) entry.airDelta.push(row.l3AirYardsDelta);
+    if (row.l3TargetShare !== undefined) entry.targetShare.push(row.l3TargetShare);
+    if (row.l3AirShare !== undefined) entry.airShare.push(row.l3AirShare);
+    if (row.l3Wopr !== undefined) entry.wopr.push(row.l3Wopr);
+    usageByPos.set(pos, entry);
+  }
+
+  const usageStatsByPos = new Map<
+    string,
+    {
+      targetsDelta: { mean: number; std: number };
+      touchesDelta: { mean: number; std: number };
+      airDelta: { mean: number; std: number };
+      targetShare: { mean: number; std: number };
+      airShare: { mean: number; std: number };
+      wopr: { mean: number; std: number };
+    }
+  >();
+
+  for (const [pos, entry] of usageByPos.entries()) {
+    const targetsMean = average(entry.targetsDelta) ?? 0;
+    const touchesMean = average(entry.touchesDelta) ?? 0;
+    const airMean = average(entry.airDelta) ?? 0;
+    const targetShareMean = average(entry.targetShare) ?? 0;
+    const airShareMean = average(entry.airShare) ?? 0;
+    const woprMean = average(entry.wopr) ?? 0;
+
+    usageStatsByPos.set(pos, {
+      targetsDelta: {
+        mean: targetsMean,
+        std: standardDeviation(entry.targetsDelta) ?? 0,
+      },
+      touchesDelta: {
+        mean: touchesMean,
+        std: standardDeviation(entry.touchesDelta) ?? 0,
+      },
+      airDelta: {
+        mean: airMean,
+        std: standardDeviation(entry.airDelta) ?? 0,
+      },
+      targetShare: {
+        mean: targetShareMean,
+        std: standardDeviation(entry.targetShare) ?? 0,
+      },
+      airShare: {
+        mean: airShareMean,
+        std: standardDeviation(entry.airShare) ?? 0,
+      },
+      wopr: {
+        mean: woprMean,
+        std: standardDeviation(entry.wopr) ?? 0,
+      },
+    });
+  }
+
+  for (const row of rows) {
+    const pos = (row.position ?? "UNK").toUpperCase();
+    const stats = usageStatsByPos.get(pos);
+    if (!stats) continue;
+    const zTargets = zScore(row.l3TargetsDelta, stats.targetsDelta.mean, stats.targetsDelta.std);
+    const zTouches = zScore(row.l3TouchesDelta, stats.touchesDelta.mean, stats.touchesDelta.std);
+    const zAir = zScore(row.l3AirYardsDelta, stats.airDelta.mean, stats.airDelta.std);
+    const zTargetShare = zScore(row.l3TargetShare, stats.targetShare.mean, stats.targetShare.std);
+    const zAirShare = zScore(row.l3AirShare, stats.airShare.mean, stats.airShare.std);
+    const zWopr = zScore(row.l3Wopr, stats.wopr.mean, stats.wopr.std);
+
+    row.usageTrendScore = (zTargets + zTouches + zAir) / 3;
+    row.usageShareScore = (zTargetShare + zAirShare + zWopr) / 3;
+    row.usageScore = row.usageTrendScore * 0.6 + row.usageShareScore * 0.4;
+  }
+
   const positions = Array.from(
     new Set(rows.map((row) => row.position).filter((value): value is string => Boolean(value)))
   ).sort();
@@ -667,6 +773,10 @@ export default async function NflTrendingPage({
     filtered = filtered.filter((row) => (row.l3YardsPerTarget ?? 0) >= minYpt);
   }
 
+  if (minUsage > -5) {
+    filtered = filtered.filter((row) => (row.usageScore ?? -Infinity) >= minUsage);
+  }
+
   const sorted = filtered.slice().sort((a, b) => {
     switch (sort) {
       case "trend":
@@ -709,6 +819,8 @@ export default async function NflTrendingPage({
         return (b.l3CatchRate ?? -Infinity) - (a.l3CatchRate ?? -Infinity);
       case "ypt":
         return (b.l3YardsPerTarget ?? -Infinity) - (a.l3YardsPerTarget ?? -Infinity);
+      case "usage_score":
+        return (b.usageScore ?? -Infinity) - (a.usageScore ?? -Infinity);
       case "home_l3":
         return (b.homeL3Avg ?? -Infinity) - (a.homeL3Avg ?? -Infinity);
       case "away_l3":
@@ -1027,6 +1139,16 @@ export default async function NflTrendingPage({
             className="mt-1 block w-20 rounded-md border border-black/10 bg-white px-3 py-2 text-sm text-black placeholder:text-zinc-400 dark:border-white/10 dark:bg-white/5 dark:text-white"
           />
         </label>
+        <label className="text-xs text-zinc-600 dark:text-zinc-400">
+          Min usage
+          <input
+            type="number"
+            name="min_usage"
+            step={0.1}
+            defaultValue={minUsage > -5 ? minUsage : ""}
+            className="mt-1 block w-20 rounded-md border border-black/10 bg-white px-3 py-2 text-sm text-black placeholder:text-zinc-400 dark:border-white/10 dark:bg-white/5 dark:text-white"
+          />
+        </label>
         <label className="flex items-center gap-2 text-xs text-zinc-600 dark:text-zinc-400">
           <input
             type="checkbox"
@@ -1090,7 +1212,7 @@ export default async function NflTrendingPage({
 
       <section className="mt-8">
         <div className="overflow-x-auto rounded-xl border border-black/10 bg-white dark:border-white/10 dark:bg-white/5">
-          <table className="w-full min-w-[2400px] text-left text-sm">
+          <table className="w-full min-w-[2500px] text-left text-sm">
             <thead className="bg-zinc-100 text-xs uppercase tracking-wide text-zinc-500 dark:bg-white/10 dark:text-zinc-400">
               <tr>
                 <th className="px-3 py-2">Player</th>
@@ -1104,6 +1226,7 @@ export default async function NflTrendingPage({
                 <th className="px-3 py-2">L3 Avg</th>
                 <th className="px-3 py-2">Home L3</th>
                 <th className="px-3 py-2">Away L3</th>
+                <th className="px-3 py-2">Usage Score</th>
                 <th className="px-3 py-2">L3 Targets</th>
                 <th className="px-3 py-2">L3 Touches</th>
                 <th className="px-3 py-2">L3 Yards</th>
@@ -1158,6 +1281,11 @@ export default async function NflTrendingPage({
                     </td>
                     <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
                       {row.awayL3Avg !== undefined ? formatNumber(row.awayL3Avg) : "—"}
+                    </td>
+                    <td
+                      className={`px-3 py-2 ${row.usageScore !== undefined && row.usageScore >= 0 ? "text-emerald-500" : "text-rose-500"}`}
+                    >
+                      {row.usageScore !== undefined ? row.usageScore.toFixed(2) : "—"}
                     </td>
                     <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
                       {row.l3Targets !== undefined ? formatNumber(row.l3Targets) : "—"}
@@ -1246,7 +1374,7 @@ export default async function NflTrendingPage({
               })}
               {sorted.length === 0 ? (
                 <tr>
-                  <td className="px-3 py-4 text-zinc-600 dark:text-zinc-400" colSpan={37}>
+                  <td className="px-3 py-4 text-zinc-600 dark:text-zinc-400" colSpan={38}>
                     No players match the filters.
                   </td>
                 </tr>
@@ -1260,7 +1388,8 @@ export default async function NflTrendingPage({
         <p>
           L3 Avg Rank follows the selected rank mode. TP Rate L3 counts top‑finish weeks vs positional thresholds. Opp Rank
           is relative to position over the last {OPP_WINDOW_WEEKS} weeks. Prices come from Sport.fun tokens when a name
-          match exists. Target/Air share and WOPR come from nflverse weekly stats.
+          match exists. Target/Air share and WOPR come from nflverse weekly stats. Usage Score is a position‑normalized mix
+          of L3 usage deltas + share.
         </p>
       </section>
     </NflPageShell>
