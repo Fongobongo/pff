@@ -142,6 +142,7 @@ export default async function NflPricesPage({
     q?: string;
     page?: string;
     sort?: string;
+    activity?: string;
   }>;
 }) {
   const params = await searchParams;
@@ -153,6 +154,7 @@ export default async function NflPricesPage({
   const queryText = params.q?.trim().toLowerCase() ?? "";
   const pageParam = parseNumber(params.page, 1, 1, 200);
   const sortParam = params.sort ?? "price_desc";
+  const activityParam = params.activity === "active" || params.activity === "inactive" ? params.activity : undefined;
 
   const snapshot = await getSportfunMarketSnapshot({
     sport: "nfl",
@@ -186,6 +188,8 @@ export default async function NflPricesPage({
     const team = row.team ?? (row.attributes ? extractTeam(row.attributes) : null);
     if (positionFilter && (position ?? "").toUpperCase() !== positionFilter) return false;
     if (teamFilter && (team ?? "").toUpperCase() !== teamFilter) return false;
+    if (activityParam === "active" && (row.trades24h ?? 0) === 0) return false;
+    if (activityParam === "inactive" && (row.trades24h ?? 0) > 0) return false;
     if (queryText) {
       const label = (row.name ?? `#${row.tokenIdDec}`).toLowerCase();
       if (!label.includes(queryText)) return false;
@@ -226,6 +230,10 @@ export default async function NflPricesPage({
         return bVolume > aVolume ? 1 : -1;
       case "trades_desc":
         return bTrades - aTrades;
+      case "supply_desc":
+        return bSupply - aSupply;
+      case "supply_asc":
+        return aSupply - bSupply;
       case "price_desc":
       default:
         if (aPrice === bPrice) return a.tokenIdDec.localeCompare(b.tokenIdDec);
@@ -372,21 +380,35 @@ export default async function NflPricesPage({
             </select>
           </label>
           <label className="flex flex-col gap-1 text-xs text-zinc-600 dark:text-zinc-400">
+            <span>Activity</span>
+            <select
+              name="activity"
+              defaultValue={activityParam ?? "all"}
+              className="rounded-md border border-black/10 bg-white px-2 py-1 text-xs text-black dark:border-white/10 dark:bg-white/5 dark:text-white"
+            >
+              <option value="all">All</option>
+              <option value="active">Active (24h)</option>
+              <option value="inactive">Inactive (24h)</option>
+            </select>
+          </label>
+          <label className="flex flex-col gap-1 text-xs text-zinc-600 dark:text-zinc-400">
             <span>Sort</span>
             <select
               name="sort"
               defaultValue={sortParam}
               className="rounded-md border border-black/10 bg-white px-2 py-1 text-xs text-black dark:border-white/10 dark:bg-white/5 dark:text-white"
             >
-              <option value="price_desc">Price ↓</option>
-              <option value="price_asc">Price ↑</option>
-              <option value="market_cap_desc">Market cap ↓</option>
-              <option value="market_cap_asc">Market cap ↑</option>
-              <option value="change_desc">Δ 24h ↓</option>
-              <option value="change_asc">Δ 24h ↑</option>
-              <option value="volume_desc">Volume ↓</option>
-              <option value="trades_desc">Trades ↓</option>
-            </select>
+                <option value="price_desc">Price ↓</option>
+                <option value="price_asc">Price ↑</option>
+                <option value="market_cap_desc">Market cap ↓</option>
+                <option value="market_cap_asc">Market cap ↑</option>
+                <option value="supply_desc">Supply ↓</option>
+                <option value="supply_asc">Supply ↑</option>
+                <option value="change_desc">Δ 24h ↓</option>
+                <option value="change_asc">Δ 24h ↑</option>
+                <option value="volume_desc">Volume ↓</option>
+                <option value="trades_desc">Trades ↓</option>
+              </select>
           </label>
           <button
             type="submit"
@@ -396,7 +418,7 @@ export default async function NflPricesPage({
           </button>
           <Link
             className="text-xs text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white"
-            href={`/nfl/prices${buildQuery({ windowHours: String(windowHours) })}`}
+            href={`/nfl/prices${buildQuery({ windowHours: String(windowHours), activity: activityParam ?? undefined })}`}
           >
             Reset
           </Link>
@@ -407,10 +429,10 @@ export default async function NflPricesPage({
           >
             Export CSV
           </a>
-            <div className="ml-auto text-xs text-zinc-500 dark:text-zinc-400">
-              {sortedFiltered.length} tokens · page {page} / {totalPages}
-            </div>
-          </form>
+          <div className="ml-auto text-xs text-zinc-500 dark:text-zinc-400">
+            {sortedFiltered.length} tokens · page {page} / {totalPages}
+          </div>
+        </form>
       </section>
 
       <section className="mt-6">
@@ -428,6 +450,7 @@ export default async function NflPricesPage({
                         windowHours: String(windowHours),
                         position: positionFilter ?? undefined,
                         team: teamFilter ?? undefined,
+                        activity: activityParam ?? undefined,
                         q: queryText || undefined,
                         sort: toggleSort(sortParam, "price_asc", "price_desc"),
                       })}`}
@@ -442,6 +465,7 @@ export default async function NflPricesPage({
                         windowHours: String(windowHours),
                         position: positionFilter ?? undefined,
                         team: teamFilter ?? undefined,
+                        activity: activityParam ?? undefined,
                         q: queryText || undefined,
                         sort: toggleSort(sortParam, "market_cap_asc", "market_cap_desc"),
                       })}`}
@@ -450,13 +474,28 @@ export default async function NflPricesPage({
                       Market cap
                     </Link>
                   </th>
-                  <th className="px-3 py-2">Supply</th>
                   <th className="px-3 py-2">
                     <Link
                       href={`/nfl/prices${buildQuery({
                         windowHours: String(windowHours),
                         position: positionFilter ?? undefined,
                         team: teamFilter ?? undefined,
+                        activity: activityParam ?? undefined,
+                        q: queryText || undefined,
+                        sort: toggleSort(sortParam, "supply_asc", "supply_desc"),
+                      })}`}
+                      className="hover:underline"
+                    >
+                      Supply
+                    </Link>
+                  </th>
+                  <th className="px-3 py-2">
+                    <Link
+                      href={`/nfl/prices${buildQuery({
+                        windowHours: String(windowHours),
+                        position: positionFilter ?? undefined,
+                        team: teamFilter ?? undefined,
+                        activity: activityParam ?? undefined,
                         q: queryText || undefined,
                         sort: toggleSort(sortParam, "change_asc", "change_desc"),
                       })}`}
@@ -471,6 +510,7 @@ export default async function NflPricesPage({
                         windowHours: String(windowHours),
                         position: positionFilter ?? undefined,
                         team: teamFilter ?? undefined,
+                        activity: activityParam ?? undefined,
                         q: queryText || undefined,
                         sort: "volume_desc",
                       })}`}
@@ -485,6 +525,7 @@ export default async function NflPricesPage({
                         windowHours: String(windowHours),
                         position: positionFilter ?? undefined,
                         team: teamFilter ?? undefined,
+                        activity: activityParam ?? undefined,
                         q: queryText || undefined,
                         sort: "trades_desc",
                       })}`}
@@ -548,6 +589,7 @@ export default async function NflPricesPage({
                 windowHours: String(windowHours),
                 position: positionFilter ?? undefined,
                 team: teamFilter ?? undefined,
+                activity: activityParam ?? undefined,
                 q: queryText || undefined,
                 sort: sortParam,
                 page: String(Math.max(1, page - 1)),
@@ -564,6 +606,7 @@ export default async function NflPricesPage({
                 windowHours: String(windowHours),
                 position: positionFilter ?? undefined,
                 team: teamFilter ?? undefined,
+                activity: activityParam ?? undefined,
                 q: queryText || undefined,
                 sort: sortParam,
                 page: String(Math.min(totalPages, page + 1)),
