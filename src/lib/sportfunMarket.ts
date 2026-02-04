@@ -98,6 +98,7 @@ const DEFAULT_TREND_DAYS = 30;
 const TOKEN_UNIVERSE_DAYS = 180;
 const TOKEN_UNIVERSE_START_MS = Date.UTC(2025, 7, 1);
 const LOG_CHUNK_BLOCKS = 2500n;
+const MAX_TRANSFER_PAGES = 20;
 const CACHE_DIR = path.join(process.cwd(), ".cache", "sportfun", "market");
 
 const PRICE_DISTRIBUTION_BINS: Array<{ label: string; min?: number; max?: number }> = [
@@ -282,6 +283,34 @@ type RpcLog = {
   blockNumber: Hex;
   transactionHash?: Hex;
 };
+
+type AssetTransfer = {
+  tokenId?: string;
+  erc1155Metadata?: Array<{ tokenId?: string }>;
+};
+
+function parseTokenId(value?: string): string | null {
+  if (!value) return null;
+  try {
+    return value.startsWith("0x") || value.startsWith("0X") ? BigInt(value).toString(10) : BigInt(value).toString(10);
+  } catch {
+    return null;
+  }
+}
+
+function extractTokenIdsFromTransfer(transfer: AssetTransfer): string[] {
+  const ids: string[] = [];
+  const meta = Array.isArray(transfer.erc1155Metadata) ? transfer.erc1155Metadata : [];
+  for (const entry of meta) {
+    const parsed = parseTokenId(entry?.tokenId);
+    if (parsed) ids.push(parsed);
+  }
+  if (!ids.length) {
+    const parsed = parseTokenId(transfer.tokenId);
+    if (parsed) ids.push(parsed);
+  }
+  return ids;
+}
 
 async function fetchLogsChunk(params: {
   addresses: string[];
@@ -593,6 +622,49 @@ function writeTokenCache(sport: SportfunMarketSport, tokenIds: string[]) {
   }
 }
 
+async function getTokenUniverseFromTransfers(
+  sport: SportfunMarketSport,
+  fromBlock: bigint,
+  toBlock: bigint
+): Promise<string[]> {
+  const contracts = getSportContracts(sport);
+  const addresses = contracts.map((contract) => contract.playerToken);
+  const tokenIds = new Set<string>();
+  let pageKey: string | undefined;
+  let pages = 0;
+
+  while (pages < MAX_TRANSFER_PAGES) {
+    const params: Record<string, unknown> = {
+      fromBlock: toHex(fromBlock),
+      toBlock: toHex(toBlock),
+      category: ["erc1155"],
+      contractAddresses: addresses,
+      withMetadata: false,
+      maxCount: "0x3e8",
+      order: "desc",
+    };
+    if (pageKey) params.pageKey = pageKey;
+
+    const result = (await alchemyRpc("alchemy_getAssetTransfers", [params])) as {
+      transfers?: AssetTransfer[];
+      pageKey?: string;
+    };
+
+    const transfers = Array.isArray(result?.transfers) ? result.transfers : [];
+    for (const transfer of transfers) {
+      for (const tokenId of extractTokenIdsFromTransfer(transfer)) {
+        tokenIds.add(tokenId);
+      }
+    }
+
+    pageKey = result?.pageKey;
+    pages += 1;
+    if (!pageKey) break;
+  }
+
+  return Array.from(tokenIds);
+}
+
 async function getTokenUniverse(sport: SportfunMarketSport, days: number): Promise<string[]> {
   const cache = readTokenCache(sport);
   const cacheFresh = cache && Date.now() - cache.updatedAt < 6 * 60 * 60 * 1000;
@@ -601,23 +673,36 @@ async function getTokenUniverse(sport: SportfunMarketSport, days: number): Promi
   const latest = await getLatestBlock();
   const fromTs = Math.min(Date.now() - days * 24 * 60 * 60 * 1000, TOKEN_UNIVERSE_START_MS);
   const fromBlock = await findBlockByTimestamp(fromTs);
-  const events = await getTradeEvents({ sport, fromBlock, toBlock: latest });
-  const tradeTokenIds = events.map((e) => e.tokenIdDec);
+  let tradeTokenIds: string[] = [];
+  try {
+    const events = await getTradeEvents({ sport, fromBlock, toBlock: latest });
+    tradeTokenIds = events.map((e) => e.tokenIdDec);
+  } catch {
+    tradeTokenIds = [];
+  }
 
   const contracts = getSportContracts(sport);
   const devPlayers = contracts.map((c) => c.developmentPlayers?.toLowerCase()).filter(Boolean) as string[];
   let promoTokenIds: string[] = [];
   if (devPlayers.length) {
-    const promoLogs = await fetchLogs({
-      addresses: devPlayers,
-      topic0: SPORTFUN_TOPICS.PlayerSharesPromoted,
-      fromBlock,
-      toBlock: latest,
-    });
-    promoTokenIds = promoLogs.flatMap(decodePromotionLog);
+    try {
+      const promoLogs = await fetchLogs({
+        addresses: devPlayers,
+        topic0: SPORTFUN_TOPICS.PlayerSharesPromoted,
+        fromBlock,
+        toBlock: latest,
+      });
+      promoTokenIds = promoLogs.flatMap(decodePromotionLog);
+    } catch {
+      promoTokenIds = [];
+    }
   }
 
   const tokenSet = new Set<string>([...(cache?.tokenIds ?? []), ...tradeTokenIds, ...promoTokenIds]);
+  if (!tokenSet.size) {
+    const transferTokenIds = await getTokenUniverseFromTransfers(sport, fromBlock, latest);
+    transferTokenIds.forEach((tokenId) => tokenSet.add(tokenId));
+  }
   const tokenIds = Array.from(tokenSet).sort((a, b) => Number(a) - Number(b));
   if (!tokenIds.length && cache?.tokenIds?.length) return cache.tokenIds;
   writeTokenCache(sport, tokenIds);
@@ -722,7 +807,12 @@ export async function getSportfunMarketSnapshot(params: {
       const trendStart = now - trendDays * 24 * 60 * 60 * 1000;
       const trendFromBlock = await findBlockByTimestamp(trendStart);
 
-      const events = await getTradeEvents({ sport: params.sport, fromBlock: trendFromBlock, toBlock: latest });
+      let events: TradeEvent[] = [];
+      try {
+        events = await getTradeEvents({ sport: params.sport, fromBlock: trendFromBlock, toBlock: latest });
+      } catch {
+        events = [];
+      }
       const tokenAgg = normalizeTokenAgg(events, windowStart);
       const lastTradeByToken = new Map<string, { ts: number; price?: bigint }>();
       for (const event of events) {
