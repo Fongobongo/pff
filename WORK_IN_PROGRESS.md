@@ -14,30 +14,6 @@
   - Identify free-tier data sources and constraints.
   - Build ingestion endpoints + caching for stat feeds.
   - Add per-sport scoring tests to validate normalization.
-- NFL parity plan (nfl-fun.vercel.app):
-  - **1) Market Overview (NFL)** — расширить рынок до уровня nfl-fun:
-    - Market Cap (оценка по supply/metadata), Market Sentiment (bullish/bearish), Price Range/Spread.
-    - Trend‑фильтры All/Gainers/Losers.
-    - Position Breakdown (QB/RB/WR/TE/etc) с долей и средней динамикой.
-  - **2) Players** — карточка/таблица как на nfl-fun:
-    - Фильтр по позиции и режимы Season Stats / Weekly Stats.
-    - Колонки: FPts, FPPG, Proj, L3 Avg, Avg Rank, TP Rate, Total TP, TP/Price и др.
-  - **3) Trending** — L3‑метрики и тренд‑скор:
-    - L3 Avg FPts, L3 Avg Rank, TP Rate L3, Trend, Opp Δ.
-    - Фильтры по позиции/тренду/оппонентам.
-  - **4) Advanced Stats** — вкладки и метрики:
-    - Efficiency, Volume, Red Zone, Advanced, Tournament.
-    - EPA, air yards, red‑zone usage, ceiling/floor/consistency.
-  - **5) Opportunities** — недельный usage‑трек:
-    - Targets/Rushes/Snaps по позициям и L3‑сводки.
-  - **6) Matchups** — расширить до matchup‑карточек:
-    - Implied points и defensive ranks vs позициям.
-  - **7) Analytics** — сравнение игроков + турнирная аналитика:
-    - Player compare, usage trends, contest‑аналитика.
-  - **8) Signals/Alerts** — отдельная страница:
-    - Market signals, алерты по резким изменениям.
-  - **9) Маппинг Sport.fun ↔ NFL игроки**:
-    - Привязка tokenId к player_id/позиции для сквозных таблиц.
 
 ## Status
 - Last updated: 2026-02-04
@@ -62,3 +38,10 @@
   - Pricing via `FDFPair.getPrices(tokenIds)`.
   - WIP analytics (moving-average cost basis) with promotions treated as free shares.
   - Sanity checks to compare decoded share deltas to ERC-1155 deltas.
+- NFL parity plan (nfl-fun.vercel.app) completed:
+  - Market Overview (market cap, sentiment, range/spread, trend filters, position breakdown, inactive tokens).
+  - Players (season/weekly modes, TP metrics, L3, ranks, pricing).
+  - Trending (L3 metrics, trend score, filters).
+  - Advanced Stats tabs (efficiency/volume/red zone/advanced/tournament).
+  - Opportunities, Matchups, Analytics, Signals pages.
+  - Sport.fun token ↔ NFL player mapping with metadata enrichment.
