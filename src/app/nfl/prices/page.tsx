@@ -127,6 +127,11 @@ function buildQuery(params: Record<string, string | undefined>) {
   return qs ? `?${qs}` : "";
 }
 
+function toggleSort(current: string, asc: string, desc: string): string {
+  if (current === desc) return asc;
+  return desc;
+}
+
 export default async function NflPricesPage({
   searchParams,
 }: {
@@ -417,11 +422,77 @@ export default async function NflPricesPage({
                   <th className="px-3 py-2">Player</th>
                   <th className="px-3 py-2">Pos</th>
                   <th className="px-3 py-2">Team</th>
-                  <th className="px-3 py-2">Price</th>
-                  <th className="px-3 py-2">Market cap</th>
-                  <th className="px-3 py-2">Δ (24h)</th>
-                  <th className="px-3 py-2">Volume</th>
-                  <th className="px-3 py-2">Trades</th>
+                  <th className="px-3 py-2">
+                    <Link
+                      href={`/nfl/prices${buildQuery({
+                        windowHours: String(windowHours),
+                        position: positionFilter ?? undefined,
+                        team: teamFilter ?? undefined,
+                        q: queryText || undefined,
+                        sort: toggleSort(sortParam, "price_asc", "price_desc"),
+                      })}`}
+                      className="hover:underline"
+                    >
+                      Price
+                    </Link>
+                  </th>
+                  <th className="px-3 py-2">
+                    <Link
+                      href={`/nfl/prices${buildQuery({
+                        windowHours: String(windowHours),
+                        position: positionFilter ?? undefined,
+                        team: teamFilter ?? undefined,
+                        q: queryText || undefined,
+                        sort: toggleSort(sortParam, "market_cap_asc", "market_cap_desc"),
+                      })}`}
+                      className="hover:underline"
+                    >
+                      Market cap
+                    </Link>
+                  </th>
+                  <th className="px-3 py-2">Supply</th>
+                  <th className="px-3 py-2">
+                    <Link
+                      href={`/nfl/prices${buildQuery({
+                        windowHours: String(windowHours),
+                        position: positionFilter ?? undefined,
+                        team: teamFilter ?? undefined,
+                        q: queryText || undefined,
+                        sort: toggleSort(sortParam, "change_asc", "change_desc"),
+                      })}`}
+                      className="hover:underline"
+                    >
+                      Δ (24h)
+                    </Link>
+                  </th>
+                  <th className="px-3 py-2">
+                    <Link
+                      href={`/nfl/prices${buildQuery({
+                        windowHours: String(windowHours),
+                        position: positionFilter ?? undefined,
+                        team: teamFilter ?? undefined,
+                        q: queryText || undefined,
+                        sort: "volume_desc",
+                      })}`}
+                      className="hover:underline"
+                    >
+                      Volume
+                    </Link>
+                  </th>
+                  <th className="px-3 py-2">
+                    <Link
+                      href={`/nfl/prices${buildQuery({
+                        windowHours: String(windowHours),
+                        position: positionFilter ?? undefined,
+                        team: teamFilter ?? undefined,
+                        q: queryText || undefined,
+                        sort: "trades_desc",
+                      })}`}
+                      className="hover:underline"
+                    >
+                      Trades
+                    </Link>
+                  </th>
                   <th className="px-3 py-2">Last trade</th>
                 </tr>
               </thead>
@@ -440,6 +511,9 @@ export default async function NflPricesPage({
                       <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{formatUsd(row.currentPriceUsdcRaw)}</td>
                       <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
                         {marketCap !== undefined ? formatUsdValue(marketCap) : "—"}
+                      </td>
+                      <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
+                        {supply !== null && supply !== undefined ? supply.toLocaleString() : "—"}
                       </td>
                       <td
                         className={`px-3 py-2 ${
@@ -460,7 +534,7 @@ export default async function NflPricesPage({
                 })}
                 {rows.length === 0 ? (
                   <tr>
-                    <td className="px-3 py-4 text-zinc-600 dark:text-zinc-400" colSpan={9}>
+                    <td className="px-3 py-4 text-zinc-600 dark:text-zinc-400" colSpan={10}>
                       No tokens match the filters.
                     </td>
                   </tr>

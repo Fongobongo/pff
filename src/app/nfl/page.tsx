@@ -375,6 +375,28 @@ export default async function NflMarketPage({
     .sort((a, b) => b.cap - a.cap)
     .slice(0, 6);
 
+  const topMarketCapGainers = currentPrices
+    .map((row) => {
+      const supply = row.supply ?? (row.attributes ? extractSupply(row.attributes) : null);
+      const price = row.currentPriceUsdcRaw ? toUsdNumber(row.currentPriceUsdcRaw) : undefined;
+      const cap = supply && price ? supply * price : 0;
+      return { row, cap };
+    })
+    .filter((entry) => entry.cap > 0 && (entry.row.priceChange24hPercent ?? 0) > 0)
+    .sort((a, b) => b.cap - a.cap)
+    .slice(0, 6);
+
+  const topMarketCapLosers = currentPrices
+    .map((row) => {
+      const supply = row.supply ?? (row.attributes ? extractSupply(row.attributes) : null);
+      const price = row.currentPriceUsdcRaw ? toUsdNumber(row.currentPriceUsdcRaw) : undefined;
+      const cap = supply && price ? supply * price : 0;
+      return { row, cap };
+    })
+    .filter((entry) => entry.cap > 0 && (entry.row.priceChange24hPercent ?? 0) < 0)
+    .sort((a, b) => b.cap - a.cap)
+    .slice(0, 6);
+
   const topVolume = currentPrices
     .slice()
     .sort((a, b) => {
@@ -1241,6 +1263,77 @@ export default async function NflMarketPage({
                     <tr>
                       <td className="px-3 py-4 text-zinc-600 dark:text-zinc-400" colSpan={3}>
                         No volume data.
+                      </td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <div className="overflow-hidden rounded-lg border border-black/10 dark:border-white/10">
+              <div className="border-b border-black/10 px-3 py-2 text-xs uppercase tracking-wide text-zinc-500 dark:border-white/10 dark:text-zinc-400">
+                Top market cap gainers
+              </div>
+              <table className="w-full text-left text-sm">
+                <thead className="bg-zinc-100 text-xs uppercase tracking-wide text-zinc-500 dark:bg-white/10 dark:text-zinc-400">
+                  <tr>
+                    <th className="px-3 py-2">Player</th>
+                    <th className="px-3 py-2">Market cap</th>
+                    <th className="px-3 py-2">Δ</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {topMarketCapGainers.map((entry) => (
+                    <tr key={`cap-gain-${entry.row.tokenIdDec}`} className="border-t border-black/10 dark:border-white/10">
+                      <td className="px-3 py-2 text-black dark:text-white">
+                        {entry.row.name ?? `#${entry.row.tokenIdDec}`}
+                      </td>
+                      <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{formatUsdValue(entry.cap)}</td>
+                      <td className="px-3 py-2 text-emerald-500">
+                        {formatPercent(entry.row.priceChange24hPercent)}
+                      </td>
+                    </tr>
+                  ))}
+                  {topMarketCapGainers.length === 0 ? (
+                    <tr>
+                      <td className="px-3 py-4 text-zinc-600 dark:text-zinc-400" colSpan={3}>
+                        No market cap gainers.
+                      </td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="overflow-hidden rounded-lg border border-black/10 dark:border-white/10">
+              <div className="border-b border-black/10 px-3 py-2 text-xs uppercase tracking-wide text-zinc-500 dark:border-white/10 dark:text-zinc-400">
+                Top market cap losers
+              </div>
+              <table className="w-full text-left text-sm">
+                <thead className="bg-zinc-100 text-xs uppercase tracking-wide text-zinc-500 dark:bg-white/10 dark:text-zinc-400">
+                  <tr>
+                    <th className="px-3 py-2">Player</th>
+                    <th className="px-3 py-2">Market cap</th>
+                    <th className="px-3 py-2">Δ</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {topMarketCapLosers.map((entry) => (
+                    <tr key={`cap-loss-${entry.row.tokenIdDec}`} className="border-t border-black/10 dark:border-white/10">
+                      <td className="px-3 py-2 text-black dark:text-white">
+                        {entry.row.name ?? `#${entry.row.tokenIdDec}`}
+                      </td>
+                      <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{formatUsdValue(entry.cap)}</td>
+                      <td className="px-3 py-2 text-rose-500">
+                        {formatPercent(entry.row.priceChange24hPercent)}
+                      </td>
+                    </tr>
+                  ))}
+                  {topMarketCapLosers.length === 0 ? (
+                    <tr>
+                      <td className="px-3 py-4 text-zinc-600 dark:text-zinc-400" colSpan={3}>
+                        No market cap losers.
                       </td>
                     </tr>
                   ) : null}
