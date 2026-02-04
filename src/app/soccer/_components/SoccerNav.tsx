@@ -2,6 +2,7 @@ import Link from "next/link";
 
 const NAV_ITEMS = [
   { href: "/soccer", label: "Market" },
+  { href: "/nfl", label: "Switch to NFL" },
   { href: "/soccer/players", label: "Players" },
   { href: "/soccer/trending", label: "Trending" },
   { href: "/soccer/advanced-stats", label: "Advanced stats" },
