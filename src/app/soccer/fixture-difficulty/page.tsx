@@ -1,4 +1,4 @@
-import { getBaseUrl } from "@/lib/serverBaseUrl";
+import { footballDataFetch } from "@/lib/footballdata";
 import SoccerPageShell from "../_components/SoccerPageShell";
 
 const LEAGUES = [
@@ -19,27 +19,33 @@ type FootballDataStandingsEntry = {
   table?: FootballDataStandingsRow[];
 };
 
-type StandingsResponse = {
-  standings?: { standings?: FootballDataStandingsEntry[] };
-  table?: FootballDataStandingsRow[];
+type FootballDataStandingsResponse = {
+  standings?: FootballDataStandingsEntry[];
 };
 
-function extractRows(data: StandingsResponse): FootballDataStandingsRow[] {
-  const standings = data.standings?.standings ?? [];
+function extractRows(data: FootballDataStandingsResponse): FootballDataStandingsRow[] {
+  const standings = data.standings ?? [];
   const table = standings.find((item) => item.type === "TOTAL") ?? standings[0];
-  return data.table ?? table?.table ?? [];
+  return table?.table ?? [];
+}
+
+async function fetchLeagueRows(competition: string): Promise<FootballDataStandingsRow[]> {
+  try {
+    const data = await footballDataFetch<FootballDataStandingsResponse>(
+      `/competitions/${competition}/standings`,
+      {},
+      300
+    );
+    return extractRows(data);
+  } catch {
+    return [];
+  }
 }
 
 export default async function SoccerFixtureDifficultyPage() {
-  const baseUrl = await getBaseUrl();
-
   const results = await Promise.all(
     LEAGUES.map(async (league) => {
-      const res = await fetch(`${baseUrl}/api/football-data/standings?competition=${league.code}`, {
-        next: { revalidate: 300 },
-      });
-      const data = (await res.json()) as StandingsResponse;
-      const rows = extractRows(data);
+      const rows = await fetchLeagueRows(league.code);
       const sorted = rows.slice().sort((a, b) => (b.points ?? 0) - (a.points ?? 0));
       return {
         league,
@@ -64,23 +70,31 @@ export default async function SoccerFixtureDifficultyPage() {
             <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
               <div>
                 <div className="text-xs uppercase tracking-wide text-zinc-500 dark:text-zinc-400">Toughest</div>
-                <ul className="mt-2 space-y-1 text-sm">
-                  {toughest.map((row) => (
-                    <li key={row.team?.id ?? row.team?.name} className="text-black dark:text-white">
-                      {row.team?.name} · {row.points ?? 0} pts
-                    </li>
-                  ))}
-                </ul>
+                {toughest.length ? (
+                  <ul className="mt-2 space-y-1 text-sm">
+                    {toughest.map((row) => (
+                      <li key={row.team?.id ?? row.team?.name} className="text-black dark:text-white">
+                        {row.team?.name} · {row.points ?? 0} pts
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">No data available.</p>
+                )}
               </div>
               <div>
                 <div className="text-xs uppercase tracking-wide text-zinc-500 dark:text-zinc-400">Easiest</div>
-                <ul className="mt-2 space-y-1 text-sm">
-                  {easiest.map((row) => (
-                    <li key={row.team?.id ?? row.team?.name} className="text-black dark:text-white">
-                      {row.team?.name} · {row.points ?? 0} pts
-                    </li>
-                  ))}
-                </ul>
+                {easiest.length ? (
+                  <ul className="mt-2 space-y-1 text-sm">
+                    {easiest.map((row) => (
+                      <li key={row.team?.id ?? row.team?.name} className="text-black dark:text-white">
+                        {row.team?.name} · {row.points ?? 0} pts
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">No data available.</p>
+                )}
               </div>
             </div>
           </div>
