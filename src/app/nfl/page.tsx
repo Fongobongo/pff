@@ -222,6 +222,29 @@ export default async function NflMarketPage({
       return bPrice > aPrice ? 1 : -1;
     })
     .slice(0, 12);
+  const inactiveShort = inactiveTop.slice(0, 6);
+
+  const mostActive = snapshot.tokens
+    .slice()
+    .sort((a, b) => {
+      const aTrades = a.trades24h ?? 0;
+      const bTrades = b.trades24h ?? 0;
+      if (aTrades !== bTrades) return bTrades - aTrades;
+      const aVolume = BigInt(a.volume24hSharesRaw ?? "0");
+      const bVolume = BigInt(b.volume24hSharesRaw ?? "0");
+      if (aVolume === bVolume) return 0;
+      return bVolume > aVolume ? 1 : -1;
+    })
+    .slice(0, 12);
+
+  const currentPrices = snapshot.tokens
+    .slice()
+    .sort((a, b) => {
+      const aPrice = BigInt(a.currentPriceUsdcRaw ?? "0");
+      const bPrice = BigInt(b.currentPriceUsdcRaw ?? "0");
+      if (aPrice === bPrice) return a.tokenIdDec.localeCompare(b.tokenIdDec);
+      return bPrice > aPrice ? 1 : -1;
+    });
   const sentiment =
     gainersCount > losersCount ? "Bullish" : losersCount > gainersCount ? "Bearish" : "Neutral";
 
@@ -419,6 +442,62 @@ export default async function NflMarketPage({
                 <div className="w-10 text-right text-zinc-600 dark:text-zinc-400">{bin.count}</div>
               </div>
             ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="mt-8">
+        <div className="overflow-hidden rounded-xl border border-black/10 bg-white dark:border-white/10 dark:bg-white/5">
+          <div className="border-b border-black/10 px-3 py-2 text-xs uppercase tracking-wide text-zinc-500 dark:border-white/10 dark:text-zinc-400">
+            Current prices
+          </div>
+          <div className="max-h-[620px] overflow-auto">
+            <table className="w-full text-left text-sm">
+              <thead className="sticky top-0 bg-zinc-100 text-xs uppercase tracking-wide text-zinc-500 dark:bg-black dark:text-zinc-400">
+                <tr>
+                  <th className="px-3 py-2">Player</th>
+                  <th className="px-3 py-2">Pos</th>
+                  <th className="px-3 py-2">Price</th>
+                  <th className="px-3 py-2">Δ (24h)</th>
+                  <th className="px-3 py-2">Volume</th>
+                  <th className="px-3 py-2">Trades</th>
+                  <th className="px-3 py-2">Last trade</th>
+                </tr>
+              </thead>
+              <tbody>
+                {currentPrices.map((row) => {
+                  const position = row.position ?? (row.attributes ? extractPosition(row.attributes) : null);
+                  return (
+                    <tr key={row.tokenIdDec} className="border-t border-black/10 dark:border-white/10">
+                      <td className="px-3 py-2 text-black dark:text-white">{row.name ?? `#${row.tokenIdDec}`}</td>
+                      <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{position ?? "—"}</td>
+                      <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{formatUsd(row.currentPriceUsdcRaw)}</td>
+                      <td
+                        className={`px-3 py-2 ${
+                          (row.priceChange24hPercent ?? 0) >= 0 ? "text-emerald-500" : "text-rose-500"
+                        }`}
+                      >
+                        {formatPercent(row.priceChange24hPercent)}
+                      </td>
+                      <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
+                        {formatShares(row.volume24hSharesRaw, 2)}
+                      </td>
+                      <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{row.trades24h ?? 0}</td>
+                      <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
+                        {row.lastTradeAt ? formatDate(row.lastTradeAt) : "—"}
+                      </td>
+                    </tr>
+                  );
+                })}
+                {currentPrices.length === 0 ? (
+                  <tr>
+                    <td className="px-3 py-4 text-zinc-600 dark:text-zinc-400" colSpan={7}>
+                      No token prices available.
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
           </div>
         </div>
       </section>
@@ -674,6 +753,73 @@ export default async function NflMarketPage({
               <div className="mt-1 text-lg text-black dark:text-white">
                 {priceSpreadPct !== undefined ? `${priceSpreadPct.toFixed(2)}%` : "—"}
               </div>
+            </div>
+          </div>
+          <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <div className="overflow-hidden rounded-lg border border-black/10 dark:border-white/10">
+              <div className="border-b border-black/10 px-3 py-2 text-xs uppercase tracking-wide text-zinc-500 dark:border-white/10 dark:text-zinc-400">
+                Most active (24h)
+              </div>
+              <table className="w-full text-left text-sm">
+                <thead className="bg-zinc-100 text-xs uppercase tracking-wide text-zinc-500 dark:bg-white/10 dark:text-zinc-400">
+                  <tr>
+                    <th className="px-3 py-2">Player</th>
+                    <th className="px-3 py-2">Trades</th>
+                    <th className="px-3 py-2">Volume</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {mostActive.map((row) => (
+                    <tr key={`active-${row.tokenIdDec}`} className="border-t border-black/10 dark:border-white/10">
+                      <td className="px-3 py-2 text-black dark:text-white">{row.name ?? `#${row.tokenIdDec}`}</td>
+                      <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{row.trades24h ?? 0}</td>
+                      <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
+                        {formatShares(row.volume24hSharesRaw, 2)}
+                      </td>
+                    </tr>
+                  ))}
+                  {mostActive.length === 0 ? (
+                    <tr>
+                      <td className="px-3 py-4 text-zinc-600 dark:text-zinc-400" colSpan={3}>
+                        No active tokens in the window.
+                      </td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="overflow-hidden rounded-lg border border-black/10 dark:border-white/10">
+              <div className="border-b border-black/10 px-3 py-2 text-xs uppercase tracking-wide text-zinc-500 dark:border-white/10 dark:text-zinc-400">
+                Most inactive (24h)
+              </div>
+              <table className="w-full text-left text-sm">
+                <thead className="bg-zinc-100 text-xs uppercase tracking-wide text-zinc-500 dark:bg-white/10 dark:text-zinc-400">
+                  <tr>
+                    <th className="px-3 py-2">Player</th>
+                    <th className="px-3 py-2">Price</th>
+                    <th className="px-3 py-2">Last trade</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {inactiveShort.map((row) => (
+                    <tr key={`inactive-${row.tokenIdDec}`} className="border-t border-black/10 dark:border-white/10">
+                      <td className="px-3 py-2 text-black dark:text-white">{row.name ?? `#${row.tokenIdDec}`}</td>
+                      <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{formatUsd(row.currentPriceUsdcRaw)}</td>
+                      <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
+                        {row.lastTradeAt ? formatDate(row.lastTradeAt) : "—"}
+                      </td>
+                    </tr>
+                  ))}
+                  {inactiveShort.length === 0 ? (
+                    <tr>
+                      <td className="px-3 py-4 text-zinc-600 dark:text-zinc-400" colSpan={3}>
+                        No inactive tokens in the window.
+                      </td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
             </div>
           </div>
         </div>
