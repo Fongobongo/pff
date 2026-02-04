@@ -122,6 +122,17 @@ function extractSupply(attributes: unknown): number | null {
   return parsed;
 }
 
+function formatUsdValue(value?: number): string {
+  if (value === undefined || Number.isNaN(value)) return "—";
+  const abs = Math.abs(value);
+  if (abs >= 1e9) return `$${(value / 1e9).toFixed(2)}B`;
+  if (abs >= 1e6) return `$${(value / 1e6).toFixed(2)}M`;
+  if (abs >= 1e3) return `$${(value / 1e3).toFixed(2)}K`;
+  if (abs >= 1) return `$${value.toFixed(2)}`;
+  if (abs >= 0.01) return `$${value.toFixed(4)}`;
+  return `$${value.toFixed(6)}`;
+}
+
 function extractTeam(attributes: unknown): string | null {
   const raw = extractAttributeValue(attributes, (key) => key.includes("team") || key.includes("club"));
   if (typeof raw === "string" && raw.trim()) return raw.trim();
@@ -149,6 +160,7 @@ export default async function NflMarketPage({
     price_team?: string;
     price_page?: string;
     price_q?: string;
+    price_sort?: string;
   }>;
 }) {
   const params = await searchParams;
@@ -161,6 +173,7 @@ export default async function NflMarketPage({
   const priceTeamFilter = priceTeamParam && priceTeamParam !== "ALL" ? priceTeamParam : undefined;
   const pricePageParam = parseNumber(params.price_page, 1, 1, 200);
   const priceQuery = params.price_q?.trim().toLowerCase() ?? "";
+  const priceSort = params.price_sort ?? "price_desc";
 
   const snapshot = await getSportfunMarketSnapshot({
     sport: "nfl",
@@ -293,7 +306,7 @@ export default async function NflMarketPage({
         .map((value) => value.toUpperCase())
     )
   ).sort();
-  const currentPricesFiltered = currentPrices.filter((row) => {
+  const currentPricesFilteredBase = currentPrices.filter((row) => {
     const position = row.position ?? (row.attributes ? extractPosition(row.attributes) : null);
     const team = row.team ?? (row.attributes ? extractTeam(row.attributes) : null);
     if (pricePositionFilter && (position ?? "").toUpperCase() !== pricePositionFilter) return false;
@@ -304,6 +317,45 @@ export default async function NflMarketPage({
     }
     return true;
   });
+  const currentPricesFiltered = currentPricesFilteredBase.slice().sort((a, b) => {
+    const aPrice = BigInt(a.currentPriceUsdcRaw ?? "0");
+    const bPrice = BigInt(b.currentPriceUsdcRaw ?? "0");
+    const aChange = a.priceChange24hPercent ?? 0;
+    const bChange = b.priceChange24hPercent ?? 0;
+    const aVolume = BigInt(a.volume24hSharesRaw ?? "0");
+    const bVolume = BigInt(b.volume24hSharesRaw ?? "0");
+    const aTrades = a.trades24h ?? 0;
+    const bTrades = b.trades24h ?? 0;
+    const aSupply = a.supply ?? (a.attributes ? extractSupply(a.attributes) : null) ?? 0;
+    const bSupply = b.supply ?? (b.attributes ? extractSupply(b.attributes) : null) ?? 0;
+    const aPriceNum = a.currentPriceUsdcRaw ? toUsdNumber(a.currentPriceUsdcRaw) : 0;
+    const bPriceNum = b.currentPriceUsdcRaw ? toUsdNumber(b.currentPriceUsdcRaw) : 0;
+    const aMarketCap = aSupply && aPriceNum ? aSupply * aPriceNum : 0;
+    const bMarketCap = bSupply && bPriceNum ? bSupply * bPriceNum : 0;
+
+    switch (priceSort) {
+      case "price_asc":
+        if (aPrice === bPrice) return a.tokenIdDec.localeCompare(b.tokenIdDec);
+        return aPrice > bPrice ? 1 : -1;
+      case "change_desc":
+        return bChange - aChange;
+      case "change_asc":
+        return aChange - bChange;
+      case "market_cap_desc":
+        return bMarketCap - aMarketCap;
+      case "market_cap_asc":
+        return aMarketCap - bMarketCap;
+      case "volume_desc":
+        if (aVolume === bVolume) return 0;
+        return bVolume > aVolume ? 1 : -1;
+      case "trades_desc":
+        return bTrades - aTrades;
+      case "price_desc":
+      default:
+        if (aPrice === bPrice) return a.tokenIdDec.localeCompare(b.tokenIdDec);
+        return bPrice > aPrice ? 1 : -1;
+    }
+  });
   const pricePageSize = 50;
   const priceTotalPages = Math.max(1, Math.ceil(currentPricesFiltered.length / pricePageSize));
   const pricePageSafe = Math.min(priceTotalPages, Math.max(1, pricePageParam));
@@ -311,6 +363,65 @@ export default async function NflMarketPage({
     (pricePageSafe - 1) * pricePageSize,
     pricePageSafe * pricePageSize
   );
+
+  const topMarketCap = currentPrices
+    .map((row) => {
+      const supply = row.supply ?? (row.attributes ? extractSupply(row.attributes) : null);
+      const price = row.currentPriceUsdcRaw ? toUsdNumber(row.currentPriceUsdcRaw) : undefined;
+      const cap = supply && price ? supply * price : 0;
+      return { row, cap };
+    })
+    .filter((entry) => entry.cap > 0)
+    .sort((a, b) => b.cap - a.cap)
+    .slice(0, 6);
+
+  const topVolume = currentPrices
+    .slice()
+    .sort((a, b) => {
+      const aVolume = BigInt(a.volume24hSharesRaw ?? "0");
+      const bVolume = BigInt(b.volume24hSharesRaw ?? "0");
+      if (aVolume === bVolume) return 0;
+      return bVolume > aVolume ? 1 : -1;
+    })
+    .slice(0, 6);
+
+  const exportMarketCsvHref = () => {
+    const header = [
+      "tokenId",
+      "player",
+      "position",
+      "team",
+      "price_usd",
+      "market_cap",
+      "price_change_24h_pct",
+      "volume_shares_24h",
+      "trades_24h",
+      "last_trade_at",
+    ];
+    const lines = [header.join(",")];
+    for (const row of currentPricesFiltered) {
+      const position = row.position ?? (row.attributes ? extractPosition(row.attributes) : null);
+      const team = row.team ?? (row.attributes ? extractTeam(row.attributes) : null);
+      const supply = row.supply ?? (row.attributes ? extractSupply(row.attributes) : null);
+      const price = row.currentPriceUsdcRaw ? toUsdNumber(row.currentPriceUsdcRaw) : undefined;
+      const marketCap = supply && price ? supply * price : undefined;
+      lines.push(
+        [
+          row.tokenIdDec,
+          `"${String(row.name ?? `#${row.tokenIdDec}`).replaceAll('"', '""')}"`,
+          position ?? "",
+          team ?? "",
+          price ?? "",
+          marketCap ?? "",
+          row.priceChange24hPercent ?? "",
+          row.volume24hSharesRaw ?? "0",
+          row.trades24h ?? 0,
+          row.lastTradeAt ?? "",
+        ].join(",")
+      );
+    }
+    return `data:text/csv;charset=utf-8,${encodeURIComponent(lines.join("\n"))}`;
+  };
   const sentiment =
     gainersCount > losersCount ? "Bullish" : losersCount > gainersCount ? "Bearish" : "Neutral";
 
@@ -560,6 +671,7 @@ export default async function NflMarketPage({
                       price_position: pos,
                       price_team: priceTeamFilter ?? undefined,
                       price_q: priceQuery || undefined,
+                      price_sort: priceSort,
                     })}`}
                   >
                     {pos}
@@ -596,6 +708,23 @@ export default async function NflMarketPage({
                   ))}
                 </select>
               </label>
+              <label className="flex flex-col gap-1">
+                <span>Sort</span>
+                <select
+                  name="price_sort"
+                  defaultValue={priceSort}
+                  className="rounded-md border border-black/10 bg-white px-2 py-1 text-xs text-black dark:border-white/10 dark:bg-white/5 dark:text-white"
+                >
+                  <option value="price_desc">Price ↓</option>
+                  <option value="price_asc">Price ↑</option>
+                  <option value="market_cap_desc">Market cap ↓</option>
+                  <option value="market_cap_asc">Market cap ↑</option>
+                  <option value="change_desc">Δ 24h ↓</option>
+                  <option value="change_asc">Δ 24h ↑</option>
+                  <option value="volume_desc">Volume ↓</option>
+                  <option value="trades_desc">Trades ↓</option>
+                </select>
+              </label>
               <button
                 type="submit"
                 className="rounded-md border border-black/10 bg-black px-3 py-1 text-xs text-white hover:bg-zinc-800 dark:border-white/10 dark:bg-white dark:text-black dark:hover:bg-zinc-200"
@@ -612,6 +741,13 @@ export default async function NflMarketPage({
               >
                 Reset
               </Link>
+              <a
+                href={exportMarketCsvHref()}
+                download={`nfl-market-prices-${windowHours}h.csv`}
+                className="text-xs text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white"
+              >
+                Export CSV
+              </a>
               <div className="ml-auto text-xs text-zinc-500 dark:text-zinc-400">
                 {currentPricesFiltered.length} tokens · page {pricePageSafe} / {priceTotalPages}
               </div>
@@ -624,6 +760,7 @@ export default async function NflMarketPage({
                   <th className="px-3 py-2">Player</th>
                   <th className="px-3 py-2">Pos</th>
                   <th className="px-3 py-2">Price</th>
+                  <th className="px-3 py-2">Market cap</th>
                   <th className="px-3 py-2">Δ (24h)</th>
                   <th className="px-3 py-2">Volume</th>
                   <th className="px-3 py-2">Trades</th>
@@ -633,11 +770,17 @@ export default async function NflMarketPage({
               <tbody>
                 {pricePageRows.map((row) => {
                   const position = row.position ?? (row.attributes ? extractPosition(row.attributes) : null);
+                  const supply = row.supply ?? (row.attributes ? extractSupply(row.attributes) : null);
+                  const price = row.currentPriceUsdcRaw ? toUsdNumber(row.currentPriceUsdcRaw) : undefined;
+                  const marketCap = supply && price ? supply * price : undefined;
                   return (
                     <tr key={row.tokenIdDec} className="border-t border-black/10 dark:border-white/10">
                       <td className="px-3 py-2 text-black dark:text-white">{row.name ?? `#${row.tokenIdDec}`}</td>
                       <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{position ?? "—"}</td>
                       <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{formatUsd(row.currentPriceUsdcRaw)}</td>
+                      <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
+                        {marketCap !== undefined ? formatUsdValue(marketCap) : "—"}
+                      </td>
                       <td
                         className={`px-3 py-2 ${
                           (row.priceChange24hPercent ?? 0) >= 0 ? "text-emerald-500" : "text-rose-500"
@@ -657,7 +800,7 @@ export default async function NflMarketPage({
                 })}
                 {pricePageRows.length === 0 ? (
                   <tr>
-                    <td className="px-3 py-4 text-zinc-600 dark:text-zinc-400" colSpan={7}>
+                    <td className="px-3 py-4 text-zinc-600 dark:text-zinc-400" colSpan={8}>
                       No token prices available.
                     </td>
                   </tr>
@@ -687,6 +830,7 @@ export default async function NflMarketPage({
                 price_position: pricePositionFilter ?? undefined,
                 price_team: priceTeamFilter ?? undefined,
                 price_q: priceQuery || undefined,
+                price_sort: priceSort,
                 price_page: String(Math.max(1, pricePageSafe - 1)),
               })}`}
               className={pricePageSafe > 1 ? "hover:underline" : "pointer-events-none opacity-40"}
@@ -704,6 +848,7 @@ export default async function NflMarketPage({
                 price_position: pricePositionFilter ?? undefined,
                 price_team: priceTeamFilter ?? undefined,
                 price_q: priceQuery || undefined,
+                price_sort: priceSort,
                 price_page: String(Math.min(priceTotalPages, pricePageSafe + 1)),
               })}`}
               className={pricePageSafe < priceTotalPages ? "hover:underline" : "pointer-events-none opacity-40"}
@@ -1027,6 +1172,75 @@ export default async function NflMarketPage({
                     <tr>
                       <td className="px-3 py-4 text-zinc-600 dark:text-zinc-400" colSpan={3}>
                         No inactive tokens in the window.
+                      </td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <div className="overflow-hidden rounded-lg border border-black/10 dark:border-white/10">
+              <div className="border-b border-black/10 px-3 py-2 text-xs uppercase tracking-wide text-zinc-500 dark:border-white/10 dark:text-zinc-400">
+                Top market cap
+              </div>
+              <table className="w-full text-left text-sm">
+                <thead className="bg-zinc-100 text-xs uppercase tracking-wide text-zinc-500 dark:bg-white/10 dark:text-zinc-400">
+                  <tr>
+                    <th className="px-3 py-2">Player</th>
+                    <th className="px-3 py-2">Market cap</th>
+                    <th className="px-3 py-2">Price</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {topMarketCap.map((entry) => (
+                    <tr key={`cap-${entry.row.tokenIdDec}`} className="border-t border-black/10 dark:border-white/10">
+                      <td className="px-3 py-2 text-black dark:text-white">
+                        {entry.row.name ?? `#${entry.row.tokenIdDec}`}
+                      </td>
+                      <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{formatUsdValue(entry.cap)}</td>
+                      <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
+                        {formatUsd(entry.row.currentPriceUsdcRaw)}
+                      </td>
+                    </tr>
+                  ))}
+                  {topMarketCap.length === 0 ? (
+                    <tr>
+                      <td className="px-3 py-4 text-zinc-600 dark:text-zinc-400" colSpan={3}>
+                        No market cap data.
+                      </td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="overflow-hidden rounded-lg border border-black/10 dark:border-white/10">
+              <div className="border-b border-black/10 px-3 py-2 text-xs uppercase tracking-wide text-zinc-500 dark:border-white/10 dark:text-zinc-400">
+                Top volume (24h)
+              </div>
+              <table className="w-full text-left text-sm">
+                <thead className="bg-zinc-100 text-xs uppercase tracking-wide text-zinc-500 dark:bg-white/10 dark:text-zinc-400">
+                  <tr>
+                    <th className="px-3 py-2">Player</th>
+                    <th className="px-3 py-2">Volume</th>
+                    <th className="px-3 py-2">Trades</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {topVolume.map((row) => (
+                    <tr key={`vol-${row.tokenIdDec}`} className="border-t border-black/10 dark:border-white/10">
+                      <td className="px-3 py-2 text-black dark:text-white">{row.name ?? `#${row.tokenIdDec}`}</td>
+                      <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
+                        {formatShares(row.volume24hSharesRaw, 2)}
+                      </td>
+                      <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{row.trades24h ?? 0}</td>
+                    </tr>
+                  ))}
+                  {topVolume.length === 0 ? (
+                    <tr>
+                      <td className="px-3 py-4 text-zinc-600 dark:text-zinc-400" colSpan={3}>
+                        No volume data.
                       </td>
                     </tr>
                   ) : null}
