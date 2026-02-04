@@ -9,6 +9,7 @@ const NAV_ITEMS = [
   { href: "/nfl/portfolio", label: "Portfolio" },
   { href: "/nfl/token", label: "Token" },
   { href: "/nfl/trending", label: "Trending" },
+  { href: "/nfl/signals", label: "Signals" },
   { href: "/nfl/analytics", label: "Analytics" },
   { href: "/nfl/advanced-stats", label: "Advanced stats" },
   { href: "/nfl/opportunities", label: "Opportunities" },
