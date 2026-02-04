@@ -1,38 +1,54 @@
 import Link from "next/link";
-import { getBaseUrl } from "@/lib/serverBaseUrl";
 import NflPageShell from "../_components/NflPageShell";
+import { getSportfunMarketSnapshot, toUsdNumber } from "@/lib/sportfunMarket";
 
-const SAMPLE_SEASONS = [2021, 2022, 2023];
-const SEASON_TYPES = ["REG", "POST", "PRE"] as const;
+const SORT_OPTIONS = [
+  { key: "volume", label: "24h volume" },
+  { key: "change", label: "24h price change" },
+  { key: "trades", label: "24h trades" },
+] as const;
 
-type ScheduleResponse = {
-  weeks: number[];
-};
+function parseNumber(value: string | undefined, fallback: number, min: number, max: number): number {
+  if (!value) return fallback;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(min, Math.min(max, parsed));
+}
 
-type ScoreWeekRow = {
-  player_id: string;
-  player_display_name: string;
-  team?: string;
-  position?: string;
-  score?: {
-    total?: number;
-    totalRounded?: number;
-  };
-};
+function formatUsd(raw?: string): string {
+  if (!raw) return "—";
+  const value = toUsdNumber(raw);
+  const abs = Math.abs(value);
+  if (abs >= 1000) return `$${value.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+  if (abs >= 1) return `$${value.toFixed(2)}`;
+  if (abs >= 0.01) return `$${value.toFixed(4)}`;
+  return `$${value.toFixed(6)}`;
+}
 
-type ScoreWeekResponse = {
-  rows: ScoreWeekRow[];
-};
+function formatPercent(value?: number): string {
+  if (value === undefined || Number.isNaN(value)) return "—";
+  const sign = value >= 0 ? "+" : "";
+  return `${sign}${value.toFixed(2)}%`;
+}
 
-type TrendRow = {
-  playerId: string;
-  name: string;
-  team?: string;
-  position?: string;
-  currentScore: number;
-  previousScore: number;
-  delta: number;
-};
+function formatShares(raw?: string, fractionDigits = 2): string {
+  if (!raw) return "0";
+  const neg = raw.startsWith("-");
+  const abs = BigInt(neg ? raw.slice(1) : raw);
+  const base = 10n ** 18n;
+  const whole = abs / base;
+  const fraction = abs % base;
+  if (fractionDigits <= 0) return `${neg ? "-" : ""}${whole.toString()}`;
+  const frac = fraction.toString().padStart(18, "0").slice(0, fractionDigits);
+  return `${neg ? "-" : ""}${whole.toString()}.${frac}`;
+}
+
+function formatDate(iso?: string): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleString();
+}
 
 function buildQuery(params: Record<string, string | undefined>) {
   const query = new URLSearchParams();
@@ -44,220 +60,116 @@ function buildQuery(params: Record<string, string | undefined>) {
   return qs ? `?${qs}` : "";
 }
 
-function scoreValue(row: ScoreWeekRow): number {
-  const val = row.score?.totalRounded ?? row.score?.total ?? 0;
-  return Number(val) || 0;
-}
-
 export default async function NflTrendingPage({
   searchParams,
 }: {
-  searchParams: Promise<{ season?: string; week?: string; season_type?: string }>;
+  searchParams: Promise<{ sort?: string; windowHours?: string }>;
 }) {
   const params = await searchParams;
-  const rawSeason = Number(params.season ?? "2023");
-  const season = Number.isFinite(rawSeason) ? rawSeason : 2023;
-  const seasonType = (params.season_type ?? "REG").toUpperCase();
-  const rawWeek = params.week ? Number(params.week) : undefined;
-  const requestedWeek = rawWeek !== undefined && Number.isFinite(rawWeek) ? rawWeek : undefined;
+  const windowHours = parseNumber(params.windowHours, 24, 1, 168);
+  const sort = SORT_OPTIONS.find((opt) => opt.key === params.sort)?.key ?? "volume";
 
-  const baseUrl = await getBaseUrl();
-  const scheduleRes = await fetch(
-    `${baseUrl}/api/stats/nfl/schedule?season=${season}&game_type=${seasonType}`,
-    { next: { revalidate: 3600 } }
-  );
-  const schedule = (await scheduleRes.json()) as ScheduleResponse;
-  const weeks = schedule.weeks.length ? schedule.weeks : [1];
-  const resolvedWeek = requestedWeek && weeks.includes(requestedWeek) ? requestedWeek : weeks[weeks.length - 1];
-  const prevWeekCandidates = weeks.filter((wk) => wk < resolvedWeek);
-  const prevWeek = prevWeekCandidates.length ? prevWeekCandidates[prevWeekCandidates.length - 1] : undefined;
-
-  const currentQuery = new URLSearchParams();
-  currentQuery.set("season", String(season));
-  currentQuery.set("week", String(resolvedWeek));
-  if (seasonType) currentQuery.set("season_type", seasonType);
-
-  const prevQuery = new URLSearchParams();
-  prevQuery.set("season", String(season));
-  if (prevWeek !== undefined) prevQuery.set("week", String(prevWeek));
-  if (seasonType) prevQuery.set("season_type", seasonType);
-
-  const [currentRes, prevRes] = await Promise.all([
-    fetch(`${baseUrl}/api/stats/nfl/score-week?${currentQuery.toString()}`, { next: { revalidate: 3600 } }),
-    prevWeek !== undefined
-      ? fetch(`${baseUrl}/api/stats/nfl/score-week?${prevQuery.toString()}`, { next: { revalidate: 3600 } })
-      : Promise.resolve(null),
-  ]);
-
-  const current = (await currentRes.json()) as ScoreWeekResponse;
-  const prev = prevRes ? ((await prevRes.json()) as ScoreWeekResponse) : { rows: [] };
-
-  const prevScores = new Map<string, number>();
-  for (const row of prev.rows) {
-    prevScores.set(row.player_id, scoreValue(row));
-  }
-
-  const trends: TrendRow[] = current.rows.map((row) => {
-    const currentScore = scoreValue(row);
-    const previousScore = prevScores.get(row.player_id) ?? 0;
-    return {
-      playerId: row.player_id,
-      name: row.player_display_name,
-      team: row.team,
-      position: row.position,
-      currentScore,
-      previousScore,
-      delta: currentScore - previousScore,
-    };
+  const snapshot = await getSportfunMarketSnapshot({
+    sport: "nfl",
+    windowHours,
+    trendDays: 30,
+    maxTokens: 200,
   });
 
-  const risers = trends
-    .filter((row) => row.delta > 0)
-    .sort((a, b) => b.delta - a.delta)
-    .slice(0, 50);
-
-  const fallers = trends
-    .filter((row) => row.delta < 0)
-    .sort((a, b) => a.delta - b.delta)
-    .slice(0, 50);
+  const sortedTokens = snapshot.tokens.slice().sort((a, b) => {
+    if (sort === "change") return Math.abs(b.priceChange24hPercent ?? 0) - Math.abs(a.priceChange24hPercent ?? 0);
+    if (sort === "trades") return (b.trades24h ?? 0) - (a.trades24h ?? 0);
+    return Number(b.volume24hSharesRaw ?? 0) - Number(a.volume24hSharesRaw ?? 0);
+  });
 
   return (
-    <NflPageShell title="NFL trending" description="Week-over-week scoring deltas from nflverse.">
+    <NflPageShell
+      title="NFL trending players"
+      description="Trending Sport.fun tokens based on 24h on-chain activity."
+    >
       <section className="mt-6 flex flex-wrap gap-3">
-        {SAMPLE_SEASONS.map((year) => (
+        {[6, 12, 24, 48, 72].map((hours) => (
           <Link
-            key={year}
-            className={`rounded-full border px-4 py-2 text-sm ${
-              year === season
-                ? "border-black bg-black text-white dark:border-white dark:bg-white dark:text-black"
-                : "border-black/10 bg-white text-black hover:bg-zinc-50 dark:border-white/10 dark:bg-white/5 dark:text-white dark:hover:bg-white/10"
-            }`}
-            href={`/nfl/trending${buildQuery({ season: String(year), week: params.week, season_type: seasonType })}`}
-          >
-            {year}
-          </Link>
-        ))}
-        {SEASON_TYPES.map((type) => (
-          <Link
-            key={type}
+            key={hours}
             className={`rounded-full border px-3 py-2 text-xs ${
-              type === seasonType
+              hours === windowHours
                 ? "border-black bg-black text-white dark:border-white dark:bg-white dark:text-black"
                 : "border-black/10 bg-white text-black hover:bg-zinc-50 dark:border-white/10 dark:bg-white/5 dark:text-white dark:hover:bg-white/10"
             }`}
-            href={`/nfl/trending${buildQuery({ season: String(season), week: params.week, season_type: type })}`}
+            href={`/nfl/trending${buildQuery({ windowHours: String(hours), sort })}`}
           >
-            {type}
+            {hours}h window
           </Link>
         ))}
       </section>
 
-      <section className="mt-4 flex flex-wrap gap-2">
-        {weeks.map((wk) => (
+      <section className="mt-4 flex flex-wrap gap-3">
+        {SORT_OPTIONS.map((opt) => (
           <Link
-            key={wk}
-            className={`rounded-full border px-3 py-1 text-xs ${
-              wk === resolvedWeek
+            key={opt.key}
+            className={`rounded-full border px-3 py-2 text-xs ${
+              opt.key === sort
                 ? "border-black bg-black text-white dark:border-white dark:bg-white dark:text-black"
                 : "border-black/10 bg-white text-black hover:bg-zinc-50 dark:border-white/10 dark:bg-white/5 dark:text-white dark:hover:bg-white/10"
             }`}
-            href={`/nfl/trending${buildQuery({ season: String(season), week: String(wk), season_type: seasonType })}`}
+            href={`/nfl/trending${buildQuery({ windowHours: String(windowHours), sort: opt.key })}`}
           >
-            Week {wk}
+            {opt.label}
           </Link>
         ))}
       </section>
 
       <section className="mt-6 text-sm text-zinc-600 dark:text-zinc-400">
-        <p>
-          Comparing week {resolvedWeek} vs {prevWeek ?? "—"}.
-        </p>
+        <p>Sorting by {SORT_OPTIONS.find((opt) => opt.key === sort)?.label}. Snapshot updated {formatDate(snapshot.asOf)}.</p>
       </section>
 
-      <section className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-2">
+      <section className="mt-8">
         <div className="overflow-hidden rounded-xl border border-black/10 bg-white dark:border-white/10 dark:bg-white/5">
-          <div className="border-b border-black/10 px-3 py-2 text-xs uppercase tracking-wide text-zinc-500 dark:border-white/10 dark:text-zinc-400">
-            Biggest risers
-          </div>
           <table className="w-full text-left text-sm">
             <thead className="bg-zinc-100 text-xs uppercase tracking-wide text-zinc-500 dark:bg-white/10 dark:text-zinc-400">
               <tr>
                 <th className="px-3 py-2">Player</th>
-                <th className="px-3 py-2">Team</th>
-                <th className="px-3 py-2">Pos</th>
+                <th className="px-3 py-2">Price</th>
                 <th className="px-3 py-2">Δ</th>
-                <th className="px-3 py-2">Now</th>
-                <th className="px-3 py-2">Prev</th>
+                <th className="px-3 py-2">Volume</th>
+                <th className="px-3 py-2">Trades</th>
+                <th className="px-3 py-2">Last trade</th>
               </tr>
             </thead>
             <tbody>
-              {risers.map((row) => (
-                <tr key={row.playerId} className="border-t border-black/10 dark:border-white/10">
-                  <td className="px-3 py-2 text-black dark:text-white">
-                    <Link className="hover:underline" href={`/nfl/player/${row.playerId}?season=${season}&season_type=${seasonType}`}>
-                      {row.name}
-                    </Link>
+              {sortedTokens.slice(0, 50).map((row) => (
+                <tr key={row.tokenIdDec} className="border-t border-black/10 dark:border-white/10">
+                  <td className="px-3 py-2 text-black dark:text-white">{row.name ?? `#${row.tokenIdDec}`}</td>
+                  <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{formatUsd(row.currentPriceUsdcRaw)}</td>
+                  <td
+                    className={`px-3 py-2 ${
+                      (row.priceChange24hPercent ?? 0) >= 0 ? "text-emerald-500" : "text-rose-500"
+                    }`}
+                  >
+                    {formatPercent(row.priceChange24hPercent)}
                   </td>
-                  <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{row.team ?? "—"}</td>
-                  <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{row.position ?? "—"}</td>
-                  <td className="px-3 py-2 text-green-600 dark:text-green-400">
-                    +{row.delta.toFixed(2)}
-                  </td>
-                  <td className="px-3 py-2 text-black dark:text-white">{row.currentScore.toFixed(2)}</td>
-                  <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{row.previousScore.toFixed(2)}</td>
+                  <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{formatShares(row.volume24hSharesRaw, 2)}</td>
+                  <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{row.trades24h}</td>
+                  <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{formatDate(row.lastTradeAt)}</td>
                 </tr>
               ))}
-              {risers.length === 0 ? (
+              {sortedTokens.length === 0 ? (
                 <tr>
                   <td className="px-3 py-4 text-zinc-600 dark:text-zinc-400" colSpan={6}>
-                    No risers found.
+                    No trades found for the selected window.
                   </td>
                 </tr>
               ) : null}
             </tbody>
           </table>
         </div>
+      </section>
 
-        <div className="overflow-hidden rounded-xl border border-black/10 bg-white dark:border-white/10 dark:bg-white/5">
-          <div className="border-b border-black/10 px-3 py-2 text-xs uppercase tracking-wide text-zinc-500 dark:border-white/10 dark:text-zinc-400">
-            Biggest fallers
-          </div>
-          <table className="w-full text-left text-sm">
-            <thead className="bg-zinc-100 text-xs uppercase tracking-wide text-zinc-500 dark:bg-white/10 dark:text-zinc-400">
-              <tr>
-                <th className="px-3 py-2">Player</th>
-                <th className="px-3 py-2">Team</th>
-                <th className="px-3 py-2">Pos</th>
-                <th className="px-3 py-2">Δ</th>
-                <th className="px-3 py-2">Now</th>
-                <th className="px-3 py-2">Prev</th>
-              </tr>
-            </thead>
-            <tbody>
-              {fallers.map((row) => (
-                <tr key={row.playerId} className="border-t border-black/10 dark:border-white/10">
-                  <td className="px-3 py-2 text-black dark:text-white">
-                    <Link className="hover:underline" href={`/nfl/player/${row.playerId}?season=${season}&season_type=${seasonType}`}>
-                      {row.name}
-                    </Link>
-                  </td>
-                  <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{row.team ?? "—"}</td>
-                  <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{row.position ?? "—"}</td>
-                  <td className="px-3 py-2 text-red-600 dark:text-red-400">{row.delta.toFixed(2)}</td>
-                  <td className="px-3 py-2 text-black dark:text-white">{row.currentScore.toFixed(2)}</td>
-                  <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{row.previousScore.toFixed(2)}</td>
-                </tr>
-              ))}
-              {fallers.length === 0 ? (
-                <tr>
-                  <td className="px-3 py-4 text-zinc-600 dark:text-zinc-400" colSpan={6}>
-                    No fallers found.
-                  </td>
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
-        </div>
+      <section className="mt-8 text-sm text-zinc-600 dark:text-zinc-400">
+        <p>
+          How to use this page: trending is based on on-chain Sport.fun trades. Higher volume and faster price change usually
+          means more attention.
+        </p>
       </section>
     </NflPageShell>
   );
