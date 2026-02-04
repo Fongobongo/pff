@@ -40,6 +40,10 @@ type SportfunPortfolioResponse = {
     activityCursor?: number;
     scanIncomplete?: boolean;
     scan?: unknown;
+    scanStart?: {
+      fromBlock?: string;
+      fromDate?: string;
+    };
   };
   assumptions: {
     shareUnits: string;
@@ -661,6 +665,12 @@ export default function SportfunPortfolioClient({ address }: { address: string }
             {fullScanAttempts.length ? ` · full scan: ${fullScanAttempts.join(" → ")}` : ""}
             {fullScanLoading ? " · full scan running…" : ""}
           </p>
+          {data.summary.scanStart?.fromDate ? (
+            <p className="mt-1 text-xs text-gray-500">
+              Scan start: {new Date(data.summary.scanStart.fromDate).toLocaleDateString()} · block{" "}
+              {data.summary.scanStart.fromBlock ?? "—"}
+            </p>
+          ) : null}
           {fullScanError ? <p className="mt-1 text-xs text-rose-400">Full scan failed: {fullScanError}</p> : null}
         </div>
         <div className="flex items-center gap-4">

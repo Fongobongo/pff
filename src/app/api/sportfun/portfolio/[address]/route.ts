@@ -1865,6 +1865,10 @@ export async function GET(request: Request, context: { params: Promise<{ address
       reconciledTransferOutCount,
       scanIncomplete,
       scan,
+      scanStart: {
+        fromBlock: scanStartBlock,
+        fromDate: SCAN_START_DATE_ISO,
+      },
     },
     holdings: holdingsEnriched,
     activity: activityEnriched,
