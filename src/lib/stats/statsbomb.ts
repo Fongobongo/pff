@@ -1,13 +1,68 @@
 import { withCache } from "@/lib/stats/cache";
-import type {
-  FootballCompetitionTier,
-  FootballMatchResult,
-  FootballNormalizedStats,
-  FootballPosition,
+import {
+  FOOTBALL_STAT_KEYS,
+  type FootballCompetitionTier,
+  type FootballMatchResult,
+  type FootballNormalizedStats,
+  type FootballPosition,
 } from "@/lib/stats/types";
 import { toFiniteNumber } from "@/lib/stats/utils";
 
 const STATSBOMB_BASE_URL = "https://raw.githubusercontent.com/statsbomb/open-data/master/data";
+
+export const STATSBOMB_MAPPED_FIELDS = [
+  "appearance_start",
+  "appearance_subbed_on",
+  "goals",
+  "shots_on_target",
+  "shots_off_target",
+  "shots_blocked_by_opponent",
+  "big_chances_created",
+  "big_chances_missed",
+  "assists",
+  "assists_penalties_won",
+  "assists_the_assister",
+  "accurate_passes_opponents_half",
+  "accurate_passes_own_half",
+  "fouls_won",
+  "penalties_won",
+  "blocked_shots",
+  "block_shots_six_yards",
+  "duels_won",
+  "successful_tackles",
+  "last_player_tackles",
+  "recoveries",
+  "effective_clearances",
+  "effective_headed_clearances",
+  "interceptions",
+  "interceptions_in_box",
+  "crosses_blocked",
+  "clearances_off_line",
+  "saves_penalty",
+  "saves_outside_box",
+  "saves_inside_box",
+  "successful_sweeper_keepers",
+  "smothers",
+  "punches",
+  "catches_cross",
+  "pick_ups",
+  "six_second_violations",
+  "own_goal",
+  "penalty_given_away",
+  "red_card",
+  "yellow_card",
+  "fouls_committed",
+  "miscontrols",
+  "dispossessions",
+  "successful_dribbles",
+  "offsides",
+  "duels_lost",
+  "crosses_not_claimed",
+  "clean_sheet_45_plus",
+  "goals_conceded",
+  "errors_leading_to_goal",
+  "errors_leading_to_shot",
+] as const;
 
 export type StatsBombCompetition = {
   competition_id: number;
@@ -25,6 +80,54 @@ export type StatsBombMatch = {
   away_score?: number;
   home_team?: { home_team_id: number; home_team_name: string };
   away_team?: { away_team_id: number; away_team_name: string };
+};
+
+type StatsBombEvent = {
+  id?: string;
+  index?: number;
+  minute?: number;
+  second?: number;
+  possession?: number;
+  player_id?: number;
+  type?: { name?: string };
+  team?: { id?: number; name?: string };
+  player?: { id?: number; player_id?: number; name?: string };
+  shot?: {
+    outcome?: { name?: string };
+    statsbomb_xg?: number;
+    type?: { name?: string };
+  };
+  pass?: {
+    outcome?: { name?: string };
+    goal_assist?: boolean;
+    shot_assist?: boolean;
+    type?: { name?: string };
+    assisted_shot_id?: string;
+  };
+  foul_won?: { penalty?: boolean };
+  foul_committed?: { penalty?: boolean; card?: { name?: string } };
+  bad_behaviour?: { card?: { name?: string } };
+  duel?: { outcome?: { name?: string }; type?: { name?: string } };
+  dribble?: { outcome?: { name?: string } };
+  clearance?: { body_part?: { name?: string } };
+  goalkeeper?: { type?: { name?: string }; outcome?: { name?: string } };
+  related_events?: string[];
+  location?: [number, number];
+};
+
+type StatsBombLineup = {
+  team_id?: number;
+  team_name?: string;
+  lineup?: Array<{
+    player_id?: number;
+    player_name?: string;
+    positions?: Array<{
+      position?: string;
+      start_reason?: string;
+      from?: string;
+      to?: string;
+    }>;
+  }>;
 };
 
 export type StatsBombPlayerStats = {
@@ -52,6 +155,7 @@ export type StatsBombMatchStats = {
   coverage: {
     mappedFields: string[];
     unmappedFields: string[];
+    scoringMissing: string[];
   };
 };
 
@@ -102,15 +206,15 @@ export async function getStatsBombMatches(
   );
 }
 
-async function getStatsBombEvents(matchId: number): Promise<any[]> {
+async function getStatsBombEvents(matchId: number): Promise<StatsBombEvent[]> {
   return withCache(`statsbomb:events:${matchId}`, 3600, () =>
-    fetchJson<any[]>(`${STATSBOMB_BASE_URL}/events/${matchId}.json`, 3600)
+    fetchJson<StatsBombEvent[]>(`${STATSBOMB_BASE_URL}/events/${matchId}.json`, 3600)
   );
 }
 
-async function getStatsBombLineups(matchId: number): Promise<any[]> {
+async function getStatsBombLineups(matchId: number): Promise<StatsBombLineup[]> {
   return withCache(`statsbomb:lineups:${matchId}`, 3600, () =>
-    fetchJson<any[]>(`${STATSBOMB_BASE_URL}/lineups/${matchId}.json`, 3600)
+    fetchJson<StatsBombLineup[]>(`${STATSBOMB_BASE_URL}/lineups/${matchId}.json`, 3600)
   );
 }
 
@@ -124,7 +228,7 @@ function parseMinutes(value?: string, fallbackMinutes = 90): number {
   return minutes + seconds / 60;
 }
 
-function getEventMinute(event: any): number {
+function getEventMinute(event: StatsBombEvent): number {
   const minute = toFiniteNumber(event?.minute);
   const second = toFiniteNumber(event?.second);
   return minute + second / 60;
@@ -278,8 +382,8 @@ export async function buildStatsBombMatchStats(options: {
   ]);
 
   const players = new Map<number, StatsBombPlayerStats>();
-  const eventsById = new Map<string, any>();
-  const shotsById = new Map<string, any>();
+  const eventsById = new Map<string, StatsBombEvent>();
+  const shotsById = new Map<string, StatsBombEvent>();
   const intervalsByPlayer = new Map<number, { start: number; end: number }[]>();
   const penaltyWins: Array<{
     playerId: number;
@@ -562,7 +666,7 @@ export async function buildStatsBombMatchStats(options: {
 
     if (typeName === "Error") {
       const relatedEvents = Array.isArray(event.related_events) ? event.related_events : [];
-      let relatedShot: any | undefined;
+      let relatedShot: StatsBombEvent | undefined;
       for (const relatedId of relatedEvents) {
         const rel = eventsById.get(relatedId);
         if (rel?.type?.name === "Shot") {
@@ -637,68 +741,16 @@ export async function buildStatsBombMatchStats(options: {
     }
   }
 
-  const mappedFields = [
-    "appearance_start",
-    "appearance_subbed_on",
-    "goals",
-    "shots_on_target",
-    "shots_off_target",
-    "shots_blocked_by_opponent",
-    "big_chances_created",
-    "big_chances_missed",
-    "assists",
-    "assists_penalties_won",
-    "assists_the_assister",
-    "accurate_passes_opponents_half",
-    "accurate_passes_own_half",
-    "fouls_won",
-    "penalties_won",
-    "blocked_shots",
-    "block_shots_six_yards",
-    "duels_won",
-    "successful_tackles",
-    "last_player_tackles",
-    "recoveries",
-    "effective_clearances",
-    "effective_headed_clearances",
-    "interceptions",
-    "interceptions_in_box",
-    "crosses_blocked",
-    "clearances_off_line",
-    "saves_penalty",
-    "saves_outside_box",
-    "saves_inside_box",
-    "successful_sweeper_keepers",
-    "smothers",
-    "punches",
-    "catches_cross",
-    "pick_ups",
-    "six_second_violations",
-    "own_goal",
-    "penalty_given_away",
-    "red_card",
-    "yellow_card",
-    "fouls_committed",
-    "miscontrols",
-    "dispossessions",
-    "successful_dribbles",
-    "offsides",
-    "duels_lost",
-    "crosses_not_claimed",
-    "clean_sheet_45_plus",
-    "goals_conceded",
-    "errors_leading_to_goal",
-    "errors_leading_to_shot",
-  ];
-
-  const unmappedFields: string[] = [];
-
   return {
     matchId,
     competitionId,
     seasonId,
     teams: teamSummary,
     players: playerArray,
-    coverage: { mappedFields, unmappedFields },
+    coverage: {
+      mappedFields: [...STATSBOMB_MAPPED_FIELDS],
+      unmappedFields: [],
+      scoringMissing: FOOTBALL_STAT_KEYS.filter((key) => !STATSBOMB_MAPPED_FIELDS.includes(key)),
+    },
   };
 }

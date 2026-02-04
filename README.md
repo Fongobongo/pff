@@ -13,3 +13,5 @@ Fan site built with **React / Next.js** for the game **pro.football.fun**.
 - Keep a conversation log and a changelog in the repository:
   - `docs/CONVERSATION_LOG.md`
   - `CHANGELOG.md`
+- Free-tier data sources and limits:
+  - `docs/FREE_TIER_SOURCES.md`

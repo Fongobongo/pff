@@ -1,5 +1,15 @@
 import Link from "next/link";
 import { getBaseUrl } from "@/lib/serverBaseUrl";
+import NflNav from "./_components/NflNav";
+import type { NflWeeklyRow } from "@/lib/stats/nflverse";
+
+type NflScoreRow = NflWeeklyRow & {
+  score?: { total?: number; totalRounded?: number };
+};
+
+type NflScoreWeekResponse = {
+  rows?: NflScoreRow[];
+};
 
 const SAMPLE_WEEKS = [1, 2, 3, 4, 5];
 const SAMPLE_SEASONS = [2021, 2022, 2023];
@@ -23,8 +33,8 @@ export default async function NflPage({
   const res = await fetch(`${baseUrl}/api/stats/nfl/score-week?${query.toString()}`, {
     next: { revalidate: 3600 },
   });
-  const data = await res.json();
-  const rows = (data.rows ?? []).slice().sort((a: any, b: any) => {
+  const data = (await res.json()) as NflScoreWeekResponse;
+  const rows = (data.rows ?? []).slice().sort((a, b) => {
     const aScore = a.score?.totalRounded ?? a.score?.total ?? 0;
     const bScore = b.score?.totalRounded ?? b.score?.total ?? 0;
     return bScore - aScore;
@@ -41,6 +51,10 @@ export default async function NflPage({
             Season {season}, week {week} — sorted by points.
           </p>
         </header>
+
+        <section className="mt-6">
+          <NflNav />
+        </section>
 
         <section className="mt-8">
           <div className="flex flex-wrap gap-3">
@@ -90,7 +104,7 @@ export default async function NflPage({
                 </tr>
               </thead>
               <tbody>
-                {rows.slice(0, 100).map((row: any) => (
+                {rows.slice(0, 100).map((row) => (
                   <tr key={`${row.player_id}-${row.team}`} className="border-t border-black/10 dark:border-white/10">
                     <td className="px-3 py-2">
                       <Link

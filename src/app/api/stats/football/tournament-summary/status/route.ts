@@ -8,7 +8,24 @@ const querySchema = z.object({
   format: z.enum(["json", "csv"]).optional(),
 });
 
-function summaryToCsv(summary: { players?: any[] }) {
+type TournamentSummaryPlayer = {
+  playerId: number;
+  playerName: string;
+  teamName: string;
+  position: string;
+  games: number;
+  totalPoints: number;
+  totalRounded: number;
+  average: number;
+};
+
+type TournamentSummaryResult = {
+  competitionId?: number;
+  seasonId?: number;
+  players?: TournamentSummaryPlayer[];
+};
+
+function summaryToCsv(summary: TournamentSummaryResult) {
   const headers = [
     "player_id",
     "player_name",
@@ -41,7 +58,7 @@ export async function GET(request: Request) {
     format: url.searchParams.get("format") ?? undefined,
   });
 
-  const job = await getJob<any>(query.job_id);
+  const job = await getJob<TournamentSummaryResult>(query.job_id);
   if (!job) {
     return NextResponse.json({ error: "Job not found." }, { status: 404 });
   }

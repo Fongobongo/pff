@@ -1,6 +1,29 @@
 import Link from "next/link";
 import { getBaseUrl } from "@/lib/serverBaseUrl";
 
+type FootballDataStandingsRow = {
+  position?: number;
+  team?: { id?: number; name?: string };
+  playedGames?: number;
+  won?: number;
+  draw?: number;
+  lost?: number;
+  goalDifference?: number;
+  points?: number;
+};
+
+type FootballDataStandingsEntry = {
+  type?: string;
+  table?: FootballDataStandingsRow[];
+};
+
+type StandingsResponse = {
+  competitionTier?: string;
+  totalTeams?: number;
+  standings?: { standings?: FootballDataStandingsEntry[] };
+  table?: FootballDataStandingsRow[];
+};
+
 export default async function StandingsPage({
   searchParams,
 }: {
@@ -22,9 +45,9 @@ export default async function StandingsPage({
   const res = await fetch(`${baseUrl}/api/football-data/standings?${query.toString()}`, {
     next: { revalidate: 300 },
   });
-  const data = await res.json();
+  const data = (await res.json()) as StandingsResponse;
   const standings = data.standings?.standings ?? [];
-  const table = standings.find((item: any) => item.type === "TOTAL") ?? standings[0];
+  const table = standings.find((item) => item.type === "TOTAL") ?? standings[0];
   const rows = data.table ?? table?.table ?? [];
   const totalTeams = data.totalTeams ?? rows.length;
   const totalPages = pageSize > 0 ? Math.ceil(totalTeams / pageSize) : 1;
@@ -98,7 +121,7 @@ export default async function StandingsPage({
                 </tr>
               </thead>
               <tbody>
-                {rows.map((row: any) => (
+                {rows.map((row) => (
                   <tr key={row.team?.id ?? row.position} className="border-t border-black/10 dark:border-white/10">
                     <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{row.position}</td>
                     <td className="px-3 py-2 text-black dark:text-white">{row.team?.name}</td>

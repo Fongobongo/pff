@@ -1,6 +1,22 @@
 import Link from "next/link";
 import { getBaseUrl } from "@/lib/serverBaseUrl";
 
+type FootballDataMatch = {
+  id: number;
+  utcDate?: string;
+  status?: string;
+  homeTeam?: { name?: string };
+  awayTeam?: { name?: string };
+  score?: { fullTime?: { home?: number | null; away?: number | null } };
+};
+
+type FixturesResponse = {
+  competitionTier?: string;
+  totalMatches?: number;
+  pageMatches?: FootballDataMatch[];
+  matches?: { matches?: FootballDataMatch[] };
+};
+
 export default async function FixturesPage({
   searchParams,
 }: {
@@ -24,7 +40,7 @@ export default async function FixturesPage({
   const res = await fetch(`${baseUrl}/api/football-data/matches?${query.toString()}`, {
     next: { revalidate: 300 },
   });
-  const data = await res.json();
+  const data = (await res.json()) as FixturesResponse;
   const matches = data.pageMatches ?? data.matches?.matches ?? [];
   const totalMatches = data.totalMatches ?? matches.length;
   const totalPages = pageSize > 0 ? Math.ceil(totalMatches / pageSize) : 1;
@@ -100,7 +116,7 @@ export default async function FixturesPage({
                 </tr>
               </thead>
               <tbody>
-                {matches.map((match: any) => (
+                {matches.map((match) => (
                   <tr key={match.id} className="border-t border-black/10 dark:border-white/10">
                     <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
                       {match.utcDate?.slice?.(0, 10) ?? "-"}

@@ -1,6 +1,20 @@
 import Link from "next/link";
 import { getBaseUrl } from "@/lib/serverBaseUrl";
 
+type ScoreFromMatchPlayer = {
+  playerId: number;
+  playerName: string;
+  teamName?: string;
+  position?: string;
+  minutesPlayed?: number;
+  score?: { total?: number; totalRounded?: number };
+};
+
+type ScoreFromMatchResponse = {
+  competitionTier?: string;
+  players?: ScoreFromMatchPlayer[];
+};
+
 export default async function MatchPage({
   params,
   searchParams,
@@ -19,7 +33,7 @@ export default async function MatchPage({
   const res = await fetch(`${baseUrl}/api/stats/football/score-from-match?${query.toString()}`, {
     next: { revalidate: 3600 },
   });
-  const data = await res.json();
+  const data = (await res.json()) as ScoreFromMatchResponse;
 
   return (
     <div className="min-h-screen bg-zinc-50 font-sans dark:bg-black">
@@ -61,7 +75,7 @@ export default async function MatchPage({
                 </tr>
               </thead>
               <tbody>
-                {(data.players ?? []).map((player: any) => (
+                {(data.players ?? []).map((player) => (
                   <tr key={player.playerId} className="border-t border-black/10 dark:border-white/10">
                     <td className="px-3 py-2 text-black dark:text-white">{player.playerName}</td>
                     <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{player.teamName}</td>

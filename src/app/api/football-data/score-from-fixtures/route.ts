@@ -2,7 +2,12 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { footballDataFetch } from "@/lib/footballdata";
 import { resolveCompetitionTierFromFootballData } from "@/lib/footballTier";
-import { buildStatsBombMatchStats, getStatsBombMatches, type StatsBombMatch } from "@/lib/stats/statsbomb";
+import {
+  buildStatsBombMatchStats,
+  getStatsBombMatches,
+  type StatsBombMatch,
+  type StatsBombMatchStats,
+} from "@/lib/stats/statsbomb";
 import { scoreFootball } from "@/lib/stats/football";
 import { findBestStatsBombMatch } from "@/lib/footballTeamMatch";
 
@@ -27,6 +32,13 @@ type FixtureMatch = {
 
 type FootballDataMatchesResponse = {
   matches?: FixtureMatch[];
+};
+
+type ScoredMatch = {
+  matchId: number;
+  teams?: StatsBombMatchStats["teams"];
+  coverage: StatsBombMatchStats["coverage"];
+  players: Array<StatsBombMatchStats["players"][number] & { score: ReturnType<typeof scoreFootball> }>;
 };
 
 async function mapWithConcurrency<T, R>(
@@ -138,7 +150,7 @@ export async function GET(request: Request) {
       query.competition
     );
 
-    let scored: any = undefined;
+    let scored: ScoredMatch | undefined = undefined;
     if (query.include_scores && match) {
       const stats = await buildStatsBombMatchStats({
         matchId: match.match_id,

@@ -1,6 +1,20 @@
 import Link from "next/link";
 import { getBaseUrl } from "@/lib/serverBaseUrl";
 
+type CompetitionScoreMatch = {
+  matchId: number;
+  matchDate?: string;
+  homeTeam?: string;
+  awayTeam?: string;
+  homeScore?: number;
+  awayScore?: number;
+};
+
+type CompetitionScoreResponse = {
+  matchCount?: number;
+  matches?: CompetitionScoreMatch[];
+};
+
 export default async function CompetitionScoresPage({
   params,
 }: {
@@ -12,7 +26,7 @@ export default async function CompetitionScoresPage({
     `${baseUrl}/api/stats/football/score-competition?competition_id=${competitionId}&season_id=${seasonId}&limit=5&include_players=false`,
     { next: { revalidate: 3600 } }
   );
-  const data = await res.json();
+  const data = (await res.json()) as CompetitionScoreResponse;
 
   return (
     <div className="min-h-screen bg-zinc-50 font-sans dark:bg-black">
@@ -54,7 +68,7 @@ export default async function CompetitionScoresPage({
                 </tr>
               </thead>
               <tbody>
-                {(data.matches ?? []).map((match: any) => (
+                {(data.matches ?? []).map((match) => (
                   <tr key={match.matchId} className="border-t border-black/10 dark:border-white/10">
                     <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
                       {match.homeTeam ?? "Home"} vs {match.awayTeam ?? "Away"}

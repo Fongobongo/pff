@@ -56,7 +56,7 @@ export async function GET(request: Request) {
   );
 
   const tier = resolveCompetitionTierFromFootballData(query.competition);
-  const table = data.standings?.find((item: any) => item.type === "TOTAL") ?? data.standings?.[0];
+  const table = data.standings?.find((item: FootballDataStandingsEntry) => item.type === "TOTAL") ?? data.standings?.[0];
   const rows = table?.table ?? [];
   const pageSize = query.page_size ?? rows.length;
   const page = query.page ?? 1;

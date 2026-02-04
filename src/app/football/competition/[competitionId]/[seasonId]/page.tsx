@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { getBaseUrl } from "@/lib/serverBaseUrl";
+import type { StatsBombMatch } from "@/lib/stats/statsbomb";
 
 export default async function CompetitionPage({
   params,
@@ -12,7 +13,7 @@ export default async function CompetitionPage({
     `${baseUrl}/api/stats/football/matches?competition_id=${competitionId}&season_id=${seasonId}`,
     { next: { revalidate: 3600 } }
   );
-  const data = await res.json();
+  const data = (await res.json()) as { matches?: StatsBombMatch[] };
 
   return (
     <div className="min-h-screen bg-zinc-50 font-sans dark:bg-black">
@@ -60,7 +61,7 @@ export default async function CompetitionPage({
                 </tr>
               </thead>
               <tbody>
-                {(data.matches ?? []).map((match: any) => (
+                {(data.matches ?? []).map((match) => (
                   <tr key={match.match_id} className="border-t border-black/10 dark:border-white/10">
                     <td className="px-3 py-2">
                       <Link

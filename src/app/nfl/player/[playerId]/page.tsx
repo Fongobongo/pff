@@ -1,6 +1,31 @@
 import Link from "next/link";
 import { getBaseUrl } from "@/lib/serverBaseUrl";
 import NflPlayerControls from "./Controls";
+import NflNav from "../../_components/NflNav";
+import type { NflWeeklyRow } from "@/lib/stats/nflverse";
+
+type NflPlayerScoreRow = NflWeeklyRow & {
+  score?: { total?: number; totalRounded?: number };
+};
+
+type NflPlayerResponse = {
+  season?: number;
+  seasonType?: string;
+  week?: number;
+  player?: {
+    displayName?: string;
+    playerName?: string;
+    team?: string;
+    position?: string;
+  };
+  summary?: {
+    games?: number;
+    totalPoints?: number;
+    totalRounded?: number;
+    average?: number;
+  };
+  rows?: NflPlayerScoreRow[];
+};
 
 export default async function NflPlayerPage({
   params,
@@ -24,7 +49,7 @@ export default async function NflPlayerPage({
   const res = await fetch(`${baseUrl}/api/stats/nfl/player?${query.toString()}`, {
     next: { revalidate: 3600 },
   });
-  const data = await res.json();
+  const data = (await res.json()) as NflPlayerResponse;
 
   return (
     <div className="min-h-screen bg-zinc-50 font-sans dark:bg-black">
@@ -39,6 +64,10 @@ export default async function NflPlayerPage({
             {data.week ? ` · Week ${data.week}` : ""}
           </p>
         </header>
+
+        <section className="mt-6">
+          <NflNav />
+        </section>
 
         <section className="mt-6 flex flex-wrap gap-3">
           <Link
@@ -95,7 +124,7 @@ export default async function NflPlayerPage({
               <tbody>
                 {(data.rows ?? [])
                   .slice((pageValue - 1) * pageSize, pageValue * pageSize)
-                  .map((row: any) => (
+                  .map((row) => (
                   <tr key={row.week} className="border-t border-black/10 dark:border-white/10">
                     <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{row.week}</td>
                     <td className="px-3 py-2 text-black dark:text-white">

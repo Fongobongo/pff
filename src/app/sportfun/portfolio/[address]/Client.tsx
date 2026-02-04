@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { shortenAddress } from "@/lib/format";
@@ -148,6 +149,42 @@ type SportfunPortfolioResponse = {
   };
 };
 
+type ActivityItem = SportfunPortfolioResponse["activity"][number];
+
+function makeTokenKey(contractAddress?: string, tokenIdDec?: string): string | null {
+  if (!contractAddress || !tokenIdDec) return null;
+  return `${contractAddress.toLowerCase()}:${tokenIdDec}`;
+}
+
+function splitTokenKey(key: string): { contractAddress: string; tokenIdDec: string } | null {
+  const parts = key.split(":");
+  if (parts.length !== 2) return null;
+  const [contractAddress, tokenIdDec] = parts;
+  if (!contractAddress || !tokenIdDec) return null;
+  return { contractAddress, tokenIdDec };
+}
+
+function activityHasToken(activity: ActivityItem, key: string): boolean {
+  const keyLc = key.toLowerCase();
+  for (const change of activity.erc1155Changes ?? []) {
+    if (makeTokenKey(change.contractAddress, change.tokenIdDec) === keyLc) return true;
+  }
+
+  if (activity.decoded?.trades) {
+    for (const trade of activity.decoded.trades) {
+      if (makeTokenKey(trade.playerToken, trade.tokenIdDec) === keyLc) return true;
+    }
+  }
+
+  if (activity.decoded?.promotions) {
+    for (const promo of activity.decoded.promotions) {
+      if (makeTokenKey(promo.playerToken, promo.tokenIdDec) === keyLc) return true;
+    }
+  }
+
+  return false;
+}
+
 async function getJson<T>(url: string): Promise<T> {
   const res = await fetch(url, { cache: "no-store" });
   if (!res.ok) throw new Error(`Request failed: ${res.status} ${res.statusText}`);
@@ -199,6 +236,7 @@ export default function SportfunPortfolioClient({ address }: { address: string }
   const [sortKey, setSortKey] = useState<SortKey>("value");
   const [sortDir, setSortDir] = useState<"desc" | "asc">("desc");
   const [sportFilter, setSportFilter] = useState<string>("all");
+  const [activityTokenFilter, setActivityTokenFilter] = useState<string>("all");
 
   const decimals = data?.assumptions.usdc.decimals ?? 6;
   const tokenLabelMap = useMemo(() => {
@@ -215,13 +253,15 @@ export default function SportfunPortfolioClient({ address }: { address: string }
     return map;
   }, [data?.holdings]);
 
-  function getTokenLabel(contractAddress?: string, tokenIdDec?: string): string {
-    if (!tokenIdDec) return "—";
-    if (!contractAddress) return tokenIdDec;
-    const key = `${contractAddress.toLowerCase()}:${tokenIdDec}`;
-    const override = getSportfunNameOverride(contractAddress, tokenIdDec);
-    return tokenLabelMap.get(key) ?? override ?? tokenIdDec;
-  }
+  const getTokenLabel = useMemo(() => {
+    return (contractAddress?: string, tokenIdDec?: string): string => {
+      if (!tokenIdDec) return "—";
+      if (!contractAddress) return tokenIdDec;
+      const key = `${contractAddress.toLowerCase()}:${tokenIdDec}`;
+      const override = getSportfunNameOverride(contractAddress, tokenIdDec);
+      return tokenLabelMap.get(key) ?? override ?? tokenIdDec;
+    };
+  }, [tokenLabelMap]);
 
   function renderTokenLabel(contractAddress?: string, tokenIdDec?: string) {
     if (!tokenIdDec) return "—";
@@ -240,6 +280,11 @@ export default function SportfunPortfolioClient({ address }: { address: string }
     const label = getTokenLabel(contractAddress, tokenIdDec);
     if (label === tokenIdDec) return `tokenId ${tokenIdDec}`;
     return `${label} (#${tokenIdDec})`;
+  }
+
+  function tokenHistoryHref(contractAddress?: string, tokenIdDec?: string) {
+    if (!contractAddress || !tokenIdDec) return null;
+    return `/sportfun/portfolio/${address}/token/${contractAddress}/${tokenIdDec}`;
   }
 
   const requestUrl = useMemo(() => {
@@ -262,6 +307,7 @@ export default function SportfunPortfolioClient({ address }: { address: string }
       setAttemptPages([]);
       setActivityCursor(null);
       setActivityDone(false);
+      setActivityTokenFilter("all");
 
       // Auto-expand until we stop seeing pageKeys / truncation.
       // With caching enabled on the API, re-runs mostly fetch only new pages.
@@ -354,32 +400,7 @@ export default function SportfunPortfolioClient({ address }: { address: string }
     return () => observer.disconnect();
   }, [activityCursor, activityDone, activityLoading, data, requestActivityPageUrl]);
 
-  if (loading && !data) {
-    return (
-      <main className="mx-auto max-w-6xl p-6">
-        <div className="text-white">Loading full scan…</div>
-        <div className="mt-2 text-sm text-gray-400">Address: {address}</div>
-      </main>
-    );
-  }
-
-  if (error) {
-    return (
-      <main className="mx-auto max-w-6xl p-6">
-        <div className="text-red-400">{error}</div>
-      </main>
-    );
-  }
-
-  if (!data) {
-    return (
-      <main className="mx-auto max-w-6xl p-6">
-        <div className="text-gray-400">No data.</div>
-      </main>
-    );
-  }
-
-  const positions = data.analytics?.positionsByToken ?? [];
+  const positions = useMemo(() => data?.analytics?.positionsByToken ?? [], [data?.analytics?.positionsByToken]);
 
   const filteredPositions = positions.filter((p) => {
     if (sportFilter === "all") return true;
@@ -410,6 +431,61 @@ export default function SportfunPortfolioClient({ address }: { address: string }
     const cmp = right > left ? 1 : -1;
     return sortDir === "desc" ? cmp : -cmp;
   });
+
+  const activityTokenOptions = useMemo(() => {
+    const map = new Map<string, { value: string; label: string }>();
+
+    const add = (contractAddress?: string, tokenIdDec?: string) => {
+      const key = makeTokenKey(contractAddress, tokenIdDec);
+      if (!key || map.has(key)) return;
+      const sport = getSportfunSportLabel(contractAddress).toUpperCase();
+      const label = getTokenLabel(contractAddress, tokenIdDec);
+      const name = label === tokenIdDec ? `#${tokenIdDec}` : `${label} (#${tokenIdDec})`;
+      map.set(key, { value: key, label: `${sport} · ${name}` });
+    };
+
+    for (const p of positions) add(p.playerToken, p.tokenIdDec);
+    for (const h of data?.holdings ?? []) add(h.contractAddress, h.tokenIdDec);
+
+    for (const a of data?.activity ?? []) {
+      for (const change of a.erc1155Changes ?? []) add(change.contractAddress, change.tokenIdDec);
+      for (const trade of a.decoded?.trades ?? []) add(trade.playerToken, trade.tokenIdDec);
+      for (const promo of a.decoded?.promotions ?? []) add(promo.playerToken, promo.tokenIdDec);
+    }
+
+    return [{ value: "all", label: "All athletes" }, ...Array.from(map.values()).sort((a, b) => a.label.localeCompare(b.label))];
+  }, [data?.activity, data?.holdings, positions, getTokenLabel]);
+
+  const filteredActivity = useMemo(() => {
+    if (!data) return [] as ActivityItem[];
+    if (activityTokenFilter === "all") return data.activity;
+    return data.activity.filter((a) => activityHasToken(a, activityTokenFilter));
+  }, [activityTokenFilter, data]);
+
+  if (loading && !data) {
+    return (
+      <main className="mx-auto max-w-6xl p-6">
+        <div className="text-white">Loading full scan…</div>
+        <div className="mt-2 text-sm text-gray-400">Address: {address}</div>
+      </main>
+    );
+  }
+
+  if (error) {
+    return (
+      <main className="mx-auto max-w-6xl p-6">
+        <div className="text-red-400">{error}</div>
+      </main>
+    );
+  }
+
+  if (!data) {
+    return (
+      <main className="mx-auto max-w-6xl p-6">
+        <div className="text-gray-400">No data.</div>
+      </main>
+    );
+  }
 
   function exportPositionsCsv() {
     const header = [
@@ -625,19 +701,21 @@ export default function SportfunPortfolioClient({ address }: { address: string }
                 <tr>
                   <th className="p-3">Sport</th>
                   <th className="p-3">Player</th>
-                  <th className="p-3">Holding shares</th>
-                  <th className="p-3">Spent</th>
-                  <th className="p-3">Avg cost/share</th>
-                  <th className="p-3">Current price/share</th>
-                  <th className="p-3">Value</th>
-                  <th className="p-3">Unrealized PnL</th>
-                  <th className="p-3">Tracked shares</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-white/10">
-                {sortedPositions.slice(0, 400).map((p) => {
-                  const pnl = p.unrealizedPnlTrackedUsdcRaw;
-                  const pnlClass = pnl ? (BigInt(pnl) >= 0n ? "text-green-400" : "text-red-400") : "text-gray-500";
+                <th className="p-3">Holding shares</th>
+                <th className="p-3">Spent</th>
+                <th className="p-3">Avg cost/share</th>
+                <th className="p-3">Current price/share</th>
+                <th className="p-3">Value</th>
+                <th className="p-3">Unrealized PnL</th>
+                <th className="p-3">Tracked shares</th>
+                <th className="p-3">History</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-white/10">
+              {sortedPositions.slice(0, 400).map((p) => {
+                const pnl = p.unrealizedPnlTrackedUsdcRaw;
+                const pnlClass = pnl ? (BigInt(pnl) >= 0n ? "text-green-400" : "text-red-400") : "text-gray-500";
+                const historyHref = tokenHistoryHref(p.playerToken, p.tokenIdDec);
 
                   return (
                     <tr key={`${p.playerToken}:${p.tokenIdDec}`} className="text-gray-200">
@@ -655,19 +733,28 @@ export default function SportfunPortfolioClient({ address }: { address: string }
                         {formatShares(p.trackedSharesRaw)}
                         {BigInt(p.trackedSharesRaw) !== BigInt(p.holdingSharesRaw) ? " (partial)" : ""}
                       </td>
+                      <td className="p-3 whitespace-nowrap">
+                        {historyHref ? (
+                          <Link className="text-blue-400 hover:underline" href={historyHref}>
+                            View
+                          </Link>
+                        ) : (
+                          <span className="text-gray-500">—</span>
+                        )}
+                      </td>
                     </tr>
                   );
                 })}
                 {sortedPositions.length === 0 ? (
                   <tr>
-                    <td className="p-3 text-gray-400" colSpan={9}>
+                    <td className="p-3 text-gray-400" colSpan={10}>
                       No positions.
                     </td>
                   </tr>
                 ) : null}
                 {sortedPositions.length > 400 ? (
                   <tr>
-                    <td className="p-3 text-gray-400" colSpan={9}>
+                    <td className="p-3 text-gray-400" colSpan={10}>
                       Showing top 400. Use CSV for full export.
                     </td>
                   </tr>
@@ -702,11 +789,13 @@ export default function SportfunPortfolioClient({ address }: { address: string }
                   <td className="p-3">
                     <div className="flex items-center gap-3">
                       {h.metadata?.imageUrl ? (
-                        <img
+                        <Image
                           src={h.metadata.imageUrl}
                           alt={h.metadata.name ?? "Player"}
+                          width={32}
+                          height={32}
                           className="h-8 w-8 rounded-md object-cover"
-                          loading="lazy"
+                          unoptimized
                         />
                       ) : (
                         <div className="h-8 w-8 rounded-md bg-white/10" />
@@ -740,9 +829,42 @@ export default function SportfunPortfolioClient({ address }: { address: string }
       </section>
 
       <section className="mt-8">
-        <h2 className="text-lg font-semibold text-white">Activity (tx grouped)</h2>
-        <p className="mt-1 text-xs text-gray-500">Showing {data.activity.length} rows (auto-load on scroll).</p>
-        <p className="mt-1 text-sm text-gray-400">{data.assumptions.usdc.note}</p>
+        <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+          <div>
+            <h2 className="text-lg font-semibold text-white">Activity (tx grouped)</h2>
+            <p className="mt-1 text-xs text-gray-500">
+              Showing {filteredActivity.length}
+              {activityTokenFilter !== "all" ? ` of ${data.activity.length}` : ""} rows (auto-load on scroll).
+            </p>
+            <p className="mt-1 text-sm text-gray-400">{data.assumptions.usdc.note}</p>
+          </div>
+          <div className="flex items-center gap-3">
+            <label className="text-xs text-gray-400">
+              Athlete
+              <select
+                className="ml-2 rounded-md border border-white/10 bg-black/30 px-2 py-1 text-sm text-gray-200"
+                value={activityTokenFilter}
+                onChange={(e) => setActivityTokenFilter(e.target.value)}
+              >
+                {activityTokenOptions.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {activityTokenFilter !== "all" ? (() => {
+              const parsed = splitTokenKey(activityTokenFilter);
+              const href = parsed ? tokenHistoryHref(parsed.contractAddress, parsed.tokenIdDec) : null;
+              if (!href) return null;
+              return (
+                <Link className="text-sm text-blue-400 hover:underline" href={href}>
+                  Open history
+                </Link>
+              );
+            })() : null}
+          </div>
+        </div>
 
         <div className="mt-3 overflow-x-auto rounded-xl border border-white/10">
           <table className="w-full text-sm">
@@ -756,7 +878,7 @@ export default function SportfunPortfolioClient({ address }: { address: string }
               </tr>
             </thead>
             <tbody className="divide-y divide-white/10">
-              {data.activity.map((a) => (
+              {filteredActivity.map((a) => (
                 <tr key={a.hash} className="text-gray-200">
                   <td className="p-3 whitespace-nowrap text-gray-400">{a.timestamp ?? "—"}</td>
                   <td className="p-3 whitespace-nowrap">
@@ -801,6 +923,13 @@ export default function SportfunPortfolioClient({ address }: { address: string }
                   </td>
                 </tr>
               ))}
+              {filteredActivity.length === 0 ? (
+                <tr>
+                  <td className="p-3 text-gray-400" colSpan={5}>
+                    No activity for selected athlete.
+                  </td>
+                </tr>
+              ) : null}
             </tbody>
           </table>
         </div>

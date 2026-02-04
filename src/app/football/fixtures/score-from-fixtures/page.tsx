@@ -1,6 +1,29 @@
 import Link from "next/link";
 import { getBaseUrl } from "@/lib/serverBaseUrl";
 
+type ScoreFromFixture = {
+  fixtureId: number;
+  fixtureDate?: string;
+  status?: string;
+  homeTeam?: string;
+  awayTeam?: string;
+  statsbombMatchId?: number | null;
+  matchSwapped?: boolean;
+  matchScore?: number | null;
+  matchConfidence?: string | null;
+  matchReason?: string | null;
+  scoreFromMatchUrl?: string | null;
+};
+
+type ScoreFromFixturesResponse = {
+  totalFixtures?: number;
+  returnedFixtures?: number;
+  matchedFixtures?: number;
+  unmatchedFixtures?: number;
+  competitionTier?: string;
+  fixtures?: ScoreFromFixture[];
+};
+
 export default async function ScoreFromFixturesPage({
   searchParams,
 }: {
@@ -36,9 +59,9 @@ export default async function ScoreFromFixturesPage({
   const res = await fetch(`${baseUrl}/api/football-data/score-from-fixtures?${query.toString()}`, {
     next: { revalidate: 300 },
   });
-  const data = await res.json();
+  const data = (await res.json()) as ScoreFromFixturesResponse;
   const fixtures = data.fixtures ?? [];
-  const unmatched = fixtures.filter((item: any) => !item.statsbombMatchId);
+  const unmatched = fixtures.filter((item) => !item.statsbombMatchId);
 
   return (
     <div className="min-h-screen bg-zinc-50 font-sans dark:bg-black">
@@ -166,7 +189,7 @@ export default async function ScoreFromFixturesPage({
                 </tr>
               </thead>
               <tbody>
-                {fixtures.map((item: any) => (
+                {fixtures.map((item) => (
                   <tr
                     key={item.fixtureId}
                     className={`border-t border-black/10 dark:border-white/10 ${

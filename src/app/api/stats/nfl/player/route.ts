@@ -117,6 +117,7 @@ export async function GET(request: Request) {
     seasonType: query.season_type,
     week: query.week,
     player,
+    coverage: data.coverage,
     summary: {
       games,
       totalPoints,
