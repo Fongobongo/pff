@@ -122,6 +122,15 @@ const PRESET_OPTIONS = [
       min_target_share: "12",
     },
   },
+  {
+    key: "signals",
+    label: "Signals",
+    params: {
+      sort: "signal",
+      min_usage: "0.6",
+      min_usage_trend: "0.4",
+    },
+  },
 ] as const;
 
 const SORT_OPTIONS = [
@@ -149,6 +158,8 @@ const SORT_OPTIONS = [
   { key: "usage_score", label: "Usage Score" },
   { key: "usage_trend", label: "Usage Trend" },
   { key: "usage_share", label: "Usage Share" },
+  { key: "signal", label: "Signal" },
+  { key: "cluster", label: "Usage Cluster" },
   { key: "home_l3", label: "Home L3" },
   { key: "away_l3", label: "Away L3" },
   { key: "home_avg", label: "Home FPPG" },
@@ -924,6 +935,18 @@ export default async function NflTrendingPage({
     filtered = filtered.filter((row) => (row.usageShareScore ?? -Infinity) >= minUsageShare);
   }
 
+  const signalPriority: Record<string, number> = {
+    Surge: 3,
+    Breakout: 2,
+    Neutral: 1,
+    Fade: 0,
+  };
+  const clusterPriority: Record<string, number> = {
+    High: 2,
+    Medium: 1,
+    Low: 0,
+  };
+
   const sorted = filtered.slice().sort((a, b) => {
     switch (sort) {
       case "trend":
@@ -972,6 +995,18 @@ export default async function NflTrendingPage({
         return (b.usageTrendScore ?? -Infinity) - (a.usageTrendScore ?? -Infinity);
       case "usage_share":
         return (b.usageShareScore ?? -Infinity) - (a.usageShareScore ?? -Infinity);
+      case "signal": {
+        const aSignal = signalPriority[a.signal ?? "Neutral"] ?? 0;
+        const bSignal = signalPriority[b.signal ?? "Neutral"] ?? 0;
+        if (bSignal !== aSignal) return bSignal - aSignal;
+        return (b.usageScore ?? -Infinity) - (a.usageScore ?? -Infinity);
+      }
+      case "cluster": {
+        const aCluster = clusterPriority[a.usageCluster ?? "Medium"] ?? 0;
+        const bCluster = clusterPriority[b.usageCluster ?? "Medium"] ?? 0;
+        if (bCluster !== aCluster) return bCluster - aCluster;
+        return (b.usageScore ?? -Infinity) - (a.usageScore ?? -Infinity);
+      }
       case "home_l3":
         return (b.homeL3Avg ?? -Infinity) - (a.homeL3Avg ?? -Infinity);
       case "away_l3":
