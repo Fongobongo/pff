@@ -138,6 +138,16 @@ export default async function NflAdvancedStatsPage({
     .sort((a, b) => toNumber(b.usage?.wopr) - toNumber(a.usage?.wopr))
     .slice(0, 10);
 
+  const topRacr = rows
+    .slice()
+    .sort((a, b) => toNumber(b.usage?.racr) - toNumber(a.usage?.racr))
+    .slice(0, 10);
+
+  const topPacr = rows
+    .slice()
+    .sort((a, b) => toNumber(b.usage?.pacr) - toNumber(a.usage?.pacr))
+    .slice(0, 10);
+
   const topPassEpa = rows
     .slice()
     .sort((a, b) => toNumber(b.usage?.passingEpa) - toNumber(a.usage?.passingEpa))
@@ -151,6 +161,16 @@ export default async function NflAdvancedStatsPage({
   const topRecEpa = rows
     .slice()
     .sort((a, b) => toNumber(b.usage?.receivingEpa) - toNumber(a.usage?.receivingEpa))
+    .slice(0, 10);
+
+  const topFantasy = rows
+    .slice()
+    .sort((a, b) => toNumber(b.usage?.fantasyPoints) - toNumber(a.usage?.fantasyPoints))
+    .slice(0, 10);
+
+  const topFantasyPpr = rows
+    .slice()
+    .sort((a, b) => toNumber(b.usage?.fantasyPointsPpr) - toNumber(a.usage?.fantasyPointsPpr))
     .slice(0, 10);
 
   return (
@@ -306,7 +326,7 @@ export default async function NflAdvancedStatsPage({
         </div>
       </section>
 
-      <section className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
+      <section className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
         <div className="overflow-hidden rounded-xl border border-black/10 bg-white dark:border-white/10 dark:bg-white/5">
           <div className="border-b border-black/10 px-3 py-2 text-xs uppercase tracking-wide text-zinc-500 dark:border-white/10 dark:text-zinc-400">
             Air yards leaders
@@ -378,6 +398,115 @@ export default async function NflAdvancedStatsPage({
                   <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{row.team ?? "—"}</td>
                   <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
                     {formatDecimal(row.usage?.wopr)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
+        <div className="overflow-hidden rounded-xl border border-black/10 bg-white dark:border-white/10 dark:bg-white/5">
+          <div className="border-b border-black/10 px-3 py-2 text-xs uppercase tracking-wide text-zinc-500 dark:border-white/10 dark:text-zinc-400">
+            RACR leaders
+          </div>
+          <table className="w-full text-left text-sm">
+            <thead className="bg-zinc-100 text-xs uppercase tracking-wide text-zinc-500 dark:bg-white/10 dark:text-zinc-400">
+              <tr>
+                <th className="px-3 py-2">Player</th>
+                <th className="px-3 py-2">Team</th>
+                <th className="px-3 py-2">RACR</th>
+              </tr>
+            </thead>
+            <tbody>
+              {topRacr.map((row) => (
+                <tr key={row.player_id} className="border-t border-black/10 dark:border-white/10">
+                  <td className="px-3 py-2 text-black dark:text-white">{row.player_display_name}</td>
+                  <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{row.team ?? "—"}</td>
+                  <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
+                    {formatDecimal(row.usage?.racr)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="overflow-hidden rounded-xl border border-black/10 bg-white dark:border-white/10 dark:bg-white/5">
+          <div className="border-b border-black/10 px-3 py-2 text-xs uppercase tracking-wide text-zinc-500 dark:border-white/10 dark:text-zinc-400">
+            PACR leaders
+          </div>
+          <table className="w-full text-left text-sm">
+            <thead className="bg-zinc-100 text-xs uppercase tracking-wide text-zinc-500 dark:bg-white/10 dark:text-zinc-400">
+              <tr>
+                <th className="px-3 py-2">Player</th>
+                <th className="px-3 py-2">Team</th>
+                <th className="px-3 py-2">PACR</th>
+              </tr>
+            </thead>
+            <tbody>
+              {topPacr.map((row) => (
+                <tr key={row.player_id} className="border-t border-black/10 dark:border-white/10">
+                  <td className="px-3 py-2 text-black dark:text-white">{row.player_display_name}</td>
+                  <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{row.team ?? "—"}</td>
+                  <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
+                    {formatDecimal(row.usage?.pacr)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+      </section>
+
+      <section className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <div className="overflow-hidden rounded-xl border border-black/10 bg-white dark:border-white/10 dark:bg-white/5">
+          <div className="border-b border-black/10 px-3 py-2 text-xs uppercase tracking-wide text-zinc-500 dark:border-white/10 dark:text-zinc-400">
+            Fantasy points leaders (Std)
+          </div>
+          <table className="w-full text-left text-sm">
+            <thead className="bg-zinc-100 text-xs uppercase tracking-wide text-zinc-500 dark:bg-white/10 dark:text-zinc-400">
+              <tr>
+                <th className="px-3 py-2">Player</th>
+                <th className="px-3 py-2">Team</th>
+                <th className="px-3 py-2">FPts</th>
+              </tr>
+            </thead>
+            <tbody>
+              {topFantasy.map((row) => (
+                <tr key={row.player_id} className="border-t border-black/10 dark:border-white/10">
+                  <td className="px-3 py-2 text-black dark:text-white">{row.player_display_name}</td>
+                  <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{row.team ?? "—"}</td>
+                  <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
+                    {formatDecimal(row.usage?.fantasyPoints, 1)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="overflow-hidden rounded-xl border border-black/10 bg-white dark:border-white/10 dark:bg-white/5">
+          <div className="border-b border-black/10 px-3 py-2 text-xs uppercase tracking-wide text-zinc-500 dark:border-white/10 dark:text-zinc-400">
+            Fantasy points leaders (PPR)
+          </div>
+          <table className="w-full text-left text-sm">
+            <thead className="bg-zinc-100 text-xs uppercase tracking-wide text-zinc-500 dark:bg-white/10 dark:text-zinc-400">
+              <tr>
+                <th className="px-3 py-2">Player</th>
+                <th className="px-3 py-2">Team</th>
+                <th className="px-3 py-2">PPR</th>
+              </tr>
+            </thead>
+            <tbody>
+              {topFantasyPpr.map((row) => (
+                <tr key={row.player_id} className="border-t border-black/10 dark:border-white/10">
+                  <td className="px-3 py-2 text-black dark:text-white">{row.player_display_name}</td>
+                  <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{row.team ?? "—"}</td>
+                  <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
+                    {formatDecimal(row.usage?.fantasyPointsPpr, 1)}
                   </td>
                 </tr>
               ))}
