@@ -4,6 +4,13 @@ import { getSportfunMarketSnapshot, toUsdNumber } from "@/lib/sportfunMarket";
 
 const TREND_OPTIONS = [7, 30, 90, 180];
 const WINDOW_OPTIONS = [24, 72, 168];
+const SERIES_OPTIONS = [
+  { key: "all", label: "All" },
+  { key: "gainers", label: "Gainers" },
+  { key: "losers", label: "Losers" },
+] as const;
+
+type TrendSeries = (typeof SERIES_OPTIONS)[number]["key"];
 
 function parseNumber(value: string | undefined, fallback: number, min: number, max: number): number {
   if (!value) return fallback;
@@ -17,6 +24,17 @@ function formatUsd(raw?: string): string {
   const value = toUsdNumber(raw);
   const abs = Math.abs(value);
   if (abs >= 1000) return `$${value.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+  if (abs >= 1) return `$${value.toFixed(2)}`;
+  if (abs >= 0.01) return `$${value.toFixed(4)}`;
+  return `$${value.toFixed(6)}`;
+}
+
+function formatUsdValue(value?: number): string {
+  if (value === undefined || Number.isNaN(value)) return "—";
+  const abs = Math.abs(value);
+  if (abs >= 1e9) return `$${(value / 1e9).toFixed(2)}B`;
+  if (abs >= 1e6) return `$${(value / 1e6).toFixed(2)}M`;
+  if (abs >= 1e3) return `$${(value / 1e3).toFixed(2)}K`;
   if (abs >= 1) return `$${value.toFixed(2)}`;
   if (abs >= 0.01) return `$${value.toFixed(4)}`;
   return `$${value.toFixed(6)}`;
@@ -47,6 +65,64 @@ function formatDate(iso?: string): string {
   return d.toLocaleString();
 }
 
+function normalizePosition(raw: string): string {
+  const value = raw.trim().toUpperCase();
+  if (value.includes("QUARTERBACK") || value === "QB") return "QB";
+  if (value.includes("RUNNING BACK") || value === "RB") return "RB";
+  if (value.includes("WIDE RECEIVER") || value === "WR") return "WR";
+  if (value.includes("TIGHT END") || value === "TE") return "TE";
+  if (value.includes("KICKER") || value === "K") return "K";
+  if (value.includes("DEF") || value.includes("DST")) return "DST";
+  return value;
+}
+
+function extractAttributeValue(attributes: unknown, matchKey: (key: string) => boolean): unknown {
+  if (!attributes) return undefined;
+  if (Array.isArray(attributes)) {
+    for (const entry of attributes) {
+      if (!entry || typeof entry !== "object") continue;
+      const record = entry as Record<string, unknown>;
+      const key = String(record.trait_type ?? record.traitType ?? record.name ?? record.key ?? "").toLowerCase();
+      if (!key) continue;
+      if (matchKey(key)) return record.value ?? record.val ?? record.text ?? record.content;
+    }
+  }
+  if (typeof attributes === "object") {
+    for (const [key, value] of Object.entries(attributes as Record<string, unknown>)) {
+      if (matchKey(key.toLowerCase())) return value;
+    }
+  }
+  return undefined;
+}
+
+function parseNumericValue(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const cleaned = value.replace(/,/g, "").trim();
+    if (!cleaned) return null;
+    const parsed = Number(cleaned);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function extractPosition(attributes: unknown): string | null {
+  const raw = extractAttributeValue(attributes, (key) => key.includes("position") || key === "pos");
+  if (typeof raw === "string" && raw.trim()) return normalizePosition(raw);
+  return null;
+}
+
+function extractSupply(attributes: unknown): number | null {
+  const raw = extractAttributeValue(
+    attributes,
+    (key) => key.includes("supply") || key.includes("shares") || key.includes("outstanding")
+  );
+  const parsed = parseNumericValue(raw);
+  if (parsed === null) return null;
+  if (parsed > 1e12) return parsed / 1e18;
+  return parsed;
+}
+
 function buildQuery(params: Record<string, string | undefined>) {
   const query = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
@@ -60,11 +136,12 @@ function buildQuery(params: Record<string, string | undefined>) {
 export default async function NflMarketPage({
   searchParams,
 }: {
-  searchParams: Promise<{ trendDays?: string; windowHours?: string }>;
+  searchParams: Promise<{ trendDays?: string; windowHours?: string; series?: string }>;
 }) {
   const params = await searchParams;
   const trendDays = parseNumber(params.trendDays, 30, 7, 365);
   const windowHours = parseNumber(params.windowHours, 24, 1, 168);
+  const series = SERIES_OPTIONS.find((opt) => opt.key === params.series)?.key ?? "all";
 
   const snapshot = await getSportfunMarketSnapshot({
     sport: "nfl",
@@ -93,13 +170,14 @@ export default async function NflMarketPage({
     .sort((a, b) => (a.priceChange24hPercent ?? 0) - (b.priceChange24hPercent ?? 0))
     .slice(0, 10);
 
-  const trend = snapshot.trend;
-  const pricePoints = trend
+  const trendData =
+    series === "gainers" ? snapshot.trendGainers : series === "losers" ? snapshot.trendLosers : snapshot.trend;
+  const pricePoints = trendData
     .filter((p) => p.avgPriceUsdcRaw)
     .map((p) => ({ ts: p.ts, price: BigInt(p.avgPriceUsdcRaw ?? "0") }));
 
-  const volumePoints = trend.map((p) => ({ ts: p.ts, volume: BigInt(p.volumeSharesRaw ?? "0") }));
-  const hasTrend = trend.length > 1 && pricePoints.length > 1;
+  const volumePoints = trendData.map((p) => ({ ts: p.ts, volume: BigInt(p.volumeSharesRaw ?? "0") }));
+  const hasTrend = trendData.length > 1 && pricePoints.length > 1;
 
   const minPrice = pricePoints.length ? pricePoints.reduce((a, b) => (a.price < b.price ? a : b)).price : 0n;
   const maxPrice = pricePoints.length ? pricePoints.reduce((a, b) => (a.price > b.price ? a : b)).price : 0n;
@@ -131,6 +209,59 @@ export default async function NflMarketPage({
 
   const maxDistribution = Math.max(1, ...snapshot.distribution.map((d) => d.count));
 
+  const gainersCount = snapshot.tokens.filter((t) => (t.priceChange24hPercent ?? 0) > 0).length;
+  const losersCount = snapshot.tokens.filter((t) => (t.priceChange24hPercent ?? 0) < 0).length;
+  const neutralCount = Math.max(0, snapshot.tokens.length - gainersCount - losersCount);
+  const sentiment =
+    gainersCount > losersCount ? "Bullish" : losersCount > gainersCount ? "Bearish" : "Neutral";
+
+  const priceMin = snapshot.summary.priceMinUsdcRaw ? toUsdNumber(snapshot.summary.priceMinUsdcRaw) : undefined;
+  const priceMax = snapshot.summary.priceMaxUsdcRaw ? toUsdNumber(snapshot.summary.priceMaxUsdcRaw) : undefined;
+  const priceSpread =
+    priceMin !== undefined && priceMax !== undefined ? Math.max(0, priceMax - priceMin) : undefined;
+  const priceSpreadPct =
+    priceMin && priceSpread !== undefined ? Math.abs(priceSpread / priceMin) * 100 : undefined;
+
+  let totalMarketCap = 0;
+  let marketCapTokens = 0;
+  for (const token of snapshot.tokens) {
+    const supply = extractSupply(token.attributes);
+    const price = token.currentPriceUsdcRaw ? toUsdNumber(token.currentPriceUsdcRaw) : 0;
+    if (supply && price) {
+      totalMarketCap += price * supply;
+      marketCapTokens += 1;
+    }
+  }
+
+  const positionMap = new Map<
+    string,
+    { count: number; sumChange: number; gainers: number; losers: number }
+  >();
+  for (const token of snapshot.tokens) {
+    const position = extractPosition(token.attributes);
+    if (!position) continue;
+    const entry = positionMap.get(position) ?? { count: 0, sumChange: 0, gainers: 0, losers: 0 };
+    const change = token.priceChange24hPercent ?? 0;
+    entry.count += 1;
+    entry.sumChange += change;
+    if (change > 0) entry.gainers += 1;
+    if (change < 0) entry.losers += 1;
+    positionMap.set(position, entry);
+  }
+  const positionTotal = Array.from(positionMap.values()).reduce((acc, row) => acc + row.count, 0);
+  const positionRows = Array.from(positionMap.entries())
+    .map(([position, row]) => ({
+      position,
+      count: row.count,
+      avgChange: row.count ? row.sumChange / row.count : 0,
+      gainers: row.gainers,
+      losers: row.losers,
+      share: positionTotal ? (row.count / positionTotal) * 100 : 0,
+    }))
+    .sort((a, b) => b.count - a.count);
+
+  const seriesLabel = SERIES_OPTIONS.find((opt) => opt.key === series)?.label ?? "All";
+
   return (
     <NflPageShell title="NFL Market Overview" description="Sport.fun on-chain market snapshot and price activity.">
       <section className="mt-6 flex flex-wrap gap-3">
@@ -142,7 +273,11 @@ export default async function NflMarketPage({
                 ? "border-black bg-black text-white dark:border-white dark:bg-white dark:text-black"
                 : "border-black/10 bg-white text-black hover:bg-zinc-50 dark:border-white/10 dark:bg-white/5 dark:text-white dark:hover:bg-white/10"
             }`}
-            href={`/nfl${buildQuery({ windowHours: String(hours), trendDays: String(trendDays) })}`}
+            href={`/nfl${buildQuery({
+              windowHours: String(hours),
+              trendDays: String(trendDays),
+              series,
+            })}`}
           >
             {hours}h window
           </Link>
@@ -158,7 +293,11 @@ export default async function NflMarketPage({
                 ? "border-black bg-black text-white dark:border-white dark:bg-white dark:text-black"
                 : "border-black/10 bg-white text-black hover:bg-zinc-50 dark:border-white/10 dark:bg-white/5 dark:text-white dark:hover:bg-white/10"
             }`}
-            href={`/nfl${buildQuery({ windowHours: String(windowHours), trendDays: String(days) })}`}
+            href={`/nfl${buildQuery({
+              windowHours: String(windowHours),
+              trendDays: String(days),
+              series,
+            })}`}
           >
             {days}d trend
           </Link>
@@ -169,7 +308,7 @@ export default async function NflMarketPage({
         <p>Snapshot updated {formatDate(snapshot.asOf)}.</p>
       </section>
 
-      <section className="mt-8 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <section className="mt-8 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-6">
         <div className="rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-white/5">
           <div className="text-xs uppercase tracking-wide text-zinc-500 dark:text-zinc-400">Total tokens</div>
           <div className="mt-2 text-2xl font-semibold text-black dark:text-white">{snapshot.summary.totalTokens}</div>
@@ -186,6 +325,22 @@ export default async function NflMarketPage({
           <div className="text-xs uppercase tracking-wide text-zinc-500 dark:text-zinc-400">Shares volume (24h)</div>
           <div className="mt-2 text-2xl font-semibold text-black dark:text-white">
             {formatShares(snapshot.summary.volume24hSharesRaw, 2)}
+          </div>
+        </div>
+        <div className="rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-white/5">
+          <div className="text-xs uppercase tracking-wide text-zinc-500 dark:text-zinc-400">Est. market cap</div>
+          <div className="mt-2 text-2xl font-semibold text-black dark:text-white">
+            {marketCapTokens > 0 ? formatUsdValue(totalMarketCap) : "—"}
+          </div>
+          <div className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+            {marketCapTokens > 0 ? `Based on ${marketCapTokens} tokens` : "No supply metadata"}
+          </div>
+        </div>
+        <div className="rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-white/5">
+          <div className="text-xs uppercase tracking-wide text-zinc-500 dark:text-zinc-400">Market sentiment</div>
+          <div className="mt-2 text-2xl font-semibold text-black dark:text-white">{sentiment}</div>
+          <div className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+            {gainersCount} gainers · {losersCount} losers · {neutralCount} flat
           </div>
         </div>
       </section>
@@ -254,15 +409,79 @@ export default async function NflMarketPage({
       </section>
 
       <section className="mt-8">
+        <div className="overflow-hidden rounded-xl border border-black/10 bg-white dark:border-white/10 dark:bg-white/5">
+          <div className="border-b border-black/10 px-3 py-2 text-xs uppercase tracking-wide text-zinc-500 dark:border-white/10 dark:text-zinc-400">
+            Position breakdown
+          </div>
+          <table className="w-full text-left text-sm">
+            <thead className="bg-zinc-100 text-xs uppercase tracking-wide text-zinc-500 dark:bg-white/10 dark:text-zinc-400">
+              <tr>
+                <th className="px-3 py-2">Position</th>
+                <th className="px-3 py-2">Tokens</th>
+                <th className="px-3 py-2">Share</th>
+                <th className="px-3 py-2">Avg Δ</th>
+                <th className="px-3 py-2">Gainers</th>
+                <th className="px-3 py-2">Losers</th>
+              </tr>
+            </thead>
+            <tbody>
+              {positionRows.map((row) => (
+                <tr key={row.position} className="border-t border-black/10 dark:border-white/10">
+                  <td className="px-3 py-2 text-black dark:text-white">{row.position}</td>
+                  <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{row.count}</td>
+                  <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{row.share.toFixed(1)}%</td>
+                  <td
+                    className={`px-3 py-2 ${
+                      row.avgChange >= 0 ? "text-emerald-500" : "text-rose-500"
+                    }`}
+                  >
+                    {formatPercent(row.avgChange)}
+                  </td>
+                  <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{row.gainers}</td>
+                  <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{row.losers}</td>
+                </tr>
+              ))}
+              {positionRows.length === 0 ? (
+                <tr>
+                  <td className="px-3 py-4 text-zinc-600 dark:text-zinc-400" colSpan={6}>
+                    No position metadata found for this window.
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="mt-8">
         <div className="rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-white/5">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <div className="text-xs uppercase tracking-wide text-zinc-500 dark:text-zinc-400">Price trends</div>
               <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-                Avg price + volume over the last {trendDays} days.
+                {seriesLabel} avg price + volume over the last {trendDays} days.
               </div>
             </div>
-            <div className="text-xs text-zinc-500 dark:text-zinc-400">{trend.length} points</div>
+            <div className="flex items-center gap-2">
+              {SERIES_OPTIONS.map((opt) => (
+                <Link
+                  key={opt.key}
+                  className={`rounded-full border px-3 py-1 text-xs ${
+                    opt.key === series
+                      ? "border-black bg-black text-white dark:border-white dark:bg-white dark:text-black"
+                      : "border-black/10 bg-white text-black hover:bg-zinc-50 dark:border-white/10 dark:bg-white/5 dark:text-white dark:hover:bg-white/10"
+                  }`}
+                  href={`/nfl${buildQuery({
+                    windowHours: String(windowHours),
+                    trendDays: String(trendDays),
+                    series: opt.key,
+                  })}`}
+                >
+                  {opt.label}
+                </Link>
+              ))}
+              <div className="text-xs text-zinc-500 dark:text-zinc-400">{trendData.length} points</div>
+            </div>
           </div>
           <div className="mt-4 overflow-x-auto">
             {hasTrend ? (
@@ -367,7 +586,7 @@ export default async function NflMarketPage({
       <section className="mt-8">
         <div className="rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-white/5">
           <div className="text-xs uppercase tracking-wide text-zinc-500 dark:text-zinc-400">Market summary</div>
-          <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-4">
+          <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-3 lg:grid-cols-6">
             <div>
               <div className="text-xs text-zinc-500 dark:text-zinc-400">Avg price</div>
               <div className="mt-1 text-lg text-black dark:text-white">{formatUsd(snapshot.summary.priceAvgUsdcRaw)}</div>
@@ -383,6 +602,18 @@ export default async function NflMarketPage({
             <div>
               <div className="text-xs text-zinc-500 dark:text-zinc-400">Max price</div>
               <div className="mt-1 text-lg text-black dark:text-white">{formatUsd(snapshot.summary.priceMaxUsdcRaw)}</div>
+            </div>
+            <div>
+              <div className="text-xs text-zinc-500 dark:text-zinc-400">Price spread</div>
+              <div className="mt-1 text-lg text-black dark:text-white">
+                {priceSpread !== undefined ? formatUsdValue(priceSpread) : "—"}
+              </div>
+            </div>
+            <div>
+              <div className="text-xs text-zinc-500 dark:text-zinc-400">Spread %</div>
+              <div className="mt-1 text-lg text-black dark:text-white">
+                {priceSpreadPct !== undefined ? `${priceSpreadPct.toFixed(2)}%` : "—"}
+              </div>
             </div>
           </div>
         </div>

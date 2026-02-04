@@ -69,6 +69,8 @@ export type SportfunMarketSnapshot = {
   tokens: SportfunMarketToken[];
   summary: SportfunMarketSummary;
   trend: SportfunMarketTrendPoint[];
+  trendGainers: SportfunMarketTrendPoint[];
+  trendLosers: SportfunMarketTrendPoint[];
   distribution: SportfunMarketDistributionBin[];
 };
 
@@ -734,8 +736,20 @@ export async function getSportfunMarketSnapshot(params: {
         priceMaxUsdcRaw: prices[prices.length - 1]?.toString(10),
       };
 
+      const gainersSet = new Set<string>();
+      const losersSet = new Set<string>();
+      for (const token of tokens) {
+        const change = token.priceChange24hPercent ?? 0;
+        if (change > 0) gainersSet.add(token.tokenIdDec);
+        if (change < 0) losersSet.add(token.tokenIdDec);
+      }
+
       const distribution = buildDistribution(prices);
       const trend = buildTrend(events, trendStart);
+      const trendGainers =
+        gainersSet.size > 0 ? buildTrend(events.filter((e) => gainersSet.has(e.tokenIdDec)), trendStart) : [];
+      const trendLosers =
+        losersSet.size > 0 ? buildTrend(events.filter((e) => losersSet.has(e.tokenIdDec)), trendStart) : [];
 
       return {
         sport: params.sport,
@@ -745,6 +759,8 @@ export async function getSportfunMarketSnapshot(params: {
         tokens: decoratedTokens,
         summary,
         trend,
+        trendGainers,
+        trendLosers,
         distribution,
       };
     } catch {
@@ -765,6 +781,8 @@ export async function getSportfunMarketSnapshot(params: {
           priceMaxUsdcRaw: undefined,
         },
         trend: [],
+        trendGainers: [],
+        trendLosers: [],
         distribution: buildDistribution([]),
       };
     }
