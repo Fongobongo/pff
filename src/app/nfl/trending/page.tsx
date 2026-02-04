@@ -1,13 +1,14 @@
 import Link from "next/link";
 import NflPageShell from "../_components/NflPageShell";
 import { getSportfunMarketSnapshot, toUsdNumber } from "@/lib/sportfunMarket";
-import { fetchNflWeeklyStats, type NflWeeklyRow } from "@/lib/stats/nflverse";
+import { fetchNflSchedule, fetchNflWeeklyStats, type NflWeeklyRow } from "@/lib/stats/nflverse";
 import { scoreNfl } from "@/lib/stats/nfl";
 
 const SAMPLE_SEASONS = [2021, 2022, 2023];
 const SEASON_TYPES = ["REG", "POST", "PRE"] as const;
 const TREND_WEEKS = 3;
 const OPP_WINDOW_WEEKS = 6;
+const DEFAULT_LOOKBACK_WEEKS = 8;
 
 const TOP_THRESHOLDS: Record<string, number> = {
   QB: 12,
@@ -29,6 +30,12 @@ const RANK_MODE_OPTIONS = [
   { key: "all", label: "Overall rank" },
 ] as const;
 
+const HOME_AWAY_OPTIONS = [
+  { key: "all", label: "All" },
+  { key: "home", label: "Home" },
+  { key: "away", label: "Away" },
+] as const;
+
 const SORT_OPTIONS = [
   { key: "l3", label: "L3 Avg FPts" },
   { key: "season", label: "Season FPPG" },
@@ -37,6 +44,11 @@ const SORT_OPTIONS = [
   { key: "tp_rate_l3", label: "TP Rate L3" },
   { key: "l3_rank", label: "L3 Avg Rank" },
   { key: "consistency", label: "Consistency" },
+  { key: "targets_l3", label: "L3 Targets" },
+  { key: "touches_l3", label: "L3 Touches" },
+  { key: "yards_l3", label: "L3 Yards" },
+  { key: "ypt_l3", label: "Yards/Touch" },
+  { key: "air_yards_l3", label: "L3 Air Yards" },
   { key: "opp_delta", label: "Opp Δ" },
   { key: "opp_rank", label: "Opp Rank" },
   { key: "games", label: "Games" },
@@ -121,6 +133,16 @@ type WeekScore = {
   rank?: number;
   posRank?: number;
   opponent?: string;
+  homeAway?: "HOME" | "AWAY";
+  usage?: {
+    carries?: number;
+    targets?: number;
+    receptions?: number;
+    rushingYards?: number;
+    receivingYards?: number;
+    passingYards?: number;
+    airYards?: number;
+  };
 };
 
 type TrendRow = {
@@ -136,11 +158,18 @@ type TrendRow = {
   l3Floor?: number;
   l3Ceiling?: number;
   l3VsSeason?: number;
+  l3Targets?: number;
+  l3Carries?: number;
+  l3Touches?: number;
+  l3Yards?: number;
+  l3AirYards?: number;
+  l3YardsPerTouch?: number;
   tpRateL3: number;
   trend?: number;
   oppDelta?: number;
   oppRank?: number;
   lastOpp?: string;
+  lastHomeAway?: "HOME" | "AWAY";
   token?: TokenInfo;
   weeks: WeekScore[];
 };
@@ -226,6 +255,8 @@ export default async function NflTrendingPage({
     min_season?: string;
     min_tp_rate?: string;
     token_only?: string;
+    home_away?: string;
+    lookback?: string;
   }>;
 }) {
   const params = await searchParams;
@@ -242,10 +273,13 @@ export default async function NflTrendingPage({
   const minSeason = parseNumber(params.min_season, 0, 0, 100);
   const minTpRate = parseNumber(params.min_tp_rate, 0, 0, 100);
   const tokenOnly = params.token_only === "1";
+  const homeAway = HOME_AWAY_OPTIONS.find((opt) => opt.key === params.home_away)?.key ?? "all";
+  const lookback = parseNumber(params.lookback, DEFAULT_LOOKBACK_WEEKS, 1, 18);
 
-  const [snapshot, weeklyData] = await Promise.all([
+  const [snapshot, weeklyData, schedule] = await Promise.all([
     getSportfunMarketSnapshot({ sport: "nfl", windowHours: 24, trendDays: 30, maxTokens: 500 }),
     fetchNflWeeklyStats({ season, seasonType }),
+    fetchNflSchedule(),
   ]);
 
   const weeks = Array.from(new Set(weeklyData.rows.map((row) => row.week).filter(Boolean))).sort(
@@ -254,8 +288,29 @@ export default async function NflTrendingPage({
   const latestWeek = weeks.length ? weeks[weeks.length - 1] : 1;
   const selectedWeek = parseNumber(params.week, latestWeek, 1, 25);
   const viewWeek = weeks.includes(selectedWeek) ? selectedWeek : latestWeek;
+  const availableWeeks = weeks.filter((wk) => wk <= viewWeek);
+  const windowWeeks = availableWeeks.slice(-lookback);
+  const windowWeekSet = new Set(windowWeeks);
 
-  const analysisRows = weeklyData.rows.filter((row) => row.week <= viewWeek);
+  const analysisRows = weeklyData.rows.filter((row) => row.week && windowWeekSet.has(row.week));
+
+  const scheduleRows = schedule.rows.filter(
+    (row) =>
+      row.season === season &&
+      row.gameType === seasonType &&
+      row.week &&
+      windowWeekSet.has(row.week)
+  );
+  const homeAwayMap = new Map<string, "HOME" | "AWAY">();
+  for (const game of scheduleRows) {
+    if (!game.week || !game.homeTeam || !game.awayTeam) continue;
+    const home = game.homeTeam.toUpperCase();
+    const away = game.awayTeam.toUpperCase();
+    const keyHome = `${game.week}|${home}|${away}`;
+    const keyAway = `${game.week}|${away}|${home}`;
+    homeAwayMap.set(keyHome, "HOME");
+    homeAwayMap.set(keyAway, "AWAY");
+  }
 
   const scores = new Map<string, number>();
   for (const row of analysisRows) {
@@ -274,8 +329,9 @@ export default async function NflTrendingPage({
     }))
   );
 
-  const oppWindowStart = Math.max(1, viewWeek - OPP_WINDOW_WEEKS + 1);
-  const oppRows = analysisRows.filter((row) => row.week >= oppWindowStart);
+  const oppWindowWeeks = windowWeeks.slice(-OPP_WINDOW_WEEKS);
+  const oppWindowSet = new Set(oppWindowWeeks);
+  const oppRows = analysisRows.filter((row) => row.week && oppWindowSet.has(row.week));
   const oppPosScores = new Map<string, number[]>();
   const leaguePosScores = new Map<string, number[]>();
   for (const row of oppRows) {
@@ -340,12 +396,18 @@ export default async function NflTrendingPage({
       : undefined;
 
     if (row.week) {
+      const team = row.team?.toUpperCase();
+      const opp = row.opponent_team?.toUpperCase();
+      const homeAway =
+        row.week && team && opp ? homeAwayMap.get(`${row.week}|${team}|${opp}`) : undefined;
       entry.weeks.push({
         week: row.week,
         score,
         rank,
         posRank,
-        opponent: row.opponent_team?.toUpperCase(),
+        opponent: opp,
+        homeAway,
+        usage: row.usage,
       });
     }
 
@@ -376,6 +438,22 @@ export default async function NflTrendingPage({
     entry.l3Ceiling = l3Scores.length ? Math.max(...l3Scores) : undefined;
     entry.l3VsSeason = entry.l3Avg - entry.seasonAvg;
 
+    const l3Count = last3.length;
+    const l3TargetsTotal = last3.reduce((acc, w) => acc + (w.usage?.targets ?? 0), 0);
+    const l3CarriesTotal = last3.reduce((acc, w) => acc + (w.usage?.carries ?? 0), 0);
+    const l3ReceptionsTotal = last3.reduce((acc, w) => acc + (w.usage?.receptions ?? 0), 0);
+    const l3RushYardsTotal = last3.reduce((acc, w) => acc + (w.usage?.rushingYards ?? 0), 0);
+    const l3RecYardsTotal = last3.reduce((acc, w) => acc + (w.usage?.receivingYards ?? 0), 0);
+    const l3AirYardsTotal = last3.reduce((acc, w) => acc + (w.usage?.airYards ?? 0), 0);
+    const touchesTotal = l3CarriesTotal + l3ReceptionsTotal;
+
+    entry.l3Targets = l3Count ? l3TargetsTotal / l3Count : 0;
+    entry.l3Carries = l3Count ? l3CarriesTotal / l3Count : 0;
+    entry.l3Touches = l3Count ? touchesTotal / l3Count : 0;
+    entry.l3Yards = l3Count ? (l3RushYardsTotal + l3RecYardsTotal) / l3Count : 0;
+    entry.l3AirYards = l3Count ? l3AirYardsTotal / l3Count : 0;
+    entry.l3YardsPerTouch = touchesTotal > 0 ? (l3RushYardsTotal + l3RecYardsTotal) / touchesTotal : undefined;
+
     const pos = (entry.position ?? "UNK").toUpperCase();
     const threshold = TOP_THRESHOLDS[pos] ?? 24;
     const tpCountL3 = last3.filter((w) => w.posRank && w.posRank <= threshold).length;
@@ -394,6 +472,8 @@ export default async function NflTrendingPage({
       }
       entry.oppRank = oppRankByPos.get(pos)?.get(lastOpp);
     }
+
+    entry.lastHomeAway = last3.length ? last3[last3.length - 1].homeAway : undefined;
 
     return entry;
   });
@@ -429,6 +509,11 @@ export default async function NflTrendingPage({
     filtered = filtered.filter((row) => Boolean(row.token));
   }
 
+  if (homeAway !== "all") {
+    const desired = homeAway === "home" ? "HOME" : "AWAY";
+    filtered = filtered.filter((row) => row.lastHomeAway === desired);
+  }
+
   if (minGames > 0) {
     filtered = filtered.filter((row) => row.games >= minGames);
   }
@@ -459,6 +544,16 @@ export default async function NflTrendingPage({
         return (a.l3AvgRank ?? Infinity) - (b.l3AvgRank ?? Infinity);
       case "consistency":
         return (a.l3StdDev ?? Infinity) - (b.l3StdDev ?? Infinity);
+      case "targets_l3":
+        return (b.l3Targets ?? 0) - (a.l3Targets ?? 0);
+      case "touches_l3":
+        return (b.l3Touches ?? 0) - (a.l3Touches ?? 0);
+      case "yards_l3":
+        return (b.l3Yards ?? 0) - (a.l3Yards ?? 0);
+      case "ypt_l3":
+        return (b.l3YardsPerTouch ?? -Infinity) - (a.l3YardsPerTouch ?? -Infinity);
+      case "air_yards_l3":
+        return (b.l3AirYards ?? 0) - (a.l3AirYards ?? 0);
       case "opp_delta":
         return (b.oppDelta ?? -Infinity) - (a.oppDelta ?? -Infinity);
       case "opp_rank":
@@ -534,6 +629,17 @@ export default async function NflTrendingPage({
           </select>
         </label>
         <label className="text-xs text-zinc-600 dark:text-zinc-400">
+          Lookback
+          <input
+            type="number"
+            name="lookback"
+            min={1}
+            max={18}
+            defaultValue={lookback}
+            className="mt-1 block w-20 rounded-md border border-black/10 bg-white px-3 py-2 text-sm text-black placeholder:text-zinc-400 dark:border-white/10 dark:bg-white/5 dark:text-white"
+          />
+        </label>
+        <label className="text-xs text-zinc-600 dark:text-zinc-400">
           Position
           <select
             name="position"
@@ -556,6 +662,20 @@ export default async function NflTrendingPage({
             className="mt-1 block w-24 rounded-md border border-black/10 bg-white px-3 py-2 text-sm text-black dark:border-white/10 dark:bg-white/5 dark:text-white"
           >
             {TREND_FILTERS.map((opt) => (
+              <option key={opt.key} value={opt.key}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="text-xs text-zinc-600 dark:text-zinc-400">
+          Home/Away
+          <select
+            name="home_away"
+            defaultValue={homeAway}
+            className="mt-1 block w-24 rounded-md border border-black/10 bg-white px-3 py-2 text-sm text-black dark:border-white/10 dark:bg-white/5 dark:text-white"
+          >
+            {HOME_AWAY_OPTIONS.map((opt) => (
               <option key={opt.key} value={opt.key}>
                 {opt.label}
               </option>
@@ -670,15 +790,15 @@ export default async function NflTrendingPage({
 
       <section className="mt-4 text-sm text-zinc-600 dark:text-zinc-400">
         <p>
-          Window: last {TREND_WEEKS} games through week {viewWeek}. Rank mode: {rankMode === "all" ? "overall" : "position"}.
-          Opp Δ compares opponent allowed vs league average over last {OPP_WINDOW_WEEKS} weeks. Consistency uses L3
-          standard deviation.
+          Window: last {TREND_WEEKS} games within the last {lookback} weeks through week {viewWeek}. Rank mode:{" "}
+          {rankMode === "all" ? "overall" : "position"}. Opp Δ compares opponent allowed vs league average over last{" "}
+          {OPP_WINDOW_WEEKS} weeks. Consistency uses L3 standard deviation.
         </p>
       </section>
 
       <section className="mt-8">
         <div className="overflow-x-auto rounded-xl border border-black/10 bg-white dark:border-white/10 dark:bg-white/5">
-          <table className="w-full min-w-[1400px] text-left text-sm">
+          <table className="w-full min-w-[1700px] text-left text-sm">
             <thead className="bg-zinc-100 text-xs uppercase tracking-wide text-zinc-500 dark:bg-white/10 dark:text-zinc-400">
               <tr>
                 <th className="px-3 py-2">Player</th>
@@ -688,6 +808,11 @@ export default async function NflTrendingPage({
                 <th className="px-3 py-2">Price</th>
                 <th className="px-3 py-2">Season FPPG</th>
                 <th className="px-3 py-2">L3 Avg</th>
+                <th className="px-3 py-2">L3 Targets</th>
+                <th className="px-3 py-2">L3 Touches</th>
+                <th className="px-3 py-2">L3 Yards</th>
+                <th className="px-3 py-2">Y/Tch</th>
+                <th className="px-3 py-2">L3 Air</th>
                 <th className="px-3 py-2">L3 Std</th>
                 <th className="px-3 py-2">L3 Floor</th>
                 <th className="px-3 py-2">L3 Ceiling</th>
@@ -697,6 +822,7 @@ export default async function NflTrendingPage({
                 <th className="px-3 py-2">L3 vs Season</th>
                 <th className="px-3 py-2">Opp Δ</th>
                 <th className="px-3 py-2">Opp Rank</th>
+                <th className="px-3 py-2">H/A</th>
                 <th className="px-3 py-2">Opp</th>
               </tr>
             </thead>
@@ -715,6 +841,21 @@ export default async function NflTrendingPage({
                       {formatNumber(row.seasonAvg)}
                     </td>
                     <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{formatNumber(row.l3Avg)}</td>
+                    <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
+                      {row.l3Targets !== undefined ? formatNumber(row.l3Targets) : "—"}
+                    </td>
+                    <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
+                      {row.l3Touches !== undefined ? formatNumber(row.l3Touches) : "—"}
+                    </td>
+                    <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
+                      {row.l3Yards !== undefined ? formatNumber(row.l3Yards) : "—"}
+                    </td>
+                    <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
+                      {row.l3YardsPerTouch !== undefined ? formatNumber(row.l3YardsPerTouch) : "—"}
+                    </td>
+                    <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
+                      {row.l3AirYards !== undefined ? formatNumber(row.l3AirYards) : "—"}
+                    </td>
                     <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
                       {row.l3StdDev !== undefined ? formatNumber(row.l3StdDev) : "—"}
                     </td>
@@ -746,13 +887,16 @@ export default async function NflTrendingPage({
                     <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
                       {row.oppRank ? `#${row.oppRank}` : "—"}
                     </td>
+                    <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
+                      {row.lastHomeAway === "HOME" ? "H" : row.lastHomeAway === "AWAY" ? "A" : "—"}
+                    </td>
                     <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{row.lastOpp ?? "—"}</td>
                   </tr>
                 );
               })}
               {sorted.length === 0 ? (
                 <tr>
-                  <td className="px-3 py-4 text-zinc-600 dark:text-zinc-400" colSpan={17}>
+                  <td className="px-3 py-4 text-zinc-600 dark:text-zinc-400" colSpan={23}>
                     No players match the filters.
                   </td>
                 </tr>

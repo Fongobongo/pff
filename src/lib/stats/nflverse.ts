@@ -46,6 +46,17 @@ export type NflWeeklyRow = {
   week: number;
   season_type: string;
   stats: NflNormalizedStats;
+  usage?: {
+    carries?: number;
+    targets?: number;
+    receptions?: number;
+    rushingYards?: number;
+    receivingYards?: number;
+    passingYards?: number;
+    airYards?: number;
+    fantasyPoints?: number;
+    fantasyPointsPpr?: number;
+  };
 };
 
 export type NflWeeklyResponse = {
@@ -281,6 +292,17 @@ export async function fetchNflWeeklyStats(options: {
       week: rowWeek,
       season_type: rowSeasonType,
       stats: mapRowToNormalized(rowObj),
+      usage: {
+        carries: toNumber(rowObj.carries),
+        targets: toNumber(rowObj.targets),
+        receptions: toNumber(rowObj.receptions),
+        rushingYards: toNumber(rowObj.rushing_yards),
+        receivingYards: toNumber(rowObj.receiving_yards),
+        passingYards: toNumber(rowObj.passing_yards),
+        airYards: toNumber(rowObj.receiving_air_yards),
+        fantasyPoints: toNumber(rowObj.fantasy_points),
+        fantasyPointsPpr: toNumber(rowObj.fantasy_points_ppr),
+      },
     });
   }
 
