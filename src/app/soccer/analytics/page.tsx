@@ -34,8 +34,14 @@ export default async function SoccerAnalyticsPage({
   });
 
   const scores: number[] = [];
-  const positionMap = new Map<string, { count: number; total: number; max: number }>();
-  const teamMap = new Map<string, { count: number; total: number; max: number }>();
+  const positionMap = new Map<
+    string,
+    { count: number; total: number; max: number; xg: number; xa: number; minutes: number }
+  >();
+  const teamMap = new Map<
+    string,
+    { count: number; total: number; max: number; xg: number; xa: number; minutes: number }
+  >();
   const leaderMap = new Map<
     number,
     { playerName: string; teamName?: string; xg: number; xa: number; assists: number }
@@ -49,16 +55,40 @@ export default async function SoccerAnalyticsPage({
       const position = player.position ?? "UNK";
       const team = player.teamName ?? "UNK";
 
-      const posEntry = positionMap.get(position) ?? { count: 0, total: 0, max: 0 };
+      const minutes = toNumber(player.minutesPlayed);
+      const xg = toNumber(player.xg);
+      const xa = toNumber(player.xa);
+
+      const posEntry = positionMap.get(position) ?? {
+        count: 0,
+        total: 0,
+        max: 0,
+        xg: 0,
+        xa: 0,
+        minutes: 0,
+      };
       posEntry.count += 1;
       posEntry.total += score;
       posEntry.max = Math.max(posEntry.max, score);
+      posEntry.xg += xg;
+      posEntry.xa += xa;
+      posEntry.minutes += minutes;
       positionMap.set(position, posEntry);
 
-      const teamEntry = teamMap.get(team) ?? { count: 0, total: 0, max: 0 };
+      const teamEntry = teamMap.get(team) ?? {
+        count: 0,
+        total: 0,
+        max: 0,
+        xg: 0,
+        xa: 0,
+        minutes: 0,
+      };
       teamEntry.count += 1;
       teamEntry.total += score;
       teamEntry.max = Math.max(teamEntry.max, score);
+      teamEntry.xg += xg;
+      teamEntry.xa += xa;
+      teamEntry.minutes += minutes;
       teamMap.set(team, teamEntry);
 
       const leader = leaderMap.get(player.playerId) ?? {
@@ -85,20 +115,34 @@ export default async function SoccerAnalyticsPage({
         ? sortedScores[Math.floor(totalPlayers / 2)]
         : (sortedScores[totalPlayers / 2 - 1] + sortedScores[totalPlayers / 2]) / 2;
 
-  const positions = Array.from(positionMap.entries()).map(([position, entry]) => ({
-    position,
-    avg: entry.count ? entry.total / entry.count : 0,
-    max: entry.max,
-    count: entry.count,
-  }));
+  const positions = Array.from(positionMap.entries()).map(([position, entry]) => {
+    const minutes = entry.minutes;
+    const xgPer90 = minutes > 0 ? (entry.xg / minutes) * 90 : 0;
+    const xaPer90 = minutes > 0 ? (entry.xa / minutes) * 90 : 0;
+    return {
+      position,
+      avg: entry.count ? entry.total / entry.count : 0,
+      max: entry.max,
+      count: entry.count,
+      xgPer90,
+      xaPer90,
+    };
+  });
   positions.sort((a, b) => b.avg - a.avg);
 
-  const teams = Array.from(teamMap.entries()).map(([team, entry]) => ({
-    team,
-    avg: entry.count ? entry.total / entry.count : 0,
-    max: entry.max,
-    count: entry.count,
-  }));
+  const teams = Array.from(teamMap.entries()).map(([team, entry]) => {
+    const minutes = entry.minutes;
+    const xgPer90 = minutes > 0 ? (entry.xg / minutes) * 90 : 0;
+    const xaPer90 = minutes > 0 ? (entry.xa / minutes) * 90 : 0;
+    return {
+      team,
+      avg: entry.count ? entry.total / entry.count : 0,
+      max: entry.max,
+      count: entry.count,
+      xgPer90,
+      xaPer90,
+    };
+  });
   teams.sort((a, b) => b.avg - a.avg);
 
   const leaders = Array.from(leaderMap.values());
@@ -134,7 +178,8 @@ export default async function SoccerAnalyticsPage({
 
       <section className="mt-4 text-sm text-zinc-600 dark:text-zinc-400">
         <p>
-          Showing {safeLimit} matches · {currentCompetition?.label ?? "Competition"}. Total players: {totalPlayers}.
+          Showing {safeLimit} matches · {currentCompetition?.label ?? "Competition"}. Total players: {totalPlayers}. xG/xA
+          are normalized per 90 minutes.
         </p>
       </section>
 
@@ -164,6 +209,8 @@ export default async function SoccerAnalyticsPage({
                 <th className="px-3 py-2">Position</th>
                 <th className="px-3 py-2">Avg</th>
                 <th className="px-3 py-2">Max</th>
+                <th className="px-3 py-2">xG/90</th>
+                <th className="px-3 py-2">xA/90</th>
                 <th className="px-3 py-2">Samples</th>
               </tr>
             </thead>
@@ -173,6 +220,8 @@ export default async function SoccerAnalyticsPage({
                   <td className="px-3 py-2 text-black dark:text-white">{row.position}</td>
                   <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{row.avg.toFixed(2)}</td>
                   <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{row.max.toFixed(2)}</td>
+                  <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{row.xgPer90.toFixed(2)}</td>
+                  <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{row.xaPer90.toFixed(2)}</td>
                   <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{row.count}</td>
                 </tr>
               ))}
@@ -190,6 +239,8 @@ export default async function SoccerAnalyticsPage({
                 <th className="px-3 py-2">Team</th>
                 <th className="px-3 py-2">Avg</th>
                 <th className="px-3 py-2">Max</th>
+                <th className="px-3 py-2">xG/90</th>
+                <th className="px-3 py-2">xA/90</th>
                 <th className="px-3 py-2">Samples</th>
               </tr>
             </thead>
@@ -199,6 +250,8 @@ export default async function SoccerAnalyticsPage({
                   <td className="px-3 py-2 text-black dark:text-white">{row.team}</td>
                   <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{row.avg.toFixed(2)}</td>
                   <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{row.max.toFixed(2)}</td>
+                  <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{row.xgPer90.toFixed(2)}</td>
+                  <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{row.xaPer90.toFixed(2)}</td>
                   <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{row.count}</td>
                 </tr>
               ))}
