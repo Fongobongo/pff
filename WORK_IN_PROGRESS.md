@@ -1,7 +1,7 @@
 # Work in Progress
 
 ## Now
-- **Step 5 (Soccer analytics + market expansion):** Identify missing Sport.fun metadata source (ERC-1155 `uri()` returns numeric IDs in spot check).
+- **Step 5 (Soccer analytics + market expansion):** Identify missing Sport.fun athlete metadata source (ERC-1155 `uri()` returns numeric IDs in spot check).
 
 ## Next
 - Review soccer pages for load/perf impact with the expanded competition list.
@@ -27,6 +27,7 @@
   - Soccer competition pickers now use featured chips + collapsible full list.
   - Added defensive + GK leaderboards to soccer advanced stats.
   - Added transfer-based fallback for token universe when log scanning fails on Alchemy free tier.
+  - Added $FUN token metadata (name/symbol/logo) via Sport.fun API.
 - Step 3 (Sport.fun portfolio) completed:
   - Activity pagination + cursors to avoid large receipt decode bursts.
   - Decoded-receipt cache (memory + disk) for speed and rate-limit relief.
