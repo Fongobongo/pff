@@ -5,8 +5,17 @@ type KvResult<T> = {
   error?: string;
 };
 
-const REST_URL = process.env.UPSTASH_REDIS_REST_URL;
-const REST_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
+function stripQuotes(value: string | undefined): string | undefined {
+  if (!value) return value;
+  const trimmed = value.trim();
+  if ((trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
+    return trimmed.slice(1, -1);
+  }
+  return trimmed;
+}
+
+const REST_URL = stripQuotes(process.env.UPSTASH_REDIS_REST_URL);
+const REST_TOKEN = stripQuotes(process.env.UPSTASH_REDIS_REST_TOKEN);
 const KV_ENABLED = Boolean(REST_URL && REST_TOKEN);
 
 async function kvCommand<T>(cmd: Array<string | number>): Promise<T | null> {
