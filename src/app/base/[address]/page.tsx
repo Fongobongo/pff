@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { formatEthFromWeiHex, shortenAddress } from "@/lib/format";
+import { shortenAddress } from "@/lib/format";
 import TokenBalances from "./TokenBalances";
 import FlowsTable from "./FlowsTable";
 import { type TokenMetadata } from "@/lib/token";
@@ -8,7 +8,6 @@ import { getBaseUrl } from "@/lib/serverBaseUrl";
 type PortfolioResponse = {
   chain: string;
   address: string;
-  nativeBalanceWeiHex: string;
   tokenBalances: Array<{ contractAddress: string; tokenBalance: string }>;
   tokenMetadataByAddress: Record<string, TokenMetadata>;
 };
@@ -79,14 +78,7 @@ export default async function BaseWalletPage({
       </div>
 
       <section className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-3">
-        <div className="rounded-xl border border-white/10 bg-white/5 p-4">
-          <div className="text-sm text-gray-400">Native balance (ETH)</div>
-          <div className="mt-2 text-xl text-white">
-            {formatEthFromWeiHex(portfolio.nativeBalanceWeiHex)}
-          </div>
-        </div>
-
-        <div className="rounded-xl border border-white/10 bg-white/5 p-4 md:col-span-2">
+        <div className="rounded-xl border border-white/10 bg-white/5 p-4 md:col-span-3">
           <div className="text-sm text-gray-400">Token balances</div>
           <div className="mt-2 text-xl text-white">{portfolio.tokenBalances.length}</div>
           <p className="mt-1 text-xs text-gray-500">
