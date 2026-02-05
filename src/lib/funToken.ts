@@ -11,8 +11,23 @@ import {
 
 export const FUN_TOKEN_ADDRESS = "0x16EE7ecAc70d1028E7712751E2Ee6BA808a7dd92";
 export const FUN_PAIR_ADDRESS = "0x659bE70647B0f63217D60e077F4417b1eCC65064";
+const FUN_METADATA_BASE = "https://api.sport.fun/tokens";
 
 const ERC20_ABI: Abi = [
+  {
+    type: "function",
+    name: "name",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "string" }],
+  },
+  {
+    type: "function",
+    name: "symbol",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "string" }],
+  },
   {
     type: "function",
     name: "decimals",
@@ -100,6 +115,12 @@ type FunTokenSnapshot = {
   asOf: string;
   token: string;
   pair: string;
+  tokenMeta?: {
+    name?: string;
+    symbol?: string;
+    logoUrl?: string;
+    iconUrl?: string;
+  };
   priceUsdcRaw?: string;
   priceChange24hPercent?: number;
   volume24hUsdcRaw?: string;
@@ -195,11 +216,36 @@ function computePrice(params: { reserveFun: bigint; reserveUsdc: bigint; funDeci
   return (params.reserveUsdc * funScale) / params.reserveFun;
 }
 
+async function getFunTokenMetadata() {
+  return withCache("fun:token:meta", 3600, async () => {
+    const addr = FUN_TOKEN_ADDRESS.toLowerCase();
+    try {
+      const [name, symbol] = (await Promise.all([
+        ethCall(FUN_TOKEN_ADDRESS, ERC20_ABI, "name"),
+        ethCall(FUN_TOKEN_ADDRESS, ERC20_ABI, "symbol"),
+      ])) as [string, string];
+
+      return {
+        name,
+        symbol,
+        logoUrl: `${FUN_METADATA_BASE}/${addr}/logo.png`,
+        iconUrl: `${FUN_METADATA_BASE}/${addr}/icon.png`,
+      };
+    } catch {
+      return {
+        logoUrl: `${FUN_METADATA_BASE}/${addr}/logo.png`,
+        iconUrl: `${FUN_METADATA_BASE}/${addr}/icon.png`,
+      };
+    }
+  });
+}
+
 export async function getFunTokenSnapshot(): Promise<FunTokenSnapshot> {
   return withCache("fun:token:snapshot", 120, async () => {
     const now = Date.now();
 
     try {
+      const tokenMeta = await getFunTokenMetadata();
       const token0 = (await ethCall(FUN_PAIR_ADDRESS, PAIR_ABI, "token0")) as string;
 
       const [reserve0, reserve1] = (await ethCall(FUN_PAIR_ADDRESS, PAIR_ABI, "getReserves")) as [
@@ -307,6 +353,7 @@ export async function getFunTokenSnapshot(): Promise<FunTokenSnapshot> {
         asOf: new Date(now).toISOString(),
         token: FUN_TOKEN_ADDRESS,
         pair: FUN_PAIR_ADDRESS,
+        tokenMeta,
         priceUsdcRaw: priceUsdcRaw?.toString(10),
         priceChange24hPercent,
         volume24hUsdcRaw: volumeUsdc.toString(10),
@@ -319,6 +366,7 @@ export async function getFunTokenSnapshot(): Promise<FunTokenSnapshot> {
         asOf: new Date(now).toISOString(),
         token: FUN_TOKEN_ADDRESS,
         pair: FUN_PAIR_ADDRESS,
+        tokenMeta: await getFunTokenMetadata(),
         priceUsdcRaw: undefined,
         priceChange24hPercent: undefined,
         volume24hUsdcRaw: "0",

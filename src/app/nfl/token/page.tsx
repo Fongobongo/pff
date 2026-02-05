@@ -18,10 +18,27 @@ function formatPercent(value?: number): string {
 export default async function NflTokenPage() {
   const snapshot = await getFunTokenSnapshot();
   const changePositive = (snapshot.priceChange24hPercent ?? 0) >= 0;
+  const meta = snapshot.tokenMeta;
 
   return (
     <NflPageShell title="$FUN token" description="On-chain snapshot for the Sport.fun ecosystem token.">
-      <section className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[2fr,1fr]">
+      <section className="mt-6 flex items-center gap-4">
+        {meta?.logoUrl ? (
+          <img
+            src={meta.logoUrl}
+            alt={meta.symbol ?? "$FUN"}
+            className="h-12 w-12 rounded-full border border-black/10 object-cover dark:border-white/10"
+          />
+        ) : null}
+        <div>
+          <div className="text-xs uppercase tracking-wide text-zinc-500 dark:text-zinc-400">Token</div>
+          <div className="text-lg font-semibold text-black dark:text-white">
+            {meta?.name ?? "$FUN"}{meta?.symbol ? ` (${meta.symbol})` : ""}
+          </div>
+        </div>
+      </section>
+
+      <section className="mt-4 grid grid-cols-1 gap-6 lg:grid-cols-[2fr,1fr]">
         <div className="rounded-xl border border-black/10 bg-white p-6 dark:border-white/10 dark:bg-white/5">
           <div className="flex items-center justify-between">
             <div>
