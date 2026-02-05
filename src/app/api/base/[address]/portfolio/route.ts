@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { alchemyRpc } from "@/lib/alchemy";
+import { FUN_TOKEN_ADDRESS } from "@/lib/funToken";
+import { BASE_USDC } from "@/lib/sportfun";
 
 const paramsSchema = z.object({
   address: z.string().min(1),
@@ -36,10 +38,12 @@ export async function GET(
   const nonZero = tokenBalances.filter(
     (t) => typeof t.tokenBalance === "string" && t.tokenBalance !== "0x0"
   );
+  const allowed = new Set([BASE_USDC, FUN_TOKEN_ADDRESS].map((a) => a.toLowerCase()));
+  const filtered = nonZero.filter((t) => allowed.has(t.contractAddress.toLowerCase()));
 
   // Fetch metadata for each token (limit concurrency implicitly via Promise.all on small set)
   const metaEntries = await Promise.all(
-    nonZero.map(async (t) => {
+    filtered.map(async (t) => {
       const metadata = (await alchemyRpc("alchemy_getTokenMetadata", [
         t.contractAddress,
       ])) as TokenMetadata;
@@ -53,7 +57,7 @@ export async function GET(
     chain: "base",
     address,
     nativeBalanceWeiHex,
-    tokenBalances,
+    tokenBalances: filtered,
     tokenMetadataByAddress,
   });
 }

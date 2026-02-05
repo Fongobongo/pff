@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { alchemyRpc } from "@/lib/alchemy";
+import { FUN_TOKEN_ADDRESS } from "@/lib/funToken";
+import { BASE_USDC, SPORTFUN_ERC1155_CONTRACTS } from "@/lib/sportfun";
 
 const paramsSchema = z.object({
   address: z.string().min(1),
@@ -50,7 +52,19 @@ export async function GET(
     ]),
   ]);
 
-  const transfers = [...(incoming?.transfers ?? []), ...(outgoing?.transfers ?? [])];
+  const allowedErc20 = new Set([BASE_USDC, FUN_TOKEN_ADDRESS].map((a) => a.toLowerCase()));
+  const allowedErc1155 = new Set(SPORTFUN_ERC1155_CONTRACTS.map((a) => a.toLowerCase()));
+
+  const transfers = [...(incoming?.transfers ?? []), ...(outgoing?.transfers ?? [])].filter((t: {
+    category?: string;
+    rawContract?: { address?: string };
+  }) => {
+    const category = (t.category ?? "").toLowerCase();
+    const contract = t.rawContract?.address?.toLowerCase();
+    if (category === "erc20") return contract ? allowedErc20.has(contract) : false;
+    if (category === "erc1155") return contract ? allowedErc1155.has(contract) : false;
+    return false;
+  });
 
   type TransferSortKey = {
     blockNum?: string | number;
