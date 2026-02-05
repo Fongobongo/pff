@@ -1,4 +1,5 @@
 import { withCache } from "@/lib/stats/cache";
+import { kvEnabled, kvGetJson, kvSetJson } from "@/lib/kv";
 import {
   FOOTBALL_STAT_KEYS,
   type FootballCompetitionTier,
@@ -380,6 +381,10 @@ export async function buildStatsBombMatchStats(options: {
 }): Promise<StatsBombMatchStats> {
   const { matchId, competitionId, seasonId } = options;
   const cacheKey = `statsbomb:match-stats:${matchId}:${competitionId ?? "na"}:${seasonId ?? "na"}`;
+  if (kvEnabled()) {
+    const kvCached = await kvGetJson<StatsBombMatchStats>(cacheKey);
+    if (kvCached) return kvCached;
+  }
   return withCache(cacheKey, 3600, async () => {
     const [events, lineups, matches] = await Promise.all([
       getStatsBombEvents(matchId),
@@ -754,7 +759,7 @@ export async function buildStatsBombMatchStats(options: {
     }
   }
 
-  return {
+  const result = {
     matchId,
     competitionId,
     seasonId,
@@ -766,5 +771,9 @@ export async function buildStatsBombMatchStats(options: {
       scoringMissing: FOOTBALL_STAT_KEYS.filter((key) => !STATSBOMB_MAPPED_FIELDS.includes(key)),
     },
   };
+  if (kvEnabled()) {
+    void kvSetJson(cacheKey, result);
+  }
+  return result;
   });
 }
