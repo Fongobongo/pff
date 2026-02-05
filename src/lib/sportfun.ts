@@ -26,6 +26,7 @@ export const SPORTFUN_DEV_PLAYERS_CONTRACTS = SPORTFUN_PLAYER_TOKENS.map((x) => 
 
 export const BASE_USDC = "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913";
 export const BASE_USDC_DECIMALS = 6;
+export const SPORTFUN_ATHLETE_METADATA_BASE = "https://api.sport.fun/athletes";
 
 export const SPORTFUN_TOPICS = {
   PlayerBatchTransfer:

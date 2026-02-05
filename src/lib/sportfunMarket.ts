@@ -8,6 +8,7 @@ import {
   DEVPLAYERS_EVENTS_ABI,
   FDFPAIR_EVENTS_ABI,
   FDFPAIR_READ_ABI,
+  SPORTFUN_ATHLETE_METADATA_BASE,
   SPORTFUN_PLAYER_TOKENS,
   SPORTFUN_TOPICS,
 } from "@/lib/sportfun";
@@ -169,6 +170,14 @@ function decodeDataUriJson(uri: string): unknown | null {
   } catch {
     return null;
   }
+}
+
+function isNumericUri(value: string): boolean {
+  return /^\d+$/.test(value.trim());
+}
+
+function buildAthleteMetadataUrl(tokenId: bigint): string {
+  return `${SPORTFUN_ATHLETE_METADATA_BASE}/${tokenId.toString(10)}/metadata.json`;
 }
 
 function extractAttributeValue(attributes: unknown, matchKey: (key: string) => boolean): unknown {
@@ -532,12 +541,25 @@ async function getErc1155Metadata(params: { contractAddress: string; tokenId: bi
     try {
       const data = encodeErc1155UriCall(params.tokenId);
       const result = await alchemyRpc("eth_call", [{ to: params.contractAddress, data }, "latest"]);
-      const uriRaw = decodeAbiString(result as Hex);
+      const uriRaw = decodeAbiString(result as Hex).trim();
       if (!uriRaw) return null;
 
       const jsonInline = decodeDataUriJson(uriRaw);
-      const resolvedUri = jsonInline ? null : normalizeToHttp(expandErc1155Uri(uriRaw, params.tokenId));
-      const metadata = jsonInline ?? (resolvedUri ? await fetchMetadata(resolvedUri) : null);
+      let metadata: unknown | null = jsonInline;
+      let resolvedUri: string | null = null;
+      if (!metadata) {
+        if (isNumericUri(uriRaw)) {
+          resolvedUri = buildAthleteMetadataUrl(params.tokenId);
+        } else {
+          const expanded = expandErc1155Uri(uriRaw, params.tokenId);
+          resolvedUri = isNumericUri(expanded) ? buildAthleteMetadataUrl(params.tokenId) : normalizeToHttp(expanded);
+        }
+        metadata = resolvedUri ? await fetchMetadata(resolvedUri) : null;
+        if (!metadata) {
+          const fallback = buildAthleteMetadataUrl(params.tokenId);
+          if (fallback !== resolvedUri) metadata = await fetchMetadata(fallback);
+        }
+      }
       if (!metadata || typeof metadata !== "object") return null;
 
       const obj = metadata as Record<string, unknown>;

@@ -20,6 +20,7 @@ import {
   DEVPLAYERS_EVENTS_ABI,
   FDFPAIR_EVENTS_ABI,
   FDFPAIR_READ_ABI,
+  SPORTFUN_ATHLETE_METADATA_BASE,
   SPORTFUN_DEV_PLAYERS_CONTRACTS,
   SPORTFUN_ERC1155_CONTRACTS,
   SPORTFUN_FDF_PAIR_CONTRACTS,
@@ -235,6 +236,22 @@ function decodeDataUriJson(uri: string): unknown | null {
   } catch {
     return null;
   }
+}
+
+function isNumericUri(value: string): boolean {
+  return /^\d+$/.test(value.trim());
+}
+
+function buildAthleteMetadataUrl(tokenId: bigint): string {
+  return `${SPORTFUN_ATHLETE_METADATA_BASE}/${tokenId.toString(10)}/metadata.json`;
+}
+
+function resolveErc1155Uri(raw: string, tokenId: bigint): string {
+  const trimmed = raw.trim();
+  if (isNumericUri(trimmed)) return buildAthleteMetadataUrl(tokenId);
+  const expanded = expandErc1155Uri(trimmed, tokenId);
+  if (isNumericUri(expanded)) return buildAthleteMetadataUrl(tokenId);
+  return normalizeToHttp(expanded);
 }
 
 function parseBool(v: string | undefined, defaultValue: boolean): boolean {
@@ -1368,7 +1385,7 @@ export async function GET(request: Request, context: { params: Promise<{ address
           () => alchemyRpc("eth_call", [{ to: h.contractAddress, data }, "latest"]),
           { retries: 2, baseDelayMs: 200 }
         )) as Hex;
-        const uri = expandErc1155Uri(decodeAbiString(result), tokenId);
+        const uri = resolveErc1155Uri(decodeAbiString(result), tokenId);
         uriByKey.set(key, { uri });
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
