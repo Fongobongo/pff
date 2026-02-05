@@ -31,6 +31,12 @@ import {
   isOneOf,
   toLower,
 } from "@/lib/sportfun";
+import {
+  getSportfunMetadataCacheEntry,
+  isSportfunMetadataFresh,
+  setSportfunMetadataCacheEntry,
+  type SportfunTokenMetadata,
+} from "@/lib/sportfunMetadataCache";
 
 export const runtime = "nodejs";
 
@@ -459,6 +465,18 @@ type TokenMetadata = {
   image?: string;
   imageUrl?: string;
 };
+
+function toTokenMetadata(meta: SportfunTokenMetadata | null | undefined): TokenMetadata | undefined {
+  if (!meta) return undefined;
+  const image = meta.image;
+  const imageUrl = image ? normalizeToHttp(image) : undefined;
+  return {
+    name: meta.name,
+    description: meta.description,
+    image,
+    imageUrl,
+  };
+}
 
 type MetadataCacheValue = {
   uri: string;
@@ -1379,6 +1397,15 @@ export async function GET(request: Request, context: { params: Promise<{ address
     await mapLimit(holdingsForMetadata, 8, async (h) => {
       const key = `${h.contractAddress}:${h.tokenIdHex}`;
       try {
+        const now = Date.now();
+        const cachedEntry = getSportfunMetadataCacheEntry(key);
+        if (isSportfunMetadataFresh(cachedEntry, now) && cachedEntry?.uri) {
+          uriByKey.set(key, { uri: cachedEntry.uri });
+          const meta = toTokenMetadata(cachedEntry.metadata);
+          if (meta) metadataByKey.set(key, { metadata: meta });
+          return;
+        }
+
         const tokenId = BigInt(h.tokenIdHex);
         const data = encodeErc1155UriCall(tokenId);
         const result = (await withRetry(
@@ -1387,6 +1414,11 @@ export async function GET(request: Request, context: { params: Promise<{ address
         )) as Hex;
         const uri = resolveErc1155Uri(decodeAbiString(result), tokenId);
         uriByKey.set(key, { uri });
+        setSportfunMetadataCacheEntry(key, {
+          updatedAt: now,
+          uri,
+          metadata: cachedEntry?.metadata ?? null,
+        });
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         uriByKey.set(key, { error: msg });
@@ -1398,17 +1430,46 @@ export async function GET(request: Request, context: { params: Promise<{ address
   if (shouldIncludeMetadata) {
     await mapLimit(holdingsForMetadata, 6, async (h) => {
       const key = `${h.contractAddress}:${h.tokenIdHex}`;
+      if (metadataByKey.has(key)) return;
       const uri = uriByKey.get(key)?.uri;
       if (!uri) return;
+
+      const localEntry = getSportfunMetadataCacheEntry(key);
+      if (isSportfunMetadataFresh(localEntry) && localEntry?.metadata) {
+        metadataByKey.set(key, { metadata: toTokenMetadata(localEntry.metadata) });
+        return;
+      }
 
       const cached = readMetadataCache(key);
       if (cached) {
         metadataByKey.set(key, { metadata: cached.metadata, error: cached.error });
+        if (cached.metadata) {
+          setSportfunMetadataCacheEntry(key, {
+            updatedAt: Date.now(),
+            uri,
+            metadata: {
+              name: cached.metadata.name,
+              description: cached.metadata.description,
+              image: cached.metadata.image,
+            },
+          });
+        }
         return;
       }
 
       const result = await fetchMetadataFromUri(uri);
       metadataByKey.set(key, result);
+      if (result.metadata) {
+        setSportfunMetadataCacheEntry(key, {
+          updatedAt: Date.now(),
+          uri,
+          metadata: {
+            name: result.metadata.name,
+            description: result.metadata.description,
+            image: result.metadata.image,
+          },
+        });
+      }
       writeMetadataCache(key, { uri, metadata: result.metadata, error: result.error });
     });
   }

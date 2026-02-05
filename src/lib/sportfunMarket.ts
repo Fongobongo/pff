@@ -4,6 +4,12 @@ import { withCache } from "@/lib/stats/cache";
 import { alchemyRpc } from "@/lib/alchemy";
 import { getSportfunNameOverride, getSportfunSportLabel, type SportfunSport } from "@/lib/sportfunNames";
 import {
+  getSportfunMetadataCacheEntry,
+  isSportfunMetadataFresh,
+  setSportfunMetadataCacheEntry,
+  type SportfunTokenMetadata,
+} from "@/lib/sportfunMetadataCache";
+import {
   BASE_USDC_DECIMALS,
   DEVPLAYERS_EVENTS_ABI,
   FDFPAIR_EVENTS_ABI,
@@ -178,6 +184,22 @@ function isNumericUri(value: string): boolean {
 
 function buildAthleteMetadataUrl(tokenId: bigint): string {
   return `${SPORTFUN_ATHLETE_METADATA_BASE}/${tokenId.toString(10)}/metadata.json`;
+}
+
+function parseErc1155Metadata(metadata: unknown): SportfunTokenMetadata | null {
+  if (!metadata || typeof metadata !== "object") return null;
+  const obj = metadata as Record<string, unknown>;
+  const name = typeof obj.name === "string" ? obj.name : undefined;
+  const description = typeof obj.description === "string" ? obj.description : undefined;
+  const image =
+    typeof obj.image_url === "string"
+      ? obj.image_url
+      : typeof obj.image === "string"
+        ? obj.image
+        : undefined;
+  const attributes = obj.attributes;
+  if (!name && !description && !image && !attributes) return null;
+  return { name, description, image, attributes };
 }
 
 function extractAttributeValue(attributes: unknown, matchKey: (key: string) => boolean): unknown {
@@ -536,9 +558,25 @@ async function fetchCurrentPrices(params: {
 }
 
 async function getErc1155Metadata(params: { contractAddress: string; tokenId: bigint }) {
-  const key = `sportfun:meta:${params.contractAddress}:${params.tokenId.toString(10)}`;
+  const cacheKey = `${params.contractAddress}:${params.tokenId.toString(10)}`;
+  const key = `sportfun:meta:${cacheKey}`;
   return withCache(key, 86400, async () => {
+    const now = Date.now();
+    const localCached = getSportfunMetadataCacheEntry(cacheKey);
+    if (isSportfunMetadataFresh(localCached, now)) {
+      return localCached?.metadata ?? null;
+    }
     try {
+      const cachedUri = localCached?.uri;
+      if (cachedUri) {
+        const metadata = await fetchMetadata(cachedUri);
+        const parsed = parseErc1155Metadata(metadata);
+        if (parsed) {
+          setSportfunMetadataCacheEntry(cacheKey, { updatedAt: now, uri: cachedUri, metadata: parsed });
+          return parsed;
+        }
+      }
+
       const data = encodeErc1155UriCall(params.tokenId);
       const result = await alchemyRpc("eth_call", [{ to: params.contractAddress, data }, "latest"]);
       const uriRaw = decodeAbiString(result as Hex).trim();
@@ -560,22 +598,22 @@ async function getErc1155Metadata(params: { contractAddress: string; tokenId: bi
           if (fallback !== resolvedUri) metadata = await fetchMetadata(fallback);
         }
       }
-      if (!metadata || typeof metadata !== "object") return null;
-
-      const obj = metadata as Record<string, unknown>;
-      return {
-        name: typeof obj.name === "string" ? obj.name : undefined,
-        description: typeof obj.description === "string" ? obj.description : undefined,
-        image:
-          typeof obj.image_url === "string"
-            ? obj.image_url
-            : typeof obj.image === "string"
-              ? obj.image
-              : undefined,
-        attributes: obj.attributes,
-      };
+      const parsed = parseErc1155Metadata(metadata);
+      setSportfunMetadataCacheEntry(cacheKey, {
+        updatedAt: now,
+        uri: resolvedUri ?? localCached?.uri,
+        metadata: parsed ?? null,
+      });
+      return parsed;
     } catch {
-      return null;
+      if (localCached) {
+        setSportfunMetadataCacheEntry(cacheKey, {
+          updatedAt: now,
+          uri: localCached.uri,
+          metadata: localCached.metadata ?? null,
+        });
+      }
+      return localCached?.metadata ?? null;
     }
   });
 }
