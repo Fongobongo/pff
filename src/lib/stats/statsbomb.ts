@@ -1,5 +1,9 @@
 import { withCache } from "@/lib/stats/cache";
 import { kvEnabled, kvGetJson, kvSetJson } from "@/lib/kv";
+import { env } from "@/lib/env";
+import { getDb } from "@/lib/db";
+import { statsbombMatchStats } from "@/db/schema";
+import { eq, sql } from "drizzle-orm";
 import {
   FOOTBALL_STAT_KEYS,
   type FootballCompetitionTier,
@@ -10,6 +14,83 @@ import {
 import { toFiniteNumber } from "@/lib/stats/utils";
 
 const STATSBOMB_BASE_URL = "https://raw.githubusercontent.com/statsbomb/open-data/master/data";
+const STATSBOMB_TABLE_NAME = "statsbomb_match_stats";
+
+let statsbombTableReady = false;
+
+async function ensureStatsbombTable(): Promise<void> {
+  if (statsbombTableReady) return;
+  if (!env.DATABASE_URL) return;
+  try {
+    const db = getDb();
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS ${sql.raw(STATSBOMB_TABLE_NAME)} (
+        match_id integer PRIMARY KEY,
+        competition_id integer,
+        season_id integer,
+        match_date text,
+        payload jsonb NOT NULL,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        updated_at timestamptz NOT NULL DEFAULT now()
+      )
+    `);
+    statsbombTableReady = true;
+  } catch {
+    // best-effort; fall back to cache if DB isn't available
+  }
+}
+
+async function getMatchStatsFromDb(matchId: number): Promise<StatsBombMatchStats | null> {
+  if (!env.DATABASE_URL) return null;
+  try {
+    await ensureStatsbombTable();
+    const db = getDb();
+    const rows = await db
+      .select({ payload: statsbombMatchStats.payload })
+      .from(statsbombMatchStats)
+      .where(eq(statsbombMatchStats.matchId, matchId))
+      .limit(1);
+    return (rows[0]?.payload as StatsBombMatchStats | undefined) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function saveMatchStatsToDb(params: {
+  matchId: number;
+  competitionId?: number;
+  seasonId?: number;
+  matchDate?: string;
+  payload: StatsBombMatchStats;
+}): Promise<void> {
+  if (!env.DATABASE_URL) return;
+  try {
+    await ensureStatsbombTable();
+    const db = getDb();
+    await db
+      .insert(statsbombMatchStats)
+      .values({
+        matchId: params.matchId,
+        competitionId: params.competitionId,
+        seasonId: params.seasonId,
+        matchDate: params.matchDate,
+        payload: params.payload,
+        updatedAt: new Date(),
+      })
+      .onConflictDoUpdate({
+        target: statsbombMatchStats.matchId,
+        set: {
+          competitionId: params.competitionId,
+          seasonId: params.seasonId,
+          matchDate: params.matchDate,
+          payload: params.payload,
+          updatedAt: new Date(),
+        },
+      });
+  } catch {
+    // ignore persistence errors
+  }
+}
 
 export const STATSBOMB_MAPPED_FIELDS = [
   "appearance_start",
@@ -386,6 +467,14 @@ export async function buildStatsBombMatchStats(options: {
     if (kvCached) return kvCached;
   }
   return withCache(cacheKey, 3600, async () => {
+    const dbCached = await getMatchStatsFromDb(matchId);
+    if (dbCached) {
+      if (kvEnabled()) {
+        void kvSetJson(cacheKey, dbCached);
+      }
+      return dbCached;
+    }
+
     const [events, lineups, matches] = await Promise.all([
       getStatsBombEvents(matchId),
       getStatsBombLineups(matchId),
@@ -774,6 +863,13 @@ export async function buildStatsBombMatchStats(options: {
   if (kvEnabled()) {
     void kvSetJson(cacheKey, result);
   }
+  void saveMatchStatsToDb({
+    matchId,
+    competitionId,
+    seasonId,
+    matchDate: match?.match_date,
+    payload: result,
+  });
   return result;
   });
 }

@@ -23,7 +23,7 @@
 - Step 5 (Soccer analytics + market expansion) updates:
   - Expanded StatsBomb competition list to the full open-data catalog.
   - Raised soccer analytics match limits up to 380/400 matches.
-  - Cached StatsBomb per-match stats (local + Vercel KV) to reduce repeat CPU work across soccer pages.
+  - Cached StatsBomb per-match stats (local + Vercel KV + Postgres/Supabase) to reduce repeat CPU work across soccer pages.
   - Market snapshot now scans token universe from 2025-08-01 and prioritizes metadata for inactive tokens.
   - Soccer competition pickers now use featured chips + collapsible full list.
   - Added defensive + GK leaderboards to soccer advanced stats.

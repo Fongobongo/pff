@@ -25,3 +25,13 @@ export const statsJobs = pgTable(
     keyIndex: uniqueIndex("stats_jobs_key_idx").on(table.key),
   })
 );
+
+export const statsbombMatchStats = pgTable("statsbomb_match_stats", {
+  matchId: integer("match_id").primaryKey(),
+  competitionId: integer("competition_id"),
+  seasonId: integer("season_id"),
+  matchDate: text("match_date"),
+  payload: jsonb("payload").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
