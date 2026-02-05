@@ -19,6 +19,9 @@ const envSchema = z.object({
   // JSON overrides for football-data.org tier mapping (e.g. {"PL":"A","CL":"A"}).
   FOOTBALL_TIER_OVERRIDES: z.string().min(1).optional(),
 
+  // StatsBomb storage mode: "hybrid" (default) or "db".
+  STATSBOMB_STORAGE_MODE: z.string().min(1).optional(),
+
 });
 
 const parsed = envSchema.parse({
@@ -28,6 +31,7 @@ const parsed = envSchema.parse({
   ALCHEMY_API_KEY: process.env.ALCHEMY_API_KEY,
   FOOTBALL_DATA_API_KEY: process.env.FOOTBALL_DATA_API_KEY,
   FOOTBALL_TIER_OVERRIDES: process.env.FOOTBALL_TIER_OVERRIDES,
+  STATSBOMB_STORAGE_MODE: process.env.STATSBOMB_STORAGE_MODE,
 });
 
 export const env = {

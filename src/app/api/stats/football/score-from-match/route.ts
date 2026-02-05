@@ -10,6 +10,7 @@ const querySchema = z.object({
   season_id: z.coerce.number().int().min(1).optional(),
   competition_tier: z.enum(FOOTBALL_COMPETITION_TIERS).optional(),
   big_match_bonus: z.coerce.number().finite().min(0).optional(),
+  refresh: z.coerce.boolean().optional(),
 });
 
 export async function GET(request: Request) {
@@ -20,12 +21,14 @@ export async function GET(request: Request) {
     season_id: url.searchParams.get("season_id") ?? undefined,
     competition_tier: url.searchParams.get("competition_tier") ?? undefined,
     big_match_bonus: url.searchParams.get("big_match_bonus") ?? undefined,
+    refresh: url.searchParams.get("refresh") ?? undefined,
   });
 
   const stats = await buildStatsBombMatchStats({
     matchId: query.match_id,
     competitionId: query.competition_id,
     seasonId: query.season_id,
+    refresh: query.refresh,
   });
 
   const resolvedTier =

@@ -65,9 +65,10 @@ async function buildTournamentSummary(options: {
   matches: Array<{ match_id: number; match_date?: string }>;
   competitionTier?: FootballCompetitionTier;
   topCount: number;
+  refresh?: boolean;
   onProgress?: (processed: number, total: number) => void;
 }): Promise<TournamentSummary> {
-  const { competitionId, seasonId, matches, competitionTier, topCount, onProgress } = options;
+  const { competitionId, seasonId, matches, competitionTier, topCount, refresh, onProgress } = options;
 
   const playerTotals = new Map<
     number,
@@ -90,6 +91,7 @@ async function buildTournamentSummary(options: {
       matchId: match.match_id,
       competitionId,
       seasonId,
+      refresh,
     });
 
     for (const player of stats.players) {
@@ -191,6 +193,7 @@ async function runTournamentSummaryJob(options: {
   matches: Array<{ match_id: number; match_date?: string }>;
   competitionTier?: FootballCompetitionTier;
   topCount: number;
+  refresh?: boolean;
 }) {
   const { jobId, cacheKey, competitionId, seasonId, matches, competitionTier, topCount } = options;
   await updateJob(jobId, { status: "running", total: matches.length, processed: 0 });
@@ -201,6 +204,7 @@ async function runTournamentSummaryJob(options: {
       matches,
       competitionTier,
       topCount,
+      refresh: options.refresh,
       onProgress: (processed) => {
         void updateJob(jobId, { processed });
       },
@@ -267,6 +271,7 @@ export async function GET(request: Request) {
         matches: limited,
         competitionTier,
         topCount,
+        refresh: query.refresh,
       });
     }
 
@@ -302,6 +307,7 @@ export async function GET(request: Request) {
     matches: limited,
     competitionTier,
     topCount,
+    refresh: query.refresh,
   });
   setCached(cacheKey, summary, 3600);
   return respondSummary(summary, format);

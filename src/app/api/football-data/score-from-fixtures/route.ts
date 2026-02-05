@@ -19,6 +19,7 @@ const querySchema = z.object({
   statsbomb_season_id: z.coerce.number().int().min(1),
   limit: z.coerce.number().int().min(1).max(200).optional(),
   include_scores: z.coerce.boolean().optional(),
+  refresh: z.coerce.boolean().optional(),
 });
 
 type FixtureMatch = {
@@ -112,6 +113,7 @@ export async function GET(request: Request) {
     statsbomb_season_id: url.searchParams.get("statsbomb_season_id"),
     limit: url.searchParams.get("limit") ?? undefined,
     include_scores: url.searchParams.get("include_scores") ?? undefined,
+    refresh: url.searchParams.get("refresh") ?? undefined,
   });
 
   const data = await footballDataFetch<FootballDataMatchesResponse>(
@@ -156,6 +158,7 @@ export async function GET(request: Request) {
         matchId: match.match_id,
         competitionId: query.statsbomb_competition_id,
         seasonId: query.statsbomb_season_id,
+        refresh: query.refresh,
       });
 
       const players = stats.players.map((player) => ({

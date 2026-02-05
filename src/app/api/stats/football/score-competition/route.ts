@@ -9,6 +9,7 @@ const querySchema = z.object({
   limit: z.coerce.number().int().min(1).max(400).optional(),
   include_players: z.coerce.boolean().optional(),
   recent: z.coerce.boolean().optional(),
+  refresh: z.coerce.boolean().optional(),
 });
 
 async function mapWithConcurrency<T, R>(
@@ -40,6 +41,7 @@ export async function GET(request: Request) {
     limit: url.searchParams.get("limit") ?? undefined,
     include_players: url.searchParams.get("include_players") ?? undefined,
     recent: url.searchParams.get("recent") ?? undefined,
+    refresh: url.searchParams.get("refresh") ?? undefined,
   });
 
   const competitionTier = await getCompetitionTierById(query.competition_id);
@@ -62,6 +64,7 @@ export async function GET(request: Request) {
       matchId: match.match_id,
       competitionId: query.competition_id,
       seasonId: query.season_id,
+      refresh: query.refresh,
     });
 
     const players = includePlayers

@@ -15,6 +15,8 @@ import { toFiniteNumber } from "@/lib/stats/utils";
 
 const STATSBOMB_BASE_URL = "https://raw.githubusercontent.com/statsbomb/open-data/master/data";
 const STATSBOMB_TABLE_NAME = "statsbomb_match_stats";
+const STATSBOMB_STORAGE_MODE = (env.STATSBOMB_STORAGE_MODE ?? "hybrid").toLowerCase();
+const STATSBOMB_USE_KV = !["db", "database", "db-only", "db_only"].includes(STATSBOMB_STORAGE_MODE);
 
 let statsbombTableReady = false;
 
@@ -459,22 +461,13 @@ export async function buildStatsBombMatchStats(options: {
   matchId: number;
   competitionId?: number;
   seasonId?: number;
+  refresh?: boolean;
 }): Promise<StatsBombMatchStats> {
-  const { matchId, competitionId, seasonId } = options;
+  const { matchId, competitionId, seasonId, refresh } = options;
   const cacheKey = `statsbomb:match-stats:${matchId}:${competitionId ?? "na"}:${seasonId ?? "na"}`;
-  if (kvEnabled()) {
-    const kvCached = await kvGetJson<StatsBombMatchStats>(cacheKey);
-    if (kvCached) return kvCached;
-  }
-  return withCache(cacheKey, 3600, async () => {
-    const dbCached = await getMatchStatsFromDb(matchId);
-    if (dbCached) {
-      if (kvEnabled()) {
-        void kvSetJson(cacheKey, dbCached);
-      }
-      return dbCached;
-    }
+  const useKv = STATSBOMB_USE_KV && kvEnabled();
 
+  const computeAndPersist = async (): Promise<StatsBombMatchStats> => {
     const [events, lineups, matches] = await Promise.all([
       getStatsBombEvents(matchId),
       getStatsBombLineups(matchId),
@@ -848,28 +841,49 @@ export async function buildStatsBombMatchStats(options: {
     }
   }
 
-  const result = {
-    matchId,
-    competitionId,
-    seasonId,
-    teams: teamSummary,
-    players: playerArray,
-    coverage: {
-      mappedFields: [...STATSBOMB_MAPPED_FIELDS],
-      unmappedFields: [],
-      scoringMissing: FOOTBALL_STAT_KEYS.filter((key) => !STATSBOMB_MAPPED_FIELDS.includes(key)),
-    },
+    const result = {
+      matchId,
+      competitionId,
+      seasonId,
+      teams: teamSummary,
+      players: playerArray,
+      coverage: {
+        mappedFields: [...STATSBOMB_MAPPED_FIELDS],
+        unmappedFields: [],
+        scoringMissing: FOOTBALL_STAT_KEYS.filter((key) => !STATSBOMB_MAPPED_FIELDS.includes(key)),
+      },
+    };
+    if (useKv) {
+      void kvSetJson(cacheKey, result);
+    }
+    void saveMatchStatsToDb({
+      matchId,
+      competitionId,
+      seasonId,
+      matchDate: match?.match_date,
+      payload: result,
+    });
+    return result;
   };
-  if (kvEnabled()) {
-    void kvSetJson(cacheKey, result);
+
+  if (refresh) {
+    return computeAndPersist();
   }
-  void saveMatchStatsToDb({
-    matchId,
-    competitionId,
-    seasonId,
-    matchDate: match?.match_date,
-    payload: result,
-  });
-  return result;
+
+  if (useKv) {
+    const kvCached = await kvGetJson<StatsBombMatchStats>(cacheKey);
+    if (kvCached) return kvCached;
+  }
+
+  return withCache(cacheKey, 3600, async () => {
+    const dbCached = await getMatchStatsFromDb(matchId);
+    if (dbCached) {
+      if (useKv) {
+        void kvSetJson(cacheKey, dbCached);
+      }
+      return dbCached;
+    }
+
+    return computeAndPersist();
   });
 }
