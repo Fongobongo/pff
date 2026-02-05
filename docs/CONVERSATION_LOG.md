@@ -90,3 +90,14 @@ This file tracks key decisions and requirements from our chats.
 - Persisted tournament summary job status to Postgres when `DATABASE_URL` is configured.
 - Added score-based fallback + tie-break rules for fixture matching.
 - Expanded league-specific alias dictionaries for fixture matching.
+
+## 2026-02-05
+
+- Added env-driven Sport.fun athlete metadata base handling:
+  - New `SPORTFUN_ATHLETE_METADATA_BASE` env var (supports `{id}` template or base URL).
+  - Shared resolver for ERC-1155 `uri()` with numeric ID handling + fallback to tokenId.
+  - Metadata cache entries now store the active template for invalidation.
+- Updated Sport.fun metadata usage in market snapshots and portfolio API to use the shared resolver.
+- Added `scripts/sportfun_metadata_probe.mjs` to probe `uri()` values, candidate URLs, and recommend a metadata base.
+- Added caching + optional concurrency env override for `GET /api/stats/football/score-competition`.
+- Fixed a stray brace in `statsbomb.ts` that caused syntax errors in the match stats pipeline.

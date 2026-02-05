@@ -10,6 +10,7 @@
     "db:generate": "drizzle-kit generate:pg",
     "db:migrate": "drizzle-kit up:pg",
     "sportfun:discover": "node scripts/sportfun_discover.mjs",
+    "sportfun:probe": "node scripts/sportfun_metadata_probe.mjs",
     "test:stats": "tsx scripts/test_stats.ts"
   },
   "dependencies": {

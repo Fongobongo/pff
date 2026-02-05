@@ -14,6 +14,7 @@ export type SportfunTokenMetadata = {
 export type SportfunMetadataCacheEntry = {
   updatedAt: number;
   uri?: string;
+  template?: string;
   metadata?: SportfunTokenMetadata | null;
   error?: string;
 };

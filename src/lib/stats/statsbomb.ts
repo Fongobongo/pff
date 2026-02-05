@@ -638,7 +638,6 @@ export async function buildStatsBombMatchStats(options: {
           addStat(player, "big_chances_created", 1);
         }
       }
-    }
 
     if (typeName === "Foul Won") {
       addStat(player, "fouls_won", 1);
@@ -841,29 +840,29 @@ export async function buildStatsBombMatchStats(options: {
     }
   }
 
-    const result = {
-      matchId,
-      competitionId,
-      seasonId,
-      teams: teamSummary,
-      players: playerArray,
-      coverage: {
-        mappedFields: [...STATSBOMB_MAPPED_FIELDS],
-        unmappedFields: [],
-        scoringMissing: FOOTBALL_STAT_KEYS.filter((key) => !STATSBOMB_MAPPED_FIELDS.includes(key)),
-      },
-    };
-    if (useKv) {
-      void kvSetJson(cacheKey, result);
-    }
-    void saveMatchStatsToDb({
-      matchId,
-      competitionId,
-      seasonId,
-      matchDate: match?.match_date,
-      payload: result,
-    });
-    return result;
+  const result = {
+    matchId,
+    competitionId,
+    seasonId,
+    teams: teamSummary,
+    players: playerArray,
+    coverage: {
+      mappedFields: [...STATSBOMB_MAPPED_FIELDS],
+      unmappedFields: [],
+      scoringMissing: FOOTBALL_STAT_KEYS.filter((key) => !STATSBOMB_MAPPED_FIELDS.includes(key)),
+    },
+  };
+  if (useKv) {
+    void kvSetJson(cacheKey, result);
+  }
+  void saveMatchStatsToDb({
+    matchId,
+    competitionId,
+    seasonId,
+    matchDate: match?.match_date,
+    payload: result,
+  });
+  return result;
   };
 
   if (refresh) {

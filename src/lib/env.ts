@@ -22,6 +22,9 @@ const envSchema = z.object({
   // StatsBomb storage mode: "hybrid" (default) or "db".
   STATSBOMB_STORAGE_MODE: z.string().min(1).optional(),
 
+  // StatsBomb scoring concurrency (optional).
+  STATSBOMB_SCORE_CONCURRENCY: z.coerce.number().int().min(1).max(6).optional(),
+
 });
 
 const parsed = envSchema.parse({
@@ -32,6 +35,7 @@ const parsed = envSchema.parse({
   FOOTBALL_DATA_API_KEY: process.env.FOOTBALL_DATA_API_KEY,
   FOOTBALL_TIER_OVERRIDES: process.env.FOOTBALL_TIER_OVERRIDES,
   STATSBOMB_STORAGE_MODE: process.env.STATSBOMB_STORAGE_MODE,
+  STATSBOMB_SCORE_CONCURRENCY: process.env.STATSBOMB_SCORE_CONCURRENCY,
 });
 
 export const env = {

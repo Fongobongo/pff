@@ -26,7 +26,42 @@ export const SPORTFUN_DEV_PLAYERS_CONTRACTS = SPORTFUN_PLAYER_TOKENS.map((x) => 
 
 export const BASE_USDC = "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913";
 export const BASE_USDC_DECIMALS = 6;
-export const SPORTFUN_ATHLETE_METADATA_BASE = "https://api.sport.fun/athletes";
+
+const DEFAULT_SPORTFUN_ATHLETE_METADATA_BASE = "https://api.sport.fun/athletes";
+
+function normalizeMetadataBase(base: string): string {
+  return base.trim().replace(/\/+$/, "");
+}
+
+export function getSportfunAthleteMetadataBase(): string {
+  const raw = process.env.SPORTFUN_ATHLETE_METADATA_BASE;
+  if (raw && raw.trim()) return raw.trim();
+  return DEFAULT_SPORTFUN_ATHLETE_METADATA_BASE;
+}
+
+export function buildSportfunAthleteMetadataTemplate(base: string): string {
+  const trimmed = base.trim();
+  if (!trimmed) return `${DEFAULT_SPORTFUN_ATHLETE_METADATA_BASE}/{id}/metadata.json`;
+  if (trimmed.includes("{id}")) return trimmed;
+  return `${normalizeMetadataBase(trimmed)}/{id}/metadata.json`;
+}
+
+export function getSportfunAthleteMetadataTemplate(): string {
+  return buildSportfunAthleteMetadataTemplate(getSportfunAthleteMetadataBase());
+}
+
+export function getSportfunAthleteMetadataDefaults(): {
+  base: string;
+  template: string;
+  defaultBase: string;
+  defaultTemplate: string;
+} {
+  const base = getSportfunAthleteMetadataBase();
+  const template = buildSportfunAthleteMetadataTemplate(base);
+  const defaultBase = DEFAULT_SPORTFUN_ATHLETE_METADATA_BASE;
+  const defaultTemplate = buildSportfunAthleteMetadataTemplate(defaultBase);
+  return { base, template, defaultBase, defaultTemplate };
+}
 
 export const SPORTFUN_TOPICS = {
   PlayerBatchTransfer:

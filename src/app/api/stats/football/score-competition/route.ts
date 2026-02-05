@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { buildStatsBombMatchStats, getCompetitionTierById, getStatsBombMatches } from "@/lib/stats/statsbomb";
 import { scoreFootball } from "@/lib/stats/football";
+import { getCached, setCached } from "@/lib/stats/cache";
+import { env } from "@/lib/env";
 
 const querySchema = z.object({
   competition_id: z.coerce.number().int().min(1),
@@ -11,6 +13,12 @@ const querySchema = z.object({
   recent: z.coerce.boolean().optional(),
   refresh: z.coerce.boolean().optional(),
 });
+
+const SCORE_COMPETITION_CACHE_TTL_SECONDS = 60 * 60;
+const SCORE_COMPETITION_CONCURRENCY = Math.max(
+  1,
+  Math.min(6, env.STATSBOMB_SCORE_CONCURRENCY ?? 2)
+);
 
 async function mapWithConcurrency<T, R>(
   items: T[],
@@ -44,6 +52,16 @@ export async function GET(request: Request) {
     refresh: url.searchParams.get("refresh") ?? undefined,
   });
 
+  const includePlayers = query.include_players ?? true;
+  const cacheKey = `statsbomb:score-competition:${query.competition_id}:${query.season_id}:${
+    query.limit ?? "all"
+  }:${query.recent ? "recent" : "all"}:${includePlayers ? "players" : "teams"}`;
+
+  if (!query.refresh) {
+    const cached = getCached<ScoreCompetitionResponse>(cacheKey);
+    if (cached) return NextResponse.json(cached);
+  }
+
   const competitionTier = await getCompetitionTierById(query.competition_id);
   const matches = await getStatsBombMatches(query.competition_id, query.season_id);
   const ordered = [...matches].sort((a, b) => {
@@ -57,9 +75,8 @@ export async function GET(request: Request) {
       ? ordered.slice(-query.limit)
       : ordered.slice(0, query.limit)
     : ordered;
-  const includePlayers = query.include_players ?? true;
 
-  const scored = await mapWithConcurrency(limited, 2, async (match) => {
+  const scored = await mapWithConcurrency(limited, SCORE_COMPETITION_CONCURRENCY, async (match) => {
     const stats = await buildStatsBombMatchStats({
       matchId: match.match_id,
       competitionId: query.competition_id,
@@ -91,7 +108,7 @@ export async function GET(request: Request) {
     };
   });
 
-  return NextResponse.json({
+  const response: ScoreCompetitionResponse = {
     sport: "football",
     source: "statsbomb_open_data",
     competitionId: query.competition_id,
@@ -99,5 +116,38 @@ export async function GET(request: Request) {
     competitionTier,
     matchCount: limited.length,
     matches: scored,
-  });
+  };
+
+  setCached(cacheKey, response, SCORE_COMPETITION_CACHE_TTL_SECONDS);
+  return NextResponse.json(response);
 }
+
+type ScoreCompetitionResponse = {
+  sport: "football";
+  source: "statsbomb_open_data";
+  competitionId: number;
+  seasonId: number;
+  competitionTier?: Awaited<ReturnType<typeof getCompetitionTierById>>;
+  matchCount: number;
+  matches: Array<{
+    matchId: number;
+    matchDate?: string;
+    homeTeam?: string;
+    awayTeam?: string;
+    homeScore?: number;
+    awayScore?: number;
+    players: Array<{
+      playerId: number;
+      playerName: string;
+      teamName?: string;
+      position?: string;
+      minutesPlayed?: number;
+      matchResult?: string;
+      stats?: Record<string, number>;
+      xg?: number;
+      xa?: number;
+      score?: { total?: number; totalRounded?: number };
+    }>;
+    coverage: unknown;
+  }>;
+};

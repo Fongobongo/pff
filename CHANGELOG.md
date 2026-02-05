@@ -63,6 +63,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Improved fixture/team matching with aliases and similarity scoring.
 - Added match scoring fallback + tie-break rules for ambiguous fixtures.
 - Expanded league-specific team alias maps for fixture matching.
+- Sport.fun athlete metadata base config via `SPORTFUN_ATHLETE_METADATA_BASE` (supports `{id}` template).
+- Shared Sport.fun ERC-1155 metadata resolver + cache template tracking.
+- Added `scripts/sportfun_metadata_probe.mjs` for probing `uri()` metadata sources.
+- Added caching and concurrency override for `GET /api/stats/football/score-competition`.
 
 ### Changed
 - Fixed server-side API fetching to derive the deployment base URL (Vercel env/headers) instead of hardcoded localhost or relative URLs.
@@ -81,4 +85,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - USDC delta is computed from receipt `Transfer` logs when receipts are available (more reliable than transfer correlation by tx hash).
   - Added debug/sanity checks for decoded share deltas vs ERC-1155 deltas (mismatch counters + samples).
   - Added basic counters for edge cases (gift buys, sells where proceeds go to another recipient).
-  - Added activity pagination via `activityCursor` and a local decoded-receipt cache (memory + disk) to reduce receipt decoding overhead.
+- Added activity pagination via `activityCursor` and a local decoded-receipt cache (memory + disk) to reduce receipt decoding overhead.
+- Sport.fun metadata fetching now handles numeric `uri()` values with a base-template fallback.
+- Fixed a stray brace in StatsBomb match stats parsing that broke TypeScript parsing.

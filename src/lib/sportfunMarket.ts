@@ -7,17 +7,17 @@ import {
   getSportfunMetadataCacheEntry,
   isSportfunMetadataFresh,
   setSportfunMetadataCacheEntry,
-  type SportfunTokenMetadata,
 } from "@/lib/sportfunMetadataCache";
 import {
   BASE_USDC_DECIMALS,
   DEVPLAYERS_EVENTS_ABI,
   FDFPAIR_EVENTS_ABI,
   FDFPAIR_READ_ABI,
-  SPORTFUN_ATHLETE_METADATA_BASE,
   SPORTFUN_PLAYER_TOKENS,
   SPORTFUN_TOPICS,
+  getSportfunAthleteMetadataDefaults,
 } from "@/lib/sportfun";
+import { resolveSportfunMetadataFromUri } from "@/lib/sportfunMetadata";
 import {
   decodeAbiParameters,
   decodeEventLog,
@@ -128,29 +128,9 @@ function parseBigIntish(value: unknown): bigint {
   return BigInt(value);
 }
 
-function normalizeToHttp(uri: string): string {
-  if (uri.startsWith("ipfs://")) {
-    let rest = uri.slice("ipfs://".length);
-    if (rest.startsWith("ipfs/")) rest = rest.slice("ipfs/".length);
-    return `https://ipfs.io/ipfs/${rest}`;
-  }
-  if (uri.startsWith("ar://")) {
-    return `https://arweave.net/${uri.slice("ar://".length)}`;
-  }
-  return uri;
-}
-
 function decodeAbiString(hex: Hex): string {
   const [s] = decodeAbiParameters([{ type: "string" }], hex);
   return String(s);
-}
-
-function formatErc1155TokenIdHex(tokenId: bigint): string {
-  return tokenId.toString(16).padStart(64, "0");
-}
-
-function expandErc1155Uri(template: string, tokenId: bigint): string {
-  return template.replace(/\{id\}/gi, formatErc1155TokenIdHex(tokenId));
 }
 
 function encodeErc1155UriCall(tokenId: bigint): Hex {
@@ -159,48 +139,6 @@ function encodeErc1155UriCall(tokenId: bigint): Hex {
   return `${selector}${tokenHex}` as Hex;
 }
 
-function decodeDataUriJson(uri: string): unknown | null {
-  if (!uri.startsWith("data:")) return null;
-  const idx = uri.indexOf(",");
-  if (idx === -1) return null;
-  const meta = uri.slice(0, idx);
-  const payload = uri.slice(idx + 1);
-  if (!meta.includes("application/json")) return null;
-  try {
-    if (meta.includes(";base64")) {
-      const raw = Buffer.from(payload, "base64").toString("utf8");
-      return JSON.parse(raw);
-    }
-    const raw = decodeURIComponent(payload);
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
-}
-
-function isNumericUri(value: string): boolean {
-  return /^\d+$/.test(value.trim());
-}
-
-function buildAthleteMetadataUrl(tokenId: bigint): string {
-  return `${SPORTFUN_ATHLETE_METADATA_BASE}/${tokenId.toString(10)}/metadata.json`;
-}
-
-function parseErc1155Metadata(metadata: unknown): SportfunTokenMetadata | null {
-  if (!metadata || typeof metadata !== "object") return null;
-  const obj = metadata as Record<string, unknown>;
-  const name = typeof obj.name === "string" ? obj.name : undefined;
-  const description = typeof obj.description === "string" ? obj.description : undefined;
-  const image =
-    typeof obj.image_url === "string"
-      ? obj.image_url
-      : typeof obj.image === "string"
-        ? obj.image
-        : undefined;
-  const attributes = obj.attributes;
-  if (!name && !description && !image && !attributes) return null;
-  return { name, description, image, attributes };
-}
 
 function extractAttributeValue(attributes: unknown, matchKey: (key: string) => boolean): unknown {
   if (!attributes) return undefined;
@@ -559,21 +497,32 @@ async function fetchCurrentPrices(params: {
 
 async function getErc1155Metadata(params: { contractAddress: string; tokenId: bigint }) {
   const cacheKey = `${params.contractAddress}:${params.tokenId.toString(10)}`;
-  const key = `sportfun:meta:${cacheKey}`;
+  const { template, defaultTemplate } = getSportfunAthleteMetadataDefaults();
+  const key = `sportfun:meta:${cacheKey}:${template}`;
   return withCache(key, 86400, async () => {
     const now = Date.now();
     const localCached = getSportfunMetadataCacheEntry(cacheKey);
-    if (isSportfunMetadataFresh(localCached, now)) {
+    const templateChanged = Boolean(localCached?.template && localCached.template !== template);
+    if (isSportfunMetadataFresh(localCached, now) && !templateChanged) {
       return localCached?.metadata ?? null;
     }
     try {
-      const cachedUri = localCached?.uri;
+      const cachedUri = !templateChanged ? localCached?.uri : undefined;
       if (cachedUri) {
-        const metadata = await fetchMetadata(cachedUri);
-        const parsed = parseErc1155Metadata(metadata);
-        if (parsed) {
-          setSportfunMetadataCacheEntry(cacheKey, { updatedAt: now, uri: cachedUri, metadata: parsed });
-          return parsed;
+        const resolved = await resolveSportfunMetadataFromUri({
+          uriRaw: cachedUri,
+          tokenId: params.tokenId,
+          template,
+          defaultTemplate,
+        });
+        if (resolved.metadata) {
+          setSportfunMetadataCacheEntry(cacheKey, {
+            updatedAt: now,
+            uri: resolved.resolvedUri ?? cachedUri,
+            metadata: resolved.metadata,
+            template,
+          });
+          return resolved.metadata;
         }
       }
 
@@ -582,27 +531,18 @@ async function getErc1155Metadata(params: { contractAddress: string; tokenId: bi
       const uriRaw = decodeAbiString(result as Hex).trim();
       if (!uriRaw) return null;
 
-      const jsonInline = decodeDataUriJson(uriRaw);
-      let metadata: unknown | null = jsonInline;
-      let resolvedUri: string | null = null;
-      if (!metadata) {
-        if (isNumericUri(uriRaw)) {
-          resolvedUri = buildAthleteMetadataUrl(params.tokenId);
-        } else {
-          const expanded = expandErc1155Uri(uriRaw, params.tokenId);
-          resolvedUri = isNumericUri(expanded) ? buildAthleteMetadataUrl(params.tokenId) : normalizeToHttp(expanded);
-        }
-        metadata = resolvedUri ? await fetchMetadata(resolvedUri) : null;
-        if (!metadata) {
-          const fallback = buildAthleteMetadataUrl(params.tokenId);
-          if (fallback !== resolvedUri) metadata = await fetchMetadata(fallback);
-        }
-      }
-      const parsed = parseErc1155Metadata(metadata);
+      const resolved = await resolveSportfunMetadataFromUri({
+        uriRaw,
+        tokenId: params.tokenId,
+        template,
+        defaultTemplate,
+      });
+      const parsed = resolved.metadata;
       setSportfunMetadataCacheEntry(cacheKey, {
         updatedAt: now,
-        uri: resolvedUri ?? localCached?.uri,
+        uri: resolved.resolvedUri ?? localCached?.uri,
         metadata: parsed ?? null,
+        template,
       });
       return parsed;
     } catch {
@@ -611,21 +551,12 @@ async function getErc1155Metadata(params: { contractAddress: string; tokenId: bi
           updatedAt: now,
           uri: localCached.uri,
           metadata: localCached.metadata ?? null,
+          template,
         });
       }
       return localCached?.metadata ?? null;
     }
   });
-}
-
-async function fetchMetadata(url: string) {
-  const res = await fetch(url, { next: { revalidate: 86400 } });
-  if (!res.ok) return null;
-  try {
-    return await res.json();
-  } catch {
-    return null;
-  }
 }
 
 async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
