@@ -59,10 +59,8 @@ async function runPageChecks() {
 }
 
 async function runApiChecks() {
-  const market = await fetchText(
-    "/api/sportfun/market?sport=nfl&windowHours=24&trendDays=30&maxTokens=120",
-    "desktop"
-  );
+  const marketPath = `/api/sportfun/market?sport=nfl&windowHours=24&trendDays=30&maxTokens=120&cacheBust=${Date.now()}`;
+  const market = await fetchText(marketPath, "desktop");
   assert.equal(market.status, 200, "market API should return 200");
   const marketJson = JSON.parse(market.text) as {
     stats?: {

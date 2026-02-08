@@ -865,12 +865,41 @@ export async function getSportfunMarketSnapshot(params: {
         }
       }
 
-      const tokenIds = await getTokenUniverse(params.sport, TOKEN_UNIVERSE_DAYS);
+      const nflFallbackResultPromise =
+        params.sport === "nfl" ? getNflFallbackTokenMeta() : Promise.resolve(null);
+
+      let tokenIds: string[] = [];
+      try {
+        tokenIds = await getTokenUniverse(params.sport, TOKEN_UNIVERSE_DAYS);
+      } catch {
+        tokenIds = [];
+      }
+
+      const nflFallbackResult = await nflFallbackResultPromise;
+      if (!tokenIds.length && nflFallbackResult?.rows.length) {
+        tokenIds = Array.from(new Set(nflFallbackResult.rows.map((row) => row.tokenIdDec))).sort((a, b) => {
+          const left = BigInt(a);
+          const right = BigInt(b);
+          if (left === right) return 0;
+          return left < right ? -1 : 1;
+        });
+        console.warn(
+          `[sportfun-market] using fallback token universe sport=${params.sport} count=${tokenIds.length} source=${nflFallbackResult.source}`
+        );
+      }
+
       const tokenIdBigInts = tokenIds.map((id) => BigInt(id));
 
       const contracts = getSportContracts(params.sport);
       const fdfPair = contracts[0].fdfPair;
-      const priceMap = await fetchCurrentPrices({ fdfPair, tokenIds: tokenIdBigInts });
+      let priceMap = new Map<string, bigint>();
+      if (tokenIdBigInts.length) {
+        try {
+          priceMap = await fetchCurrentPrices({ fdfPair, tokenIds: tokenIdBigInts });
+        } catch {
+          priceMap = new Map<string, bigint>();
+        }
+      }
 
       const tokens = tokenIds
         .map((tokenIdDec) => {
@@ -923,7 +952,6 @@ export async function getSportfunMarketSnapshot(params: {
       });
 
       const metaByToken = new Map(meta.map((m) => [m.tokenIdDec, m.metadata]));
-      const nflFallbackResult = params.sport === "nfl" ? await getNflFallbackTokenMeta() : null;
       const nflFallbackByToken = nflFallbackResult
         ? new Map(nflFallbackResult.rows.map((row) => [row.tokenIdDec, row]))
         : null;

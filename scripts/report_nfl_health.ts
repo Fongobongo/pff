@@ -52,7 +52,9 @@ async function main() {
   const projections = await checkJson(
     `/api/stats/nfl/projections?season=${season}&week=${week}&season_type=${seasonType}&source=auto`
   );
-  const market = await checkJson("/api/sportfun/market?sport=nfl&windowHours=24&trendDays=30&maxTokens=120");
+  const market = await checkJson(
+    `/api/sportfun/market?sport=nfl&windowHours=24&trendDays=30&maxTokens=120&cacheBust=${Date.now()}`
+  );
   const standings = await checkJson(`/api/stats/nfl/standings?season=${season}&game_type=${seasonType}`);
   const economics = await checkJson(`/api/stats/nfl/team-economics?sort=squad_value&dir=desc`);
 
