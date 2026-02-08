@@ -1,0 +1,649 @@
+{
+  "generatedAt": "2026-02-08T06:14:14.650Z",
+  "sourceUrl": "https://nfl-fun.vercel.app/data/players/players.json",
+  "rows": [
+    {
+      "tokenIdDec": "33526712",
+      "name": "Derrick Henry",
+      "position": "RB",
+      "team": "BAL",
+      "image": "https://s3-us-west-2.amazonaws.com/static.fantasydata.com/headshots/nfl/low-res/17959.png",
+      "isTradeable": true,
+      "supply": 5566457.08
+    },
+    {
+      "tokenIdDec": "67997479",
+      "name": "Josh Allen",
+      "position": "QB",
+      "team": "BUF",
+      "image": "https://s3-us-west-2.amazonaws.com/static.fantasydata.com/headshots/nfl/low-res/19801.png",
+      "isTradeable": true,
+      "supply": 6219146.39
+    },
+    {
+      "tokenIdDec": "79420307",
+      "name": "Jalen Hurts",
+      "position": "QB",
+      "team": "PHI",
+      "image": "https://s3-us-west-2.amazonaws.com/static.fantasydata.com/headshots/nfl/low-res/21831.png",
+      "isTradeable": true,
+      "supply": 6003336.18
+    },
+    {
+      "tokenIdDec": "88065636",
+      "name": "Jordan Love",
+      "position": "QB",
+      "team": "GB",
+      "image": "https://s3-us-west-2.amazonaws.com/static.fantasydata.com/headshots/nfl/low-res/21841.png",
+      "isTradeable": true,
+      "supply": 5558800.06
+    },
+    {
+      "tokenIdDec": "184212668",
+      "name": "J.K. Dobbins",
+      "position": "RB",
+      "team": "DEN",
+      "image": "https://s3-us-west-2.amazonaws.com/static.fantasydata.com/headshots/nfl/low-res/21674.png",
+      "isTradeable": true,
+      "supply": 5349248.3
+    },
+    {
+      "tokenIdDec": "202647757",
+      "name": "Sam LaPorta",
+      "position": "TE",
+      "team": "DET",
+      "image": "https://s3-us-west-2.amazonaws.com/static.fantasydata.com/headshots/nfl/low-res/23141.png",
+      "isTradeable": true,
+      "supply": 5546523.57
+    },
+    {
+      "tokenIdDec": "268596935",
+      "name": "Tyler Warren",
+      "position": "TE",
+      "team": "IND",
+      "image": "https://s3-us-west-2.amazonaws.com/static.fantasydata.com/headshots/nfl/low-res/0.png",
+      "isTradeable": true,
+      "supply": 5867562.3
+    },
+    {
+      "tokenIdDec": "280776288",
+      "name": "Michael Pittman Jr.",
+      "position": "WR",
+      "team": "IND",
+      "image": "https://s3-us-west-2.amazonaws.com/static.fantasydata.com/headshots/nfl/low-res/21744.png",
+      "isTradeable": true,
+      "supply": 5640398.54
+    },
+    {
+      "tokenIdDec": "298000720",
+      "name": "Jahmyr Gibbs",
+      "position": "RB",
+      "team": "DET",
+      "image": "https://s3-us-west-2.amazonaws.com/static.fantasydata.com/headshots/nfl/low-res/23200.png",
+      "isTradeable": true,
+      "supply": 6011343.92
+    },
+    {
+      "tokenIdDec": "344873876",
+      "name": "Puka Nacua",
+      "position": "WR",
+      "team": "LAR",
+      "isTradeable": true,
+      "supply": 5844905.39
+    },
+    {
+      "tokenIdDec": "350071857",
+      "name": "Rashee Rice",
+      "position": "WR",
+      "team": "KC",
+      "image": "https://s3-us-west-2.amazonaws.com/static.fantasydata.com/headshots/nfl/low-res/24120.png",
+      "isTradeable": true,
+      "supply": 5771732.76
+    },
+    {
+      "tokenIdDec": "363339787",
+      "name": "Emeka Egbuka",
+      "position": "WR",
+      "team": "TB",
+      "image": "https://s3-us-west-2.amazonaws.com/static.fantasydata.com/headshots/nfl/low-res/0.png",
+      "isTradeable": true,
+      "supply": 5741625.24
+    },
+    {
+      "tokenIdDec": "401615555",
+      "name": "Lamar Jackson",
+      "position": "QB",
+      "team": "BAL",
+      "image": "https://s3-us-west-2.amazonaws.com/static.fantasydata.com/headshots/nfl/low-res/19781.png",
+      "isTradeable": true,
+      "supply": 6083389.69
+    },
+    {
+      "tokenIdDec": "403250563",
+      "name": "Baker Mayfield",
+      "position": "QB",
+      "team": "TB",
+      "image": "https://s3-us-west-2.amazonaws.com/static.fantasydata.com/headshots/nfl/low-res/19790.png",
+      "isTradeable": true,
+      "supply": 5751726.96
+    },
+    {
+      "tokenIdDec": "439100286",
+      "name": "Jaxon Smith-Njigba",
+      "position": "WR",
+      "team": "SEA",
+      "image": "https://s3-us-west-2.amazonaws.com/static.fantasydata.com/headshots/nfl/low-res/23157.png",
+      "isTradeable": true,
+      "supply": 6258707.27
+    },
+    {
+      "tokenIdDec": "509502421",
+      "name": "Isiah Pacheco",
+      "position": "RB",
+      "team": "KC",
+      "image": "https://s3-us-west-2.amazonaws.com/static.fantasydata.com/headshots/nfl/low-res/23371.png",
+      "isTradeable": true,
+      "supply": 5457266.07
+    },
+    {
+      "tokenIdDec": "532139037",
+      "name": "James Cook III",
+      "position": "RB",
+      "team": "BUF",
+      "isTradeable": true,
+      "supply": 5857638.66
+    },
+    {
+      "tokenIdDec": "543182829",
+      "name": "Travis Kelce",
+      "position": "TE",
+      "team": "KC",
+      "image": "https://s3-us-west-2.amazonaws.com/static.fantasydata.com/headshots/nfl/low-res/15048.png",
+      "isTradeable": true,
+      "supply": 5487755.79
+    },
+    {
+      "tokenIdDec": "608240281",
+      "name": "Drake Maye",
+      "position": "QB",
+      "team": "NE",
+      "image": "https://s3-us-west-2.amazonaws.com/static.fantasydata.com/headshots/nfl/low-res/0.png",
+      "isTradeable": true,
+      "supply": 5773495.2
+    },
+    {
+      "tokenIdDec": "626101435",
+      "name": "Travis Etienne Jr.",
+      "position": "RB",
+      "team": "JAX",
+      "isTradeable": true,
+      "supply": 5312697.32
+    },
+    {
+      "tokenIdDec": "637063064",
+      "name": "TreVeyon Henderson",
+      "position": "RB",
+      "team": "NE",
+      "image": "https://s3-us-west-2.amazonaws.com/static.fantasydata.com/headshots/nfl/low-res/0.png",
+      "isTradeable": true,
+      "supply": 5672235.22
+    },
+    {
+      "tokenIdDec": "646914359",
+      "name": "Patrick Mahomes",
+      "position": "QB",
+      "team": "KC",
+      "image": "https://s3-us-west-2.amazonaws.com/static.fantasydata.com/headshots/nfl/low-res/18890.png",
+      "isTradeable": true,
+      "supply": 6043457.24
+    },
+    {
+      "tokenIdDec": "656282335",
+      "name": "De'Von Achane",
+      "position": "RB",
+      "team": "MIA",
+      "image": "https://s3-us-west-2.amazonaws.com/static.fantasydata.com/headshots/nfl/low-res/24179.png",
+      "isTradeable": true,
+      "supply": 6058696.73
+    },
+    {
+      "tokenIdDec": "679992678",
+      "name": "Brian Thomas Jr.",
+      "position": "WR",
+      "team": "JAX",
+      "isTradeable": true,
+      "supply": 5597901.04
+    },
+    {
+      "tokenIdDec": "708089183",
+      "name": "Oronde Gadsden",
+      "position": "TE",
+      "team": "LAC",
+      "image": "https://s3-us-west-2.amazonaws.com/static.fantasydata.com/headshots/nfl/low-res/0.png",
+      "isTradeable": true,
+      "supply": 5775536.17
+    },
+    {
+      "tokenIdDec": "769476837",
+      "name": "Dak Prescott",
+      "position": "QB",
+      "team": "DAL",
+      "image": "https://s3-us-west-2.amazonaws.com/static.fantasydata.com/headshots/nfl/low-res/18055.png",
+      "isTradeable": true,
+      "supply": 6079544.35
+    },
+    {
+      "tokenIdDec": "833812969",
+      "name": "Bo Nix",
+      "position": "QB",
+      "team": "DEN",
+      "image": "https://s3-us-west-2.amazonaws.com/static.fantasydata.com/headshots/nfl/low-res/0.png",
+      "isTradeable": true,
+      "supply": 5569493.2
+    },
+    {
+      "tokenIdDec": "850942466",
+      "name": "CeeDee Lamb",
+      "position": "WR",
+      "team": "DAL",
+      "image": "https://s3-us-west-2.amazonaws.com/static.fantasydata.com/headshots/nfl/low-res/21679.png",
+      "isTradeable": true,
+      "supply": 6031068.35
+    },
+    {
+      "tokenIdDec": "892204822",
+      "name": "Tetairoa McMillan",
+      "position": "WR",
+      "team": "CAR",
+      "image": "https://s3-us-west-2.amazonaws.com/static.fantasydata.com/headshots/nfl/low-res/0.png",
+      "isTradeable": true,
+      "supply": 5804516.68
+    },
+    {
+      "tokenIdDec": "942484606",
+      "name": "Zay Flowers",
+      "position": "WR",
+      "team": "BAL",
+      "image": "https://s3-us-west-2.amazonaws.com/static.fantasydata.com/headshots/nfl/low-res/23120.png",
+      "isTradeable": true,
+      "supply": 5370369.38
+    },
+    {
+      "tokenIdDec": "946323199",
+      "name": "Hunter Henry",
+      "position": "TE",
+      "team": "NE",
+      "image": "https://s3-us-west-2.amazonaws.com/static.fantasydata.com/headshots/nfl/low-res/17975.png",
+      "isTradeable": true,
+      "supply": 5502582.79
+    },
+    {
+      "tokenIdDec": "972599423",
+      "name": "Brock Bowers",
+      "position": "TE",
+      "team": "LV",
+      "image": "https://s3-us-west-2.amazonaws.com/static.fantasydata.com/headshots/nfl/low-res/0.png",
+      "isTradeable": true,
+      "supply": 5951280.91
+    },
+    {
+      "tokenIdDec": "1029815641",
+      "name": "Alvin Kamara",
+      "position": "RB",
+      "team": "NO",
+      "image": "https://s3-us-west-2.amazonaws.com/static.fantasydata.com/headshots/nfl/low-res/18878.png",
+      "isTradeable": true,
+      "supply": 5399573.24
+    },
+    {
+      "tokenIdDec": "1045355498",
+      "name": "Jonathan Taylor",
+      "position": "RB",
+      "team": "IND",
+      "image": "https://s3-us-west-2.amazonaws.com/static.fantasydata.com/headshots/nfl/low-res/21682.png",
+      "isTradeable": true,
+      "supply": 6337964.82
+    },
+    {
+      "tokenIdDec": "1049357910",
+      "name": "Dallas Goedert",
+      "position": "TE",
+      "team": "PHI",
+      "image": "https://s3-us-west-2.amazonaws.com/static.fantasydata.com/headshots/nfl/low-res/19863.png",
+      "isTradeable": true,
+      "supply": 5673664.01
+    },
+    {
+      "tokenIdDec": "1072658622",
+      "name": "Javonte Williams",
+      "position": "RB",
+      "team": "DAL",
+      "image": "https://s3-us-west-2.amazonaws.com/static.fantasydata.com/headshots/nfl/low-res/22558.png",
+      "isTradeable": true,
+      "supply": 5500104.43
+    },
+    {
+      "tokenIdDec": "1094525731",
+      "name": "Chris Olave",
+      "position": "WR",
+      "team": "NO",
+      "image": "https://s3-us-west-2.amazonaws.com/static.fantasydata.com/headshots/nfl/low-res/22565.png",
+      "isTradeable": true,
+      "supply": 5145728.51
+    },
+    {
+      "tokenIdDec": "1096457743",
+      "name": "D'Andre Swift",
+      "position": "RB",
+      "team": "CHI",
+      "image": "https://s3-us-west-2.amazonaws.com/static.fantasydata.com/headshots/nfl/low-res/21684.png",
+      "isTradeable": true,
+      "supply": 5376248.87
+    },
+    {
+      "tokenIdDec": "1207389650",
+      "name": "Jaylen Warren",
+      "position": "RB",
+      "team": "PIT",
+      "image": "https://s3-us-west-2.amazonaws.com/static.fantasydata.com/headshots/nfl/low-res/23479.png",
+      "isTradeable": true,
+      "supply": 5502591.6
+    },
+    {
+      "tokenIdDec": "1229893067",
+      "name": "Ashton Jeanty",
+      "position": "RB",
+      "team": "LV",
+      "image": "https://s3-us-west-2.amazonaws.com/static.fantasydata.com/headshots/nfl/low-res/0.png",
+      "isTradeable": true,
+      "supply": 5487344.82
+    },
+    {
+      "tokenIdDec": "1257875488",
+      "name": "George Kittle",
+      "position": "TE",
+      "team": "SF",
+      "image": "https://s3-us-west-2.amazonaws.com/static.fantasydata.com/headshots/nfl/low-res/19063.png",
+      "isTradeable": true,
+      "supply": 5960162.54
+    },
+    {
+      "tokenIdDec": "1339944146",
+      "name": "Drake London",
+      "position": "WR",
+      "team": "ATL",
+      "image": "https://s3-us-west-2.amazonaws.com/static.fantasydata.com/headshots/nfl/low-res/23151.png",
+      "isTradeable": true,
+      "supply": 5987770.39
+    },
+    {
+      "tokenIdDec": "1378093404",
+      "name": "Dalton Kincaid",
+      "position": "TE",
+      "team": "BUF",
+      "image": "https://s3-us-west-2.amazonaws.com/static.fantasydata.com/headshots/nfl/low-res/24102.png",
+      "isTradeable": true,
+      "supply": 5815087.5
+    },
+    {
+      "tokenIdDec": "1511237082",
+      "name": "Josh Jacobs",
+      "position": "RB",
+      "team": "GB",
+      "image": "https://s3-us-west-2.amazonaws.com/static.fantasydata.com/headshots/nfl/low-res/20824.png",
+      "isTradeable": true,
+      "supply": 5905037.05
+    },
+    {
+      "tokenIdDec": "1561296583",
+      "name": "Chase Brown",
+      "position": "RB",
+      "team": "CIN",
+      "image": "https://s3-us-west-2.amazonaws.com/static.fantasydata.com/headshots/nfl/low-res/24374.png",
+      "isTradeable": true,
+      "supply": 5194476.85
+    },
+    {
+      "tokenIdDec": "1591779333",
+      "name": "Rico Dowdle",
+      "position": "RB",
+      "team": "CAR",
+      "image": "https://s3-us-west-2.amazonaws.com/static.fantasydata.com/headshots/nfl/low-res/21952.png",
+      "isTradeable": true,
+      "supply": 5793145.8
+    },
+    {
+      "tokenIdDec": "1597935612",
+      "name": "Trey McBride",
+      "position": "TE",
+      "team": "ARI",
+      "image": "https://s3-us-west-2.amazonaws.com/static.fantasydata.com/headshots/nfl/low-res/23251.png",
+      "isTradeable": true,
+      "supply": 6061804.31
+    },
+    {
+      "tokenIdDec": "1613245508",
+      "name": "Saquon Barkley",
+      "position": "RB",
+      "team": "PHI",
+      "image": "https://s3-us-west-2.amazonaws.com/static.fantasydata.com/headshots/nfl/low-res/19766.png",
+      "isTradeable": true,
+      "supply": 5917247.14
+    },
+    {
+      "tokenIdDec": "1627881947",
+      "name": "Jared Goff",
+      "position": "QB",
+      "team": "DET",
+      "image": "https://s3-us-west-2.amazonaws.com/static.fantasydata.com/headshots/nfl/low-res/17922.png",
+      "isTradeable": true,
+      "supply": 5732482.69
+    },
+    {
+      "tokenIdDec": "1631265816",
+      "name": "Khalil Shakir",
+      "position": "WR",
+      "team": "BUF",
+      "image": "https://s3-us-west-2.amazonaws.com/static.fantasydata.com/headshots/nfl/low-res/23227.png",
+      "isTradeable": true,
+      "supply": 5726926.93
+    },
+    {
+      "tokenIdDec": "1634868202",
+      "name": "Kenneth Walker III",
+      "position": "RB",
+      "team": "SEA",
+      "image": "https://s3-us-west-2.amazonaws.com/static.fantasydata.com/headshots/nfl/low-res/23214.png",
+      "isTradeable": true,
+      "supply": 5593235.69
+    },
+    {
+      "tokenIdDec": "1694187555",
+      "name": "Ja'Marr Chase",
+      "position": "WR",
+      "team": "CIN",
+      "image": "https://s3-us-west-2.amazonaws.com/static.fantasydata.com/headshots/nfl/low-res/22564.png",
+      "isTradeable": true,
+      "supply": 6146878.15
+    },
+    {
+      "tokenIdDec": "1704342915",
+      "name": "Kyren Williams",
+      "position": "RB",
+      "team": "LAR",
+      "isTradeable": true,
+      "supply": 5713833.44
+    },
+    {
+      "tokenIdDec": "1708223670",
+      "name": "Bucky Irving",
+      "position": "RB",
+      "team": "TB",
+      "image": "https://s3-us-west-2.amazonaws.com/static.fantasydata.com/headshots/nfl/low-res/0.png",
+      "isTradeable": true,
+      "supply": 5652965.23
+    },
+    {
+      "tokenIdDec": "1733678391",
+      "name": "Justin Herbert",
+      "position": "QB",
+      "team": "LAC",
+      "image": "https://s3-us-west-2.amazonaws.com/static.fantasydata.com/headshots/nfl/low-res/21681.png",
+      "isTradeable": true,
+      "supply": 5691965.19
+    },
+    {
+      "tokenIdDec": "1737560144",
+      "name": "Nico Collins",
+      "position": "WR",
+      "team": "HOU",
+      "image": "https://s3-us-west-2.amazonaws.com/static.fantasydata.com/headshots/nfl/low-res/21756.png",
+      "isTradeable": true,
+      "supply": 5807919.27
+    },
+    {
+      "tokenIdDec": "1809188809",
+      "name": "DK Metcalf",
+      "position": "WR",
+      "team": "PIT",
+      "image": "https://s3-us-west-2.amazonaws.com/static.fantasydata.com/headshots/nfl/low-res/20875.png",
+      "isTradeable": true,
+      "supply": 5536601.65
+    },
+    {
+      "tokenIdDec": "1835372287",
+      "name": "Omarion Hampton",
+      "position": "RB",
+      "team": "LAC",
+      "image": "https://s3-us-west-2.amazonaws.com/static.fantasydata.com/headshots/nfl/low-res/0.png",
+      "isTradeable": true,
+      "supply": 5544382.24
+    },
+    {
+      "tokenIdDec": "1877680294",
+      "name": "Bijan Robinson",
+      "position": "RB",
+      "team": "ATL",
+      "image": "https://s3-us-west-2.amazonaws.com/static.fantasydata.com/headshots/nfl/low-res/23189.png",
+      "isTradeable": true,
+      "supply": 5763272.43
+    },
+    {
+      "tokenIdDec": "1886297532",
+      "name": "Caleb Williams",
+      "position": "QB",
+      "team": "CHI",
+      "image": "https://s3-us-west-2.amazonaws.com/static.fantasydata.com/headshots/nfl/low-res/0.png",
+      "isTradeable": true,
+      "supply": 5796397.8
+    },
+    {
+      "tokenIdDec": "1892649533",
+      "name": "Stefon Diggs",
+      "position": "WR",
+      "team": "NE",
+      "image": "https://s3-us-west-2.amazonaws.com/static.fantasydata.com/headshots/nfl/low-res/16906.png",
+      "isTradeable": true,
+      "supply": 5470142.1
+    },
+    {
+      "tokenIdDec": "1924940894",
+      "name": "Jaylen Waddle",
+      "position": "WR",
+      "team": "MIA",
+      "image": "https://s3-us-west-2.amazonaws.com/static.fantasydata.com/headshots/nfl/low-res/22598.png",
+      "isTradeable": true,
+      "supply": 5481824.94
+    },
+    {
+      "tokenIdDec": "1953241833",
+      "name": "Jake Ferguson",
+      "position": "TE",
+      "team": "DAL",
+      "image": "https://s3-us-west-2.amazonaws.com/static.fantasydata.com/headshots/nfl/low-res/23138.png",
+      "isTradeable": true,
+      "supply": 5786278.65
+    },
+    {
+      "tokenIdDec": "1955323065",
+      "name": "Amon-Ra St. Brown",
+      "position": "WR",
+      "team": "DET",
+      "image": "https://s3-us-west-2.amazonaws.com/static.fantasydata.com/headshots/nfl/low-res/22587.png",
+      "isTradeable": true,
+      "supply": 5967697.04
+    },
+    {
+      "tokenIdDec": "1957905857",
+      "name": "Ladd McConkey",
+      "position": "WR",
+      "team": "LAC",
+      "image": "https://s3-us-west-2.amazonaws.com/static.fantasydata.com/headshots/nfl/low-res/0.png",
+      "isTradeable": true,
+      "supply": 5944857.14
+    },
+    {
+      "tokenIdDec": "1965487160",
+      "name": "Rome Odunze",
+      "position": "WR",
+      "team": "CHI",
+      "image": "https://s3-us-west-2.amazonaws.com/static.fantasydata.com/headshots/nfl/low-res/0.png",
+      "isTradeable": true,
+      "supply": 5635006.1
+    },
+    {
+      "tokenIdDec": "1986714215",
+      "name": "Courtland Sutton",
+      "position": "WR",
+      "team": "DEN",
+      "image": "https://s3-us-west-2.amazonaws.com/static.fantasydata.com/headshots/nfl/low-res/19800.png",
+      "isTradeable": true,
+      "supply": 5288002.71
+    },
+    {
+      "tokenIdDec": "1987964071",
+      "name": "Justin Jefferson",
+      "position": "WR",
+      "team": "MIN",
+      "image": "https://s3-us-west-2.amazonaws.com/static.fantasydata.com/headshots/nfl/low-res/21685.png",
+      "isTradeable": true,
+      "supply": 5893261.36
+    },
+    {
+      "tokenIdDec": "2018186111",
+      "name": "A.J. Brown",
+      "position": "WR",
+      "team": "PHI",
+      "image": "https://s3-us-west-2.amazonaws.com/static.fantasydata.com/headshots/nfl/low-res/21042.png",
+      "isTradeable": true,
+      "supply": 5646547.58
+    },
+    {
+      "tokenIdDec": "2050898691",
+      "name": "Christian McCaffrey",
+      "position": "RB",
+      "team": "SF",
+      "image": "https://s3-us-west-2.amazonaws.com/static.fantasydata.com/headshots/nfl/low-res/18877.png",
+      "isTradeable": true,
+      "supply": 6193450.29
+    },
+    {
+      "tokenIdDec": "2078797761",
+      "name": "Mark Andrews",
+      "position": "TE",
+      "team": "BAL",
+      "image": "https://s3-us-west-2.amazonaws.com/static.fantasydata.com/headshots/nfl/low-res/19803.png",
+      "isTradeable": true,
+      "supply": 5526740.15
+    },
+    {
+      "tokenIdDec": "2111895848",
+      "name": "Garrett Wilson",
+      "position": "WR",
+      "team": "NYJ",
+      "image": "https://s3-us-west-2.amazonaws.com/static.fantasydata.com/headshots/nfl/low-res/23122.png",
+      "isTradeable": true,
+      "supply": 5633320.15
+    }
+  ]
+}

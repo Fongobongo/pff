@@ -2,6 +2,7 @@ import { withCache } from "@/lib/stats/cache";
 import { env } from "@/lib/env";
 import fs from "node:fs";
 import path from "node:path";
+import bundledSnapshot from "@/lib/nfl/nflFunFallback.snapshot.json";
 
 const DEFAULT_NFL_FUN_PLAYERS_DATA_URL = "https://nfl-fun.vercel.app/data/players/players.json";
 const CACHE_TTL_SECONDS = 6 * 60 * 60;
@@ -38,7 +39,7 @@ type FallbackSnapshot = {
   rows: NflFallbackTokenMeta[];
 };
 
-export type NflFallbackSource = "remote" | "stale_snapshot" | "empty";
+export type NflFallbackSource = "remote" | "stale_snapshot" | "bundled_snapshot" | "empty";
 export type NflFallbackTokenMetaResult = {
   rows: NflFallbackTokenMeta[];
   source: NflFallbackSource;
@@ -172,6 +173,28 @@ function toFallbackMeta(raw: NflFunPlayerRaw): NflFallbackTokenMeta | null {
   };
 }
 
+function readBundledSnapshotRows(): NflFallbackTokenMeta[] {
+  const out: NflFallbackTokenMeta[] = [];
+  const rows = Array.isArray((bundledSnapshot as { rows?: unknown[] }).rows)
+    ? (bundledSnapshot as { rows: unknown[] }).rows
+    : [];
+  for (const row of rows) {
+    if (!row || typeof row !== "object") continue;
+    const record = row as Record<string, unknown>;
+    if (typeof record.tokenIdDec !== "string") continue;
+    out.push({
+      tokenIdDec: record.tokenIdDec,
+      name: typeof record.name === "string" ? record.name : undefined,
+      position: typeof record.position === "string" ? record.position : undefined,
+      team: typeof record.team === "string" ? record.team : undefined,
+      image: typeof record.image === "string" ? record.image : undefined,
+      isTradeable: typeof record.isTradeable === "boolean" ? record.isTradeable : undefined,
+      supply: typeof record.supply === "number" && Number.isFinite(record.supply) ? record.supply : undefined,
+    });
+  }
+  return out;
+}
+
 export async function getNflFallbackTokenMetaMap(): Promise<Map<string, NflFallbackTokenMeta>> {
   const result = await getNflFallbackTokenMeta();
   return new Map(result.rows.map((row) => [row.tokenIdDec, row]));
@@ -179,6 +202,7 @@ export async function getNflFallbackTokenMetaMap(): Promise<Map<string, NflFallb
 
 export async function getNflFallbackTokenMeta(): Promise<NflFallbackTokenMetaResult> {
   const url = env.NFL_FUN_PLAYERS_DATA_URL ?? DEFAULT_NFL_FUN_PLAYERS_DATA_URL;
+  const bundledRows = readBundledSnapshotRows();
   return withCache(`nfl-fallback:v2:players:${url}`, CACHE_TTL_SECONDS, async () => {
     const now = Date.now();
     try {
@@ -196,6 +220,12 @@ export async function getNflFallbackTokenMeta(): Promise<NflFallbackTokenMetaRes
             rows: snapshot.rows,
             source: "stale_snapshot",
             staleAgeMs: now - snapshot.updatedAt,
+          } satisfies NflFallbackTokenMetaResult;
+        }
+        if (bundledRows.length) {
+          return {
+            rows: bundledRows,
+            source: "bundled_snapshot",
           } satisfies NflFallbackTokenMetaResult;
         }
         return { rows: [], source: "empty" } satisfies NflFallbackTokenMetaResult;
@@ -226,6 +256,12 @@ export async function getNflFallbackTokenMeta(): Promise<NflFallbackTokenMetaRes
           staleAgeMs: now - snapshot.updatedAt,
         } satisfies NflFallbackTokenMetaResult;
       }
+      if (bundledRows.length) {
+        return {
+          rows: bundledRows,
+          source: "bundled_snapshot",
+        } satisfies NflFallbackTokenMetaResult;
+      }
       return { rows: [], source: "empty" } satisfies NflFallbackTokenMetaResult;
     } catch {
       const snapshot = readSnapshot();
@@ -234,6 +270,12 @@ export async function getNflFallbackTokenMeta(): Promise<NflFallbackTokenMetaRes
           rows: snapshot.rows,
           source: "stale_snapshot",
           staleAgeMs: now - snapshot.updatedAt,
+        } satisfies NflFallbackTokenMetaResult;
+      }
+      if (bundledRows.length) {
+        return {
+          rows: bundledRows,
+          source: "bundled_snapshot",
         } satisfies NflFallbackTokenMetaResult;
       }
       return { rows: [], source: "empty" } satisfies NflFallbackTokenMetaResult;
