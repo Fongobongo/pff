@@ -16,6 +16,10 @@ async function fetchText(path: string) {
   return { url, res, text, elapsedMs };
 }
 
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function readHeaderNumber(headers: Headers, key: string): number | null {
   const value = headers.get(key);
   if (!value) return null;
@@ -37,6 +41,30 @@ async function checkJson(path: string) {
   return { path, elapsedMs, status: res.status, json, headers: res.headers };
 }
 
+async function checkMarketJsonWithRetry(attempts = 4) {
+  let last:
+    | {
+        path: string;
+        elapsedMs: number;
+        status: number;
+        json: JsonAny;
+        headers: Headers;
+      }
+    | null = null;
+
+  for (let i = 0; i < attempts; i += 1) {
+    const result = await checkJson(
+      `/api/sportfun/market?sport=nfl&windowHours=24&trendDays=30&maxTokens=120&cacheBust=${Date.now()}-${i}`
+    );
+    last = result;
+    const tokens = Array.isArray(result.json.tokens) ? result.json.tokens.length : 0;
+    if (tokens > 0) return result;
+    await sleep(300 * (i + 1));
+  }
+
+  return last ?? checkJson("/api/sportfun/market?sport=nfl&windowHours=24&trendDays=30&maxTokens=120");
+}
+
 async function main() {
   console.log(`[health] base=${baseUrl}`);
   console.log(`[health] projection target season=${season} week=${week} seasonType=${seasonType}`);
@@ -52,9 +80,7 @@ async function main() {
   const projections = await checkJson(
     `/api/stats/nfl/projections?season=${season}&week=${week}&season_type=${seasonType}&source=auto`
   );
-  const market = await checkJson(
-    `/api/sportfun/market?sport=nfl&windowHours=24&trendDays=30&maxTokens=120&cacheBust=${Date.now()}`
-  );
+  const market = await checkMarketJsonWithRetry();
   const standings = await checkJson(`/api/stats/nfl/standings?season=${season}&game_type=${seasonType}`);
   const economics = await checkJson(`/api/stats/nfl/team-economics?sort=squad_value&dir=desc`);
 

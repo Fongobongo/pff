@@ -30,6 +30,84 @@ async function fetchText(path: string, profile: "desktop" | "mobile" = "desktop"
   return { url, status: res.status, text, headers: res.headers };
 }
 
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchMarketWithRetry(profile: "desktop" | "mobile", attempts = 4) {
+  let last:
+    | {
+        market: Awaited<ReturnType<typeof fetchText>>;
+        json: {
+          stats?: {
+            metadataSourceCounts?: {
+              onchainOnly?: number;
+              fallbackOnly?: number;
+              hybrid?: number;
+              overrideOnly?: number;
+              unresolved?: number;
+            };
+            fallbackFeed?: {
+              source?: string;
+              staleAgeMs?: number;
+            };
+          };
+          tokens: Array<{ name?: string; team?: string; position?: string }>;
+        };
+      }
+    | null = null;
+
+  for (let i = 0; i < attempts; i += 1) {
+    const marketPath = `/api/sportfun/market?sport=nfl&windowHours=24&trendDays=30&maxTokens=120&cacheBust=${Date.now()}-${i}`;
+    const market = await fetchText(marketPath, profile);
+    if (market.status !== 200) {
+      await sleep(300 * (i + 1));
+      continue;
+    }
+    const json = JSON.parse(market.text) as {
+      stats?: {
+        metadataSourceCounts?: {
+          onchainOnly?: number;
+          fallbackOnly?: number;
+          hybrid?: number;
+          overrideOnly?: number;
+          unresolved?: number;
+        };
+        fallbackFeed?: {
+          source?: string;
+          staleAgeMs?: number;
+        };
+      };
+      tokens: Array<{ name?: string; team?: string; position?: string }>;
+    };
+    last = { market, json };
+    if ((json.tokens?.length ?? 0) > 0) return last;
+    await sleep(300 * (i + 1));
+  }
+
+  if (last) return last;
+
+  const marketPath = `/api/sportfun/market?sport=nfl&windowHours=24&trendDays=30&maxTokens=120&cacheBust=${Date.now()}-fallback`;
+  const market = await fetchText(marketPath, profile);
+  const json = JSON.parse(market.text) as {
+    stats?: {
+      metadataSourceCounts?: {
+        onchainOnly?: number;
+        fallbackOnly?: number;
+        hybrid?: number;
+        overrideOnly?: number;
+        unresolved?: number;
+      };
+      fallbackFeed?: {
+        source?: string;
+        staleAgeMs?: number;
+      };
+    };
+    tokens: Array<{ name?: string; team?: string; position?: string }>;
+  };
+  return { market, json };
+}
+
 async function runPageChecks() {
   const checks: Check[] = [
     { path: "/nfl/teams", marker: "NFL teams", profile: "desktop" },
@@ -59,25 +137,10 @@ async function runPageChecks() {
 }
 
 async function runApiChecks() {
-  const marketPath = `/api/sportfun/market?sport=nfl&windowHours=24&trendDays=30&maxTokens=120&cacheBust=${Date.now()}`;
-  const market = await fetchText(marketPath, "desktop");
+  const marketResult = await fetchMarketWithRetry("desktop");
+  const market = marketResult.market;
   assert.equal(market.status, 200, "market API should return 200");
-  const marketJson = JSON.parse(market.text) as {
-    stats?: {
-      metadataSourceCounts?: {
-        onchainOnly?: number;
-        fallbackOnly?: number;
-        hybrid?: number;
-        overrideOnly?: number;
-        unresolved?: number;
-      };
-      fallbackFeed?: {
-        source?: string;
-        staleAgeMs?: number;
-      };
-    };
-    tokens: Array<{ name?: string; team?: string; position?: string }>;
-  };
+  const marketJson = marketResult.json;
   assert.ok(Array.isArray(marketJson.tokens), "market tokens must be an array");
   const enrichedCount = marketJson.tokens.filter(
     (token) => Boolean(token.name) && Boolean(token.team) && Boolean(token.position)

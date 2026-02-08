@@ -1,12 +1,11 @@
 # Work in Progress
 
 ## Now
-- **NFL market telemetry + resilience hardening:** track metadata source mix and keep enrichment alive via stale snapshot fallback when upstream feed degrades.
+- **NFL market observability polish:** telemetry is available in API and now surfaced in the embedded NFL portfolio UI.
 
 ## Next
-- Deploy telemetry/stale-fallback update to production and verify headers/stats on live endpoints.
-- Consider surfacing market metadata-source telemetry in UI/debug panel (currently API-only).
 - Add optional alert thresholds for unresolved metadata share if it spikes.
+- Optionally expose the same telemetry summary on non-portfolio NFL pages (`/nfl/teams`, `/nfl/standings`) as a compact diagnostics badge.
 
 ## Status
 - Last updated: 2026-02-08
@@ -38,6 +37,8 @@
   - `src/lib/sportfunMarket.ts` now falls back to NFL fallback token IDs when on-chain token universe is temporarily empty, and tolerates price fetch failures by returning degraded-but-non-empty snapshots.
   - Added targeted mobile regression script: `scripts/test_nfl_mobile_regression.ts` (`npm run test:nfl-mobile`).
   - Stabilized prod smoke/health scripts against stale edge cache artifacts via cache-busting market query param.
+  - Surfaced market metadata telemetry in embedded NFL portfolio UI (`Market Metadata Sources` block in `src/components/portfolio/SportfunPortfolioDashboard.tsx`).
+  - Added retry logic in `scripts/test_nfl_smoke.ts` and `scripts/report_nfl_health.ts` for transient empty market snapshots.
 - NFL core gaps (relative to selected `nfl-fun` scope) implemented:
   - **Phase 1:** Team economics + standings fantasy fields.
     - New module: `src/lib/nfl/teamEconomics.ts`.
