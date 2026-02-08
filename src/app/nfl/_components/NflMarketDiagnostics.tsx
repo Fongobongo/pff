@@ -21,6 +21,10 @@ type MarketDiagnosticsResponse = {
 type MarketAlertsResponse = {
   sink?: string;
   total?: number;
+  muteRules?: Array<{
+    sport?: string;
+    type?: string;
+  }>;
   alerts?: Array<{
     ts?: string;
     type?: string;
@@ -55,6 +59,10 @@ export default async function NflMarketDiagnostics() {
     const data = (await res.json()) as MarketDiagnosticsResponse;
     const alertsData = alertsRes.ok ? ((await alertsRes.json()) as MarketAlertsResponse) : null;
     const latestAlert = alertsData?.alerts?.[0];
+    const mutedTypes = (alertsData?.muteRules ?? [])
+      .filter((rule) => rule.sport === "nfl" && typeof rule.type === "string")
+      .map((rule) => String(rule.type))
+      .sort();
     const counts = data.stats?.metadataSourceCounts ?? {};
     const fallbackFeed = data.stats?.fallbackFeed ?? {};
     const totalTokens = Array.isArray(data.tokens) ? data.tokens.length : 0;
@@ -85,6 +93,7 @@ export default async function NflMarketDiagnostics() {
           <span>alert ≥ {Number.isFinite(thresholdPct) ? thresholdPct.toFixed(0) : "25"}%</span>
           <span>alerts {alertsData?.total ?? 0}</span>
           <span>sink {alertsData?.sink ?? "n/a"}</span>
+          <span>muted {mutedTypes.length ? mutedTypes.join(",") : "none"}</span>
           {latestAlert?.ts ? (
             <span>
               last alert {new Date(latestAlert.ts).toLocaleString()} ({latestAlert.type ?? "unknown"})

@@ -1,10 +1,10 @@
 # Work in Progress
 
 ## Now
-- **NFL market observability polish:** telemetry + alerts are persisted and now have a dedicated NFL alerts page for drill-down.
+- **NFL market observability polish:** alerts feed now supports acknowledge/mute controls and type-level suppression.
 
 ## Next
-- Optional: add simple acknowledge/mute controls for noisy alert types (v1 is read-only feed).
+- Optional: add role-based/auth gate for alert mutations (current controls are internal/trusted-env style).
 
 ## Status
 - Last updated: 2026-02-08
@@ -48,6 +48,10 @@
   - Health/smoke probes now use stable market query key (`maxTokens=121`) to avoid known edge-cache flaps on `maxTokens=120`.
   - Added drill-down page `/nfl/alerts` with type/limit filters, sink summary, and alert payload table.
   - Added `Alerts` link into `NflNav`; extended smoke/health/mobile scripts to cover `/nfl/alerts`.
+  - Added mutation actions for alert ops in `/api/sportfun/market-alerts`:
+    - `ack`, `ack_all`, `mute`, `unmute`.
+  - `src/lib/marketAlertSink.ts` now stores `acknowledgedAt` and `muteRules`, and suppresses creation/logging for muted alert types.
+  - `/nfl/alerts` now includes operational controls (ack visible, per-type mute/unmute, row-level acknowledge).
 - NFL core gaps (relative to selected `nfl-fun` scope) implemented:
   - **Phase 1:** Team economics + standings fantasy fields.
     - New module: `src/lib/nfl/teamEconomics.ts`.
