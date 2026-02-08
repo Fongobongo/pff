@@ -1,10 +1,10 @@
 # Work in Progress
 
 ## Now
-- **NFL market observability polish:** telemetry + alerts are now persisted via a lightweight sink and visible in NFL diagnostics.
+- **NFL market observability polish:** telemetry + alerts are persisted and now have a dedicated NFL alerts page for drill-down.
 
 ## Next
-- Optional: add a dedicated internal page for alert history drill-down (currently surfaced via `/api/sportfun/market-alerts` and compact badges).
+- Optional: add simple acknowledge/mute controls for noisy alert types (v1 is read-only feed).
 
 ## Status
 - Last updated: 2026-02-08
@@ -46,6 +46,8 @@
   - `/api/sportfun/market` now persists throttled `stale_feed` and `unresolved_share_high` alerts into sink.
   - NFL diagnostics now shows sink metadata and latest alert details; health/smoke scripts validate new alerts API.
   - Health/smoke probes now use stable market query key (`maxTokens=121`) to avoid known edge-cache flaps on `maxTokens=120`.
+  - Added drill-down page `/nfl/alerts` with type/limit filters, sink summary, and alert payload table.
+  - Added `Alerts` link into `NflNav`; extended smoke/health/mobile scripts to cover `/nfl/alerts`.
 - NFL core gaps (relative to selected `nfl-fun` scope) implemented:
   - **Phase 1:** Team economics + standings fantasy fields.
     - New module: `src/lib/nfl/teamEconomics.ts`.

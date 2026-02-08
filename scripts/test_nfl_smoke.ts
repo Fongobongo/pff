@@ -114,6 +114,7 @@ async function runPageChecks() {
     { path: "/nfl/standings", marker: "Squad value", profile: "desktop" },
     { path: "/nfl/players", marker: "Matchup", profile: "desktop" },
     { path: "/nfl/players", marker: "Proj PPR", profile: "mobile" },
+    { path: "/nfl/alerts", marker: "NFL alerts", profile: "desktop" },
     {
       path: "/nfl/portfolio?address=0x82c117A68fD47A2d53b997049F4BE44714D57455",
       marker: "NFL portfolio",

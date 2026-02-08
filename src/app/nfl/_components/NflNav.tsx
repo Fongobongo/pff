@@ -6,6 +6,7 @@ const NAV_ITEMS = [
   { href: "/nfl/players", label: "Players" },
   { href: "/nfl/teams", label: "Teams" },
   { href: "/nfl/standings", label: "Standings" },
+  { href: "/nfl/alerts", label: "Alerts" },
   { href: "/nfl/portfolio", label: "Portfolio" },
   { href: "/nfl/token", label: "Token" },
   { href: "/nfl/trending", label: "Trending" },

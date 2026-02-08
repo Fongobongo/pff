@@ -73,6 +73,7 @@ async function main() {
     checkPage("/nfl/teams", "NFL teams"),
     checkPage("/nfl/standings", "NFL standings"),
     checkPage("/nfl/players", "NFL players"),
+    checkPage("/nfl/alerts", "NFL alerts"),
     checkPage("/nfl/portfolio?address=0x82c117A68fD47A2d53b997049F4BE44714D57455", "NFL portfolio"),
     checkPage("/nfl/token", "$FUN token"),
   ]);

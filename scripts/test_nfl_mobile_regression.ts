@@ -46,6 +46,10 @@ async function main() {
       markers: ["NFL teams", "Top 3 assets"],
     },
     {
+      path: "/nfl/alerts",
+      markers: ["NFL alerts", "All alerts", "Sink"],
+    },
+    {
       path: "/nfl/portfolio?address=0x82c117A68fD47A2d53b997049F4BE44714D57455",
       markers: ["NFL portfolio", "embedded NFL-only on-chain dashboard", "Open NFL portfolio"],
     },
