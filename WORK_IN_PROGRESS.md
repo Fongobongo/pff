@@ -57,6 +57,7 @@
     - accepts token via `x-market-alert-admin-token` or `Authorization: Bearer ...`;
     - returns `503` when token is not configured, `401` on invalid/missing token.
   - Added browser token helper panel on `/nfl/alerts` (`AlertAdminTokenPanel`) for internal operator workflows.
+  - Current production note: `MARKET_ALERT_ADMIN_TOKEN` is not set yet on Vercel, so mutation actions intentionally return `503` until configured.
 - NFL core gaps (relative to selected `nfl-fun` scope) implemented:
   - **Phase 1:** Team economics + standings fantasy fields.
     - New module: `src/lib/nfl/teamEconomics.ts`.
