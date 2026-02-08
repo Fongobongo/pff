@@ -27,7 +27,7 @@ async function fetchText(path: string, profile: "desktop" | "mobile" = "desktop"
     },
   });
   const text = await res.text();
-  return { url, status: res.status, text };
+  return { url, status: res.status, text, headers: res.headers };
 }
 
 async function runPageChecks() {
@@ -65,6 +65,19 @@ async function runApiChecks() {
   );
   assert.equal(market.status, 200, "market API should return 200");
   const marketJson = JSON.parse(market.text) as {
+    stats?: {
+      metadataSourceCounts?: {
+        onchainOnly?: number;
+        fallbackOnly?: number;
+        hybrid?: number;
+        overrideOnly?: number;
+        unresolved?: number;
+      };
+      fallbackFeed?: {
+        source?: string;
+        staleAgeMs?: number;
+      };
+    };
     tokens: Array<{ name?: string; team?: string; position?: string }>;
   };
   assert.ok(Array.isArray(marketJson.tokens), "market tokens must be an array");
@@ -75,7 +88,29 @@ async function runApiChecks() {
     enrichedCount > 0,
     "market tokens should include fallback-enriched name/team/position"
   );
-  console.log(`[api] ok /api/sportfun/market enriched=${enrichedCount}/${marketJson.tokens.length}`);
+  const metaStats = marketJson.stats?.metadataSourceCounts;
+  const fallbackFeed = marketJson.stats?.fallbackFeed;
+  assert.ok(metaStats, "market stats.metadataSourceCounts should be present");
+  assert.ok(fallbackFeed, "market stats.fallbackFeed should be present");
+  const fallbackOnly = Number(metaStats?.fallbackOnly ?? 0);
+  const hybrid = Number(metaStats?.hybrid ?? 0);
+  const unresolved = Number(metaStats?.unresolved ?? 0);
+  assert.ok(
+    fallbackOnly + hybrid > 0,
+    "market metadata stats should indicate fallback/hybrid enrichment"
+  );
+  assert.ok(unresolved < marketJson.tokens.length, "market metadata should not be unresolved for all tokens");
+  assert.ok(
+    Boolean(market.headers.get("x-market-fallback-feed-source")),
+    "market response must expose fallback feed source header"
+  );
+  assert.ok(
+    Boolean(market.headers.get("x-market-meta-source-fallback")),
+    "market response must expose metadata source count headers"
+  );
+  console.log(
+    `[api] ok /api/sportfun/market enriched=${enrichedCount}/${marketJson.tokens.length} fallback=${fallbackOnly} hybrid=${hybrid} feed=${fallbackFeed?.source ?? "n/a"}`
+  );
 
   const teamEconomics = await fetchText(
     "/api/stats/nfl/team-economics?sort=squad_value&dir=desc",

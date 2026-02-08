@@ -2,7 +2,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { withCache } from "@/lib/stats/cache";
 import { alchemyRpc } from "@/lib/alchemy";
-import { getNflFallbackTokenMetaMap } from "@/lib/nfl/nflFunFallback";
+import {
+  getNflFallbackTokenMeta,
+  type NflFallbackSource,
+} from "@/lib/nfl/nflFunFallback";
 import { getSportfunNameOverride, getSportfunSportLabel, type SportfunSport } from "@/lib/sportfunNames";
 import {
   getSportfunMetadataCacheEntry,
@@ -46,6 +49,7 @@ export type SportfunMarketToken = {
   trades24h: number;
   lastTradeAt?: string;
   isTradeable?: boolean;
+  metadataSource?: "onchain" | "fallback" | "hybrid" | "override" | "none";
 };
 
 export type SportfunMarketSummary = {
@@ -84,6 +88,19 @@ export type SportfunMarketSnapshot = {
   trendGainers: SportfunMarketTrendPoint[];
   trendLosers: SportfunMarketTrendPoint[];
   distribution: SportfunMarketDistributionBin[];
+  stats?: {
+    metadataSourceCounts: {
+      onchainOnly: number;
+      fallbackOnly: number;
+      hybrid: number;
+      overrideOnly: number;
+      unresolved: number;
+    };
+    fallbackFeed: {
+      source: NflFallbackSource | "n/a";
+      staleAgeMs?: number;
+    };
+  };
 };
 
 type TradeEvent = {
@@ -876,12 +893,46 @@ export async function getSportfunMarketSnapshot(params: {
       });
 
       const metaByToken = new Map(meta.map((m) => [m.tokenIdDec, m.metadata]));
-      const nflFallbackByToken = params.sport === "nfl" ? await getNflFallbackTokenMetaMap() : null;
+      const nflFallbackResult = params.sport === "nfl" ? await getNflFallbackTokenMeta() : null;
+      const nflFallbackByToken = nflFallbackResult
+        ? new Map(nflFallbackResult.rows.map((row) => [row.tokenIdDec, row]))
+        : null;
+      const metadataSourceCounts = {
+        onchainOnly: 0,
+        fallbackOnly: 0,
+        hybrid: 0,
+        overrideOnly: 0,
+        unresolved: 0,
+      };
 
       const decoratedTokens = tokens.map((token) => {
         const metaEntry = metaByToken.get(token.tokenIdDec);
         const fallbackMeta = nflFallbackByToken?.get(token.tokenIdDec);
         const override = getSportfunNameOverride(contracts[0].playerToken, token.tokenIdDec);
+        const onchainPosition = extractPosition(metaEntry?.attributes);
+        const onchainTeam = extractTeam(metaEntry?.attributes);
+        const usedOnchain = Boolean(metaEntry?.name || onchainPosition || onchainTeam);
+        const usedFallback = Boolean(
+          (!metaEntry?.name && fallbackMeta?.name) ||
+            (!onchainPosition && fallbackMeta?.position) ||
+            (!onchainTeam && fallbackMeta?.team)
+        );
+        let metadataSource: SportfunMarketToken["metadataSource"] = "none";
+        if (usedOnchain && usedFallback) {
+          metadataSource = "hybrid";
+          metadataSourceCounts.hybrid += 1;
+        } else if (usedOnchain) {
+          metadataSource = "onchain";
+          metadataSourceCounts.onchainOnly += 1;
+        } else if (usedFallback) {
+          metadataSource = "fallback";
+          metadataSourceCounts.fallbackOnly += 1;
+        } else if (override) {
+          metadataSource = "override";
+          metadataSourceCounts.overrideOnly += 1;
+        } else {
+          metadataSourceCounts.unresolved += 1;
+        }
         const fallbackAttributes = fallbackMeta
           ? [
               ...(fallbackMeta.position
@@ -907,6 +958,7 @@ export async function getSportfunMarketSnapshot(params: {
           team: team ?? undefined,
           supply: supply ?? undefined,
           isTradeable: fallbackMeta?.isTradeable,
+          metadataSource,
         };
       });
 
@@ -952,8 +1004,17 @@ export async function getSportfunMarketSnapshot(params: {
         trendGainers,
         trendLosers,
         distribution,
+        stats: {
+          metadataSourceCounts,
+          fallbackFeed: {
+            source: nflFallbackResult?.source ?? "n/a",
+            staleAgeMs: nflFallbackResult?.staleAgeMs,
+          },
+        },
       };
-    } catch {
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`[sportfun-market] snapshot build failed sport=${params.sport}: ${message}`);
       return {
         sport: params.sport,
         asOf: new Date(now).toISOString(),
@@ -974,6 +1035,18 @@ export async function getSportfunMarketSnapshot(params: {
         trendGainers: [],
         trendLosers: [],
         distribution: buildDistribution([]),
+        stats: {
+          metadataSourceCounts: {
+            onchainOnly: 0,
+            fallbackOnly: 0,
+            hybrid: 0,
+            overrideOnly: 0,
+            unresolved: 0,
+          },
+          fallbackFeed: {
+            source: params.sport === "nfl" ? "empty" : "n/a",
+          },
+        },
       };
     }
   });

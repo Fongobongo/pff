@@ -1,12 +1,12 @@
 # Work in Progress
 
 ## Now
-- **NFL metadata reliability hardening:** keep player/team labeling stable even when `api.sport.fun` metadata is unavailable.
+- **NFL market telemetry + resilience hardening:** track metadata source mix and keep enrichment alive via stale snapshot fallback when upstream feed degrades.
 
 ## Next
-- Deploy metadata-fallback update to production and confirm `Teams/Standings/Players` economics remain non-empty.
-- Add lightweight counters for fallback metadata source usage (on-chain URI vs nfl-fun JSON fallback).
-- Add a targeted mobile visual regression pass for `/nfl/players`, `/nfl/standings`, `/nfl/teams`, `/nfl/portfolio`, `/nfl/token`.
+- Deploy telemetry/stale-fallback update to production and verify headers/stats on live endpoints.
+- Consider surfacing market metadata-source telemetry in UI/debug panel (currently API-only).
+- Add optional alert thresholds for unresolved metadata share if it spikes.
 
 ## Status
 - Last updated: 2026-02-08
@@ -16,12 +16,25 @@
   - `npm run build`
   - `NFL_SMOKE_BASE_URL=http://localhost:3100 npm run test:nfl-smoke`
   - `NFL_HEALTH_BASE_URL=http://localhost:3100 npm run report:nfl-health`
+  - `NFL_MOBILE_BASE_URL=http://localhost:3100 npm run test:nfl-mobile`
 - Data-quality gap fix completed:
   - Added fallback module: `src/lib/nfl/nflFunFallback.ts`.
   - `src/lib/sportfunMarket.ts` now enriches NFL tokens from fallback (`name/team/position/isTradeable/supply`) when on-chain metadata is missing.
   - Added env support: `NFL_FUN_PLAYERS_DATA_URL` (`src/lib/env.ts`, `.env.example`).
   - Team alias normalization extended (`JAC -> JAX`, `LA -> LAR`, `WSH -> WAS`) and non-tradeable tokens excluded in economics aggregation (`src/lib/nfl/teamEconomics.ts`).
   - Updated smoke/health checks to assert enrichment and non-zero team economics.
+- Telemetry and resilience updates completed:
+  - Added metadata source counters and fallback feed status to `SportfunMarketSnapshot.stats`.
+  - Added market telemetry headers in `GET /api/sportfun/market`:
+    - `x-market-meta-source-onchain`
+    - `x-market-meta-source-fallback`
+    - `x-market-meta-source-hybrid`
+    - `x-market-meta-source-override`
+    - `x-market-meta-source-unresolved`
+    - `x-market-fallback-feed-source`
+    - `x-market-fallback-feed-stale-age-ms`
+  - Added stale snapshot fallback in `src/lib/nfl/nflFunFallback.ts` (serves last successful dataset if upstream fails within max stale window).
+  - Added targeted mobile regression script: `scripts/test_nfl_mobile_regression.ts` (`npm run test:nfl-mobile`).
 - NFL core gaps (relative to selected `nfl-fun` scope) implemented:
   - **Phase 1:** Team economics + standings fantasy fields.
     - New module: `src/lib/nfl/teamEconomics.ts`.

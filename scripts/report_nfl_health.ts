@@ -78,10 +78,17 @@ async function main() {
 
   const standingsRows = (standings.json.rows as unknown[]) ?? [];
   const marketTokens = (market.json.tokens as Array<Record<string, unknown>> | undefined) ?? [];
+  const marketStats = (market.json.stats as JsonAny | undefined) ?? {};
+  const metadataSourceCounts = (marketStats.metadataSourceCounts as JsonAny | undefined) ?? {};
+  const fallbackFeed = (marketStats.fallbackFeed as JsonAny | undefined) ?? {};
   const economicsRows = (economics.json.rows as Array<Record<string, unknown>> | undefined) ?? [];
   const enrichedMarketTokens = marketTokens.filter(
     (token) => typeof token.name === "string" && typeof token.team === "string" && typeof token.position === "string"
   );
+  const fallbackOnlyCount = Number(metadataSourceCounts.fallbackOnly ?? 0);
+  const hybridCount = Number(metadataSourceCounts.hybrid ?? 0);
+  const unresolvedCount = Number(metadataSourceCounts.unresolved ?? 0);
+  const feedSource = String(fallbackFeed.source ?? "n/a");
   const nonZeroEconomicsRows = economicsRows.filter((row) => {
     const tradeablePlayers = Number(row.tradeablePlayers ?? 0);
     const squadValueUsd = Number(row.squadValueUsd ?? 0);
@@ -92,10 +99,23 @@ async function main() {
   console.log(
     `- ${market.path}: status=${market.status} latencyMs=${market.elapsedMs} enriched=${enrichedMarketTokens.length}/${marketTokens.length}`
   );
+  console.log(
+    `  metadataSources(onchain=${metadataSourceCounts.onchainOnly ?? "n/a"}, fallback=${fallbackOnlyCount}, hybrid=${hybridCount}, unresolved=${unresolvedCount}) feed=${feedSource}`
+  );
+  console.log(
+    `  headers fallbackFeed=${market.headers.get("x-market-fallback-feed-source") ?? "n/a"} fallbackCount=${market.headers.get("x-market-meta-source-fallback") ?? "n/a"}`
+  );
   console.log(`- ${economics.path}: status=${economics.status} latencyMs=${economics.elapsedMs} rows=${economicsRows.length}`);
   console.log(`  nonZeroEconomicsRows=${nonZeroEconomicsRows.length}`);
 
   assert.ok(enrichedMarketTokens.length > 0, "expected enriched market tokens (name/team/position)");
+  assert.ok(fallbackOnlyCount + hybridCount > 0, "expected fallback/hybrid metadata usage");
+  assert.ok(unresolvedCount < marketTokens.length, "expected market metadata resolution for at least one token");
+  assert.ok(feedSource !== "n/a", "expected fallback feed source in market stats");
+  assert.ok(
+    Boolean(market.headers.get("x-market-fallback-feed-source")),
+    "expected fallback feed source header"
+  );
   assert.ok(nonZeroEconomicsRows.length > 0, "expected at least one non-zero economics row");
 
   console.log("\nnfl health report passed");

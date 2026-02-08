@@ -1,8 +1,12 @@
 import { withCache } from "@/lib/stats/cache";
 import { env } from "@/lib/env";
+import fs from "node:fs";
+import path from "node:path";
 
 const DEFAULT_NFL_FUN_PLAYERS_DATA_URL = "https://nfl-fun.vercel.app/data/players/players.json";
 const CACHE_TTL_SECONDS = 6 * 60 * 60;
+const STALE_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000;
+const SNAPSHOT_PATH = path.join(process.cwd(), ".cache", "sportfun", "market", "nfl-fallback-players.json");
 
 type NflFunPlayerRaw = {
   oPlayerId?: unknown;
@@ -26,6 +30,19 @@ export type NflFallbackTokenMeta = {
   image?: string;
   isTradeable?: boolean;
   supply?: number;
+};
+
+type FallbackSnapshot = {
+  updatedAt: number;
+  sourceUrl: string;
+  rows: NflFallbackTokenMeta[];
+};
+
+export type NflFallbackSource = "remote" | "stale_snapshot" | "empty";
+export type NflFallbackTokenMetaResult = {
+  rows: NflFallbackTokenMeta[];
+  source: NflFallbackSource;
+  staleAgeMs?: number;
 };
 
 function toStringOrUndefined(value: unknown): string | undefined {
@@ -111,6 +128,35 @@ function mergeFallbackMeta(
   };
 }
 
+function ensureSnapshotDir() {
+  fs.mkdirSync(path.dirname(SNAPSHOT_PATH), { recursive: true });
+}
+
+function readSnapshot(): FallbackSnapshot | null {
+  try {
+    const raw = fs.readFileSync(SNAPSHOT_PATH, "utf8");
+    const parsed = JSON.parse(raw) as FallbackSnapshot;
+    if (!parsed || !Array.isArray(parsed.rows) || typeof parsed.updatedAt !== "number") return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writeSnapshot(rows: NflFallbackTokenMeta[], sourceUrl: string) {
+  try {
+    ensureSnapshotDir();
+    const snapshot: FallbackSnapshot = {
+      updatedAt: Date.now(),
+      sourceUrl,
+      rows,
+    };
+    fs.writeFileSync(SNAPSHOT_PATH, JSON.stringify(snapshot), "utf8");
+  } catch {
+    // ignore snapshot write errors
+  }
+}
+
 function toFallbackMeta(raw: NflFunPlayerRaw): NflFallbackTokenMeta | null {
   const tokenIdDec = parseTokenIdDec(raw.oPlayerId);
   if (!tokenIdDec) return null;
@@ -127,8 +173,14 @@ function toFallbackMeta(raw: NflFunPlayerRaw): NflFallbackTokenMeta | null {
 }
 
 export async function getNflFallbackTokenMetaMap(): Promise<Map<string, NflFallbackTokenMeta>> {
+  const result = await getNflFallbackTokenMeta();
+  return new Map(result.rows.map((row) => [row.tokenIdDec, row]));
+}
+
+export async function getNflFallbackTokenMeta(): Promise<NflFallbackTokenMetaResult> {
   const url = env.NFL_FUN_PLAYERS_DATA_URL ?? DEFAULT_NFL_FUN_PLAYERS_DATA_URL;
-  const rows = await withCache(`nfl-fallback:players:${url}`, CACHE_TTL_SECONDS, async () => {
+  return withCache(`nfl-fallback:v2:players:${url}`, CACHE_TTL_SECONDS, async () => {
+    const now = Date.now();
     try {
       const response = await fetch(url, {
         cache: "no-store",
@@ -137,7 +189,17 @@ export async function getNflFallbackTokenMetaMap(): Promise<Map<string, NflFallb
           "user-agent": "pff/1.0",
         },
       });
-      if (!response.ok) return [] as NflFallbackTokenMeta[];
+      if (!response.ok) {
+        const snapshot = readSnapshot();
+        if (snapshot?.rows.length && now - snapshot.updatedAt <= STALE_MAX_AGE_MS) {
+          return {
+            rows: snapshot.rows,
+            source: "stale_snapshot",
+            staleAgeMs: now - snapshot.updatedAt,
+          } satisfies NflFallbackTokenMetaResult;
+        }
+        return { rows: [], source: "empty" } satisfies NflFallbackTokenMetaResult;
+      }
 
       const payload = (await response.json()) as NflFunPlayersPayload;
       const players = Array.isArray(payload.players) ? payload.players : [];
@@ -150,11 +212,31 @@ export async function getNflFallbackTokenMetaMap(): Promise<Map<string, NflFallb
         byToken.set(meta.tokenIdDec, mergeFallbackMeta(byToken.get(meta.tokenIdDec), meta));
       }
 
-      return Array.from(byToken.values());
+      const rows = Array.from(byToken.values());
+      if (rows.length) {
+        writeSnapshot(rows, url);
+        return { rows, source: "remote" } satisfies NflFallbackTokenMetaResult;
+      }
+
+      const snapshot = readSnapshot();
+      if (snapshot?.rows.length && now - snapshot.updatedAt <= STALE_MAX_AGE_MS) {
+        return {
+          rows: snapshot.rows,
+          source: "stale_snapshot",
+          staleAgeMs: now - snapshot.updatedAt,
+        } satisfies NflFallbackTokenMetaResult;
+      }
+      return { rows: [], source: "empty" } satisfies NflFallbackTokenMetaResult;
     } catch {
-      return [] as NflFallbackTokenMeta[];
+      const snapshot = readSnapshot();
+      if (snapshot?.rows.length && now - snapshot.updatedAt <= STALE_MAX_AGE_MS) {
+        return {
+          rows: snapshot.rows,
+          source: "stale_snapshot",
+          staleAgeMs: now - snapshot.updatedAt,
+        } satisfies NflFallbackTokenMetaResult;
+      }
+      return { rows: [], source: "empty" } satisfies NflFallbackTokenMetaResult;
     }
   });
-
-  return new Map(rows.map((row) => [row.tokenIdDec, row]));
 }
