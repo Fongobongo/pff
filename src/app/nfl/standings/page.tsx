@@ -2,6 +2,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { getBaseUrl } from "@/lib/serverBaseUrl";
 import NflPageShell from "../_components/NflPageShell";
+import NflMarketDiagnostics from "../_components/NflMarketDiagnostics";
 
 const SAMPLE_SEASONS = [2021, 2022, 2023];
 const GAME_TYPES = ["REG", "POST", "PRE"] as const;
@@ -254,6 +255,8 @@ export default async function NflStandingsPage({
       <section className="mt-4 text-xs text-zinc-600 dark:text-zinc-400">
         Updated {data.asOf ? new Date(data.asOf).toLocaleString() : "—"} · {rows.length} teams
       </section>
+
+      <NflMarketDiagnostics />
 
       {Array.from(byConference.entries()).map(([conf, confRows]) => (
         <section key={conf} className="mt-8">

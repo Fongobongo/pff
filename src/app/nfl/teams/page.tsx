@@ -2,6 +2,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { getBaseUrl } from "@/lib/serverBaseUrl";
 import NflPageShell from "../_components/NflPageShell";
+import NflMarketDiagnostics from "../_components/NflMarketDiagnostics";
 
 const SORT_OPTIONS = [
   { key: "squad_value", label: "Squad value" },
@@ -100,6 +101,8 @@ export default async function NflTeamsPage({
       <section className="mt-4 text-xs text-zinc-600 dark:text-zinc-400">
         Updated {new Date(data.asOf).toLocaleString()} · {data.rows.length} teams
       </section>
+
+      <NflMarketDiagnostics />
 
       <section className="mt-6">
         <div className="overflow-x-auto rounded-xl border border-black/10 bg-white dark:border-white/10 dark:bg-white/5">
