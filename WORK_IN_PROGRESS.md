@@ -1,10 +1,10 @@
 # Work in Progress
 
 ## Now
-- **NFL market observability polish:** telemetry is available in API and now surfaced in the embedded NFL portfolio UI.
+- **NFL market observability polish:** telemetry + alerts are now persisted via a lightweight sink and visible in NFL diagnostics.
 
 ## Next
-- Optional: persist unresolved-share alerts into a lightweight log sink/metric backend (currently console-based throttled warnings only).
+- Optional: add a dedicated internal page for alert history drill-down (currently surfaced via `/api/sportfun/market-alerts` and compact badges).
 
 ## Status
 - Last updated: 2026-02-08
@@ -41,6 +41,10 @@
   - Added configurable unresolved-share alert threshold (`NFL_MARKET_UNRESOLVED_ALERT_PCT`) with throttled warning logs in `/api/sportfun/market`.
   - Added diagnostic headers: `x-market-unresolved-share-pct`, `x-market-unresolved-alert-threshold-pct`.
   - Added compact `Market diagnostics` badge to `/nfl/teams` and `/nfl/standings` via shared `src/app/nfl/_components/NflMarketDiagnostics.tsx`.
+  - Added lightweight market alert sink (`src/lib/marketAlertSink.ts`) with KV-first persistence and file fallback.
+  - Added alerts API: `GET /api/sportfun/market-alerts` (supports `limit`, `sport`, `type`).
+  - `/api/sportfun/market` now persists throttled `stale_feed` and `unresolved_share_high` alerts into sink.
+  - NFL diagnostics now shows sink metadata and latest alert details; health/smoke scripts validate new alerts API.
 - NFL core gaps (relative to selected `nfl-fun` scope) implemented:
   - **Phase 1:** Team economics + standings fantasy fields.
     - New module: `src/lib/nfl/teamEconomics.ts`.

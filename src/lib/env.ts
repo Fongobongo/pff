@@ -36,6 +36,10 @@ const envSchema = z.object({
 
   // Alert threshold for unresolved metadata share in NFL market API responses (0..100).
   NFL_MARKET_UNRESOLVED_ALERT_PCT: z.coerce.number().min(0).max(100).optional(),
+
+  // Market alert sink config.
+  MARKET_ALERT_SINK_MAX: z.coerce.number().int().min(50).max(2000).optional(),
+  MARKET_ALERT_RETENTION_HOURS: z.coerce.number().int().min(1).max(24 * 365).optional(),
 });
 
 const parsed = envSchema.parse({
@@ -51,6 +55,8 @@ const parsed = envSchema.parse({
   FUN_REWARD_TIERS_JSON: process.env.FUN_REWARD_TIERS_JSON,
   NFL_FUN_PLAYERS_DATA_URL: process.env.NFL_FUN_PLAYERS_DATA_URL,
   NFL_MARKET_UNRESOLVED_ALERT_PCT: process.env.NFL_MARKET_UNRESOLVED_ALERT_PCT,
+  MARKET_ALERT_SINK_MAX: process.env.MARKET_ALERT_SINK_MAX,
+  MARKET_ALERT_RETENTION_HOURS: process.env.MARKET_ALERT_RETENTION_HOURS,
 });
 
 function parseBoolean(value: string | undefined): boolean {
@@ -64,4 +70,6 @@ export const env = {
   BASE_RPC_URL: parsed.BASE_RPC_URL ?? "https://mainnet.base.org",
   SLEEPER_PROJECTIONS_ENABLED: parseBoolean(parsed.SLEEPER_PROJECTIONS_ENABLED),
   NFL_MARKET_UNRESOLVED_ALERT_PCT: parsed.NFL_MARKET_UNRESOLVED_ALERT_PCT ?? 25,
+  MARKET_ALERT_SINK_MAX: parsed.MARKET_ALERT_SINK_MAX ?? 300,
+  MARKET_ALERT_RETENTION_HOURS: parsed.MARKET_ALERT_RETENTION_HOURS ?? 24 * 7,
 };

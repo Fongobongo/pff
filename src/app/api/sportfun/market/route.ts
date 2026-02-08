@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getSportfunMarketSnapshot } from "@/lib/sportfunMarket";
 import { env } from "@/lib/env";
+import { appendMarketAlert } from "@/lib/marketAlertSink";
 
 export const runtime = "nodejs";
 
@@ -22,12 +23,13 @@ function parseNumber(value: string | undefined, fallback: number, min: number, m
 const LOG_TTL_MS = 5 * 60 * 1000;
 const logWindowByKey = new Map<string, number>();
 
-function logOncePerWindow(key: string, message: string, ttlMs = LOG_TTL_MS) {
+function logOncePerWindow(key: string, message: string, ttlMs = LOG_TTL_MS): boolean {
   const now = Date.now();
   const until = logWindowByKey.get(key) ?? 0;
-  if (now < until) return;
+  if (now < until) return false;
   logWindowByKey.set(key, now + ttlMs);
   console.warn(message);
+  return true;
 }
 
 export async function GET(request: Request) {
@@ -59,18 +61,47 @@ export async function GET(request: Request) {
     totalTokens > 0 ? (metadataSourceCounts.unresolved / totalTokens) * 100 : 0;
   if (fallbackFeed.source === "stale_snapshot") {
     const staleAge = fallbackFeed.staleAgeMs ?? -1;
-    logOncePerWindow(
+    const emitted = logOncePerWindow(
       `market-fallback-stale:${query.sport}`,
       `[sportfun-market] stale fallback feed source=${query.sport} staleAgeMs=${staleAge} onchainOnly=${metadataSourceCounts.onchainOnly} fallbackOnly=${metadataSourceCounts.fallbackOnly} hybrid=${metadataSourceCounts.hybrid} unresolved=${metadataSourceCounts.unresolved}`
     );
+    if (emitted) {
+      void appendMarketAlert({
+        sport: query.sport,
+        type: "fallback_stale_feed",
+        message: "Stale fallback feed source used for market metadata.",
+        data: {
+          staleAgeMs: staleAge,
+          onchainOnly: metadataSourceCounts.onchainOnly,
+          fallbackOnly: metadataSourceCounts.fallbackOnly,
+          hybrid: metadataSourceCounts.hybrid,
+          unresolved: metadataSourceCounts.unresolved,
+          unresolvedSharePct: Number(unresolvedSharePct.toFixed(2)),
+        },
+      });
+    }
   }
   if (query.sport === "nfl" && totalTokens > 0 && unresolvedSharePct >= env.NFL_MARKET_UNRESOLVED_ALERT_PCT) {
-    logOncePerWindow(
+    const emitted = logOncePerWindow(
       `market-unresolved-share:${query.sport}`,
       `[sportfun-market] unresolved metadata share high sport=${query.sport} unresolved=${metadataSourceCounts.unresolved}/${totalTokens} unresolvedPct=${unresolvedSharePct.toFixed(
         2
       )} thresholdPct=${env.NFL_MARKET_UNRESOLVED_ALERT_PCT} fallbackFeed=${fallbackFeed.source}`
     );
+    if (emitted) {
+      void appendMarketAlert({
+        sport: query.sport,
+        type: "unresolved_share_high",
+        message: "Unresolved metadata share exceeded configured threshold.",
+        data: {
+          unresolved: metadataSourceCounts.unresolved,
+          totalTokens,
+          unresolvedSharePct: Number(unresolvedSharePct.toFixed(2)),
+          thresholdPct: env.NFL_MARKET_UNRESOLVED_ALERT_PCT,
+          fallbackFeed: fallbackFeed.source,
+        },
+      });
+    }
   }
 
   return NextResponse.json(snapshot, {

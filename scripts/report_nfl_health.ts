@@ -81,6 +81,7 @@ async function main() {
     `/api/stats/nfl/projections?season=${season}&week=${week}&season_type=${seasonType}&source=auto`
   );
   const market = await checkMarketJsonWithRetry();
+  const marketAlerts = await checkJson("/api/sportfun/market-alerts?sport=nfl&limit=5");
   const standings = await checkJson(`/api/stats/nfl/standings?season=${season}&game_type=${seasonType}`);
   const economics = await checkJson(`/api/stats/nfl/team-economics?sort=squad_value&dir=desc`);
 
@@ -135,6 +136,15 @@ async function main() {
   );
   console.log(`- ${economics.path}: status=${economics.status} latencyMs=${economics.elapsedMs} rows=${economicsRows.length}`);
   console.log(`  nonZeroEconomicsRows=${nonZeroEconomicsRows.length}`);
+  const marketAlertsJson = marketAlerts.json as JsonAny;
+  const alertRows = Array.isArray(marketAlertsJson.alerts) ? marketAlertsJson.alerts : [];
+  console.log(
+    `- ${marketAlerts.path}: status=${marketAlerts.status} latencyMs=${marketAlerts.elapsedMs} total=${marketAlertsJson.total ?? "n/a"} sink=${marketAlertsJson.sink ?? "n/a"}`
+  );
+  if (alertRows.length > 0) {
+    const latest = alertRows[0] as JsonAny;
+    console.log(`  latestAlert=${latest.type ?? "n/a"} at ${latest.ts ?? "n/a"}`);
+  }
 
   assert.ok(enrichedMarketTokens.length > 0, "expected enriched market tokens (name/team/position)");
   assert.ok(fallbackOnlyCount + hybridCount > 0, "expected fallback/hybrid metadata usage");
@@ -149,6 +159,7 @@ async function main() {
     "expected unresolved share header"
   );
   assert.ok(nonZeroEconomicsRows.length > 0, "expected at least one non-zero economics row");
+  assert.ok(Array.isArray(alertRows), "expected market alerts endpoint to return alerts array");
 
   console.log("\nnfl health report passed");
 }

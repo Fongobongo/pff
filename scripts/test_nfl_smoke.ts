@@ -248,6 +248,18 @@ async function runApiChecks() {
     "projection rows have invalid shape"
   );
   console.log(`[api] ok /api/stats/nfl/projections sources=${sources.join(",")}`);
+
+  const alerts = await fetchText("/api/sportfun/market-alerts?sport=nfl&limit=5", "desktop");
+  assert.equal(alerts.status, 200, "market-alerts API should return 200");
+  const alertsJson = JSON.parse(alerts.text) as {
+    total?: number;
+    sink?: string;
+    alerts?: Array<{ ts?: string; type?: string }>;
+  };
+  assert.ok(Array.isArray(alertsJson.alerts), "market-alerts rows must be array");
+  console.log(
+    `[api] ok /api/sportfun/market-alerts total=${alertsJson.total ?? 0} sink=${alertsJson.sink ?? "n/a"}`
+  );
 }
 
 async function main() {

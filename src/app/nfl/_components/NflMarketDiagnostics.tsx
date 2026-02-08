@@ -18,6 +18,15 @@ type MarketDiagnosticsResponse = {
   };
 };
 
+type MarketAlertsResponse = {
+  sink?: string;
+  total?: number;
+  alerts?: Array<{
+    ts?: string;
+    type?: string;
+  }>;
+};
+
 function formatAgeMs(ms?: number): string {
   if (typeof ms !== "number" || !Number.isFinite(ms) || ms < 0) return "n/a";
   const seconds = Math.floor(ms / 1000);
@@ -33,13 +42,19 @@ function formatAgeMs(ms?: number): string {
 export default async function NflMarketDiagnostics() {
   try {
     const baseUrl = await getBaseUrl();
-    const res = await fetch(
-      `${baseUrl}/api/sportfun/market?sport=nfl&windowHours=24&trendDays=30&maxTokens=1000`,
-      { next: { revalidate: 120 } }
-    );
+    const [res, alertsRes] = await Promise.all([
+      fetch(`${baseUrl}/api/sportfun/market?sport=nfl&windowHours=24&trendDays=30&maxTokens=1000`, {
+        next: { revalidate: 120 },
+      }),
+      fetch(`${baseUrl}/api/sportfun/market-alerts?sport=nfl&limit=1`, {
+        cache: "no-store",
+      }),
+    ]);
     if (!res.ok) throw new Error(`market diagnostics request failed: ${res.status}`);
 
     const data = (await res.json()) as MarketDiagnosticsResponse;
+    const alertsData = alertsRes.ok ? ((await alertsRes.json()) as MarketAlertsResponse) : null;
+    const latestAlert = alertsData?.alerts?.[0];
     const counts = data.stats?.metadataSourceCounts ?? {};
     const fallbackFeed = data.stats?.fallbackFeed ?? {};
     const totalTokens = Array.isArray(data.tokens) ? data.tokens.length : 0;
@@ -68,6 +83,13 @@ export default async function NflMarketDiagnostics() {
             unresolved {unresolved}/{totalTokens} ({Number.isFinite(unresolvedSharePct) ? unresolvedSharePct.toFixed(2) : "n/a"}%)
           </span>
           <span>alert ≥ {Number.isFinite(thresholdPct) ? thresholdPct.toFixed(0) : "25"}%</span>
+          <span>alerts {alertsData?.total ?? 0}</span>
+          <span>sink {alertsData?.sink ?? "n/a"}</span>
+          {latestAlert?.ts ? (
+            <span>
+              last alert {new Date(latestAlert.ts).toLocaleString()} ({latestAlert.type ?? "unknown"})
+            </span>
+          ) : null}
           <span>as of {data.asOf ? new Date(data.asOf).toLocaleString() : "n/a"}</span>
         </div>
       </section>
