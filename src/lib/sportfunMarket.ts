@@ -190,6 +190,11 @@ function parseNumericValue(value: unknown): number | null {
   return null;
 }
 
+function describeError(error: unknown): string {
+  if (error instanceof Error && error.message) return error.message;
+  return String(error);
+}
+
 function normalizePosition(raw: string): string {
   const value = raw.trim().toUpperCase();
   if (value.includes("QUARTERBACK") || value === "QB") return "QB";
@@ -845,14 +850,42 @@ export async function getSportfunMarketSnapshot(params: {
       const latest = await getLatestBlock();
       const windowStart = now - windowHours * 60 * 60 * 1000;
       const trendStart = now - trendDays * 24 * 60 * 60 * 1000;
-      const trendFromBlock = await findBlockByTimestamp(trendStart);
+      const windowFromBlock = await findBlockByTimestamp(windowStart);
+      const trendFromBlock =
+        trendStart < windowStart ? await findBlockByTimestamp(trendStart) : windowFromBlock;
 
-      let events: TradeEvent[] = [];
+      let windowEvents: TradeEvent[] = [];
+      let windowEventsError = false;
       try {
-        events = await getTradeEvents({ sport: params.sport, fromBlock: trendFromBlock, toBlock: latest });
-      } catch {
-        events = [];
+        windowEvents = await getTradeEvents({
+          sport: params.sport,
+          fromBlock: windowFromBlock,
+          toBlock: latest,
+        });
+      } catch (error: unknown) {
+        windowEventsError = true;
+        windowEvents = [];
+        console.warn(
+          `[sportfun-market] window trade fetch failed sport=${params.sport} windowHours=${windowHours}: ${describeError(error)}`
+        );
       }
+
+      let events = windowEvents;
+      if (trendFromBlock < windowFromBlock) {
+        try {
+          const historicalEvents = await getTradeEvents({
+            sport: params.sport,
+            fromBlock: trendFromBlock,
+            toBlock: windowFromBlock - 1n,
+          });
+          events = [...historicalEvents, ...windowEvents];
+        } catch (error: unknown) {
+          console.warn(
+            `[sportfun-market] historical trend fetch failed sport=${params.sport} trendDays=${trendDays}: ${describeError(error)}`
+          );
+        }
+      }
+
       const tokenAgg = normalizeTokenAgg(events, windowStart);
       const lastTradeByToken = new Map<string, { ts: number; price?: bigint }>();
       for (const event of events) {
@@ -1071,7 +1104,25 @@ export async function getSportfunMarketSnapshot(params: {
         },
       };
       if (snapshot.tokens.length > 0) {
-        writeMarketSnapshotFallback(params.sport, snapshot);
+        const activityDegraded = windowEventsError && snapshot.summary.trades24h === 0;
+        if (!activityDegraded) {
+          writeMarketSnapshotFallback(params.sport, snapshot);
+        } else {
+          console.warn(
+            `[sportfun-market] preserving last-good snapshot due degraded activity sport=${params.sport} trades24h=${snapshot.summary.trades24h}`
+          );
+          const staleSnapshot = readMarketSnapshotFallback(params.sport);
+          if (
+            staleSnapshot?.tokens?.length &&
+            staleSnapshot.summary?.trades24h &&
+            staleSnapshot.summary.trades24h > 0
+          ) {
+            console.warn(
+              `[sportfun-market] using stale activity snapshot sport=${params.sport} staleTrades24h=${staleSnapshot.summary.trades24h}`
+            );
+            return staleSnapshot;
+          }
+        }
         return snapshot;
       }
 
