@@ -3,6 +3,8 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
+const ALERT_ADMIN_TOKEN_STORAGE_KEY = "market_alert_admin_token";
+
 type AlertActionPayload =
   | { action: "ack"; alertId: string }
   | { action: "ack_all"; sport?: "nfl" | "soccer"; type?: "fallback_stale_feed" | "unresolved_share_high" }
@@ -33,18 +35,35 @@ export default function AlertActionButton({
   async function run() {
     if (loading || disabled) return;
     setError(null);
+    let adminToken = "";
+    try {
+      adminToken = window.localStorage.getItem(ALERT_ADMIN_TOKEN_STORAGE_KEY)?.trim() ?? "";
+    } catch {
+      adminToken = "";
+    }
+    if (!adminToken) {
+      setError("Admin token is not set. Save it in Alerts controls first.");
+      return;
+    }
     setLoading(true);
     try {
       const res = await fetch("/api/sportfun/market-alerts", {
         method: "POST",
         headers: {
           "content-type": "application/json",
+          "x-market-alert-admin-token": adminToken,
         },
         body: JSON.stringify(payload),
       });
       if (!res.ok) {
-        const body = await res.text();
-        throw new Error(body || `Action failed: ${res.status}`);
+        let message = `Action failed: ${res.status}`;
+        try {
+          const json = (await res.json()) as { error?: string };
+          if (json?.error) message = json.error;
+        } catch {
+          // ignore non-json error body
+        }
+        throw new Error(message);
       }
       router.refresh();
     } catch (err: unknown) {

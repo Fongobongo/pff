@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 import {
   acknowledgeMarketAlertById,
@@ -8,6 +9,7 @@ import {
   type MarketAlertSport,
   type MarketAlertType,
 } from "@/lib/marketAlertSink";
+import { env } from "@/lib/env";
 
 export const runtime = "nodejs";
 
@@ -48,6 +50,32 @@ function parseLimit(value: string | undefined): number {
   return Math.max(1, Math.min(200, Math.trunc(parsed)));
 }
 
+function parseBearerToken(authorization: string | null): string | null {
+  if (!authorization) return null;
+  const value = authorization.trim();
+  const prefix = "Bearer ";
+  if (!value.startsWith(prefix)) return null;
+  const token = value.slice(prefix.length).trim();
+  return token || null;
+}
+
+function tokensEqual(expected: string, provided: string): boolean {
+  const left = Buffer.from(expected);
+  const right = Buffer.from(provided);
+  if (left.length !== right.length) return false;
+  try {
+    return timingSafeEqual(left, right);
+  } catch {
+    return false;
+  }
+}
+
+function getProvidedAdminToken(request: Request): string | null {
+  const custom = request.headers.get("x-market-alert-admin-token");
+  if (custom && custom.trim()) return custom.trim();
+  return parseBearerToken(request.headers.get("authorization"));
+}
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const query = querySchema.parse({
@@ -65,11 +93,38 @@ export async function GET(request: Request) {
   return NextResponse.json(payload, {
     headers: {
       "cache-control": "no-store",
+      "x-market-alerts-mutations-auth":
+        env.MARKET_ALERT_ADMIN_TOKEN && env.MARKET_ALERT_ADMIN_TOKEN.trim()
+          ? "configured"
+          : "missing",
     },
   });
 }
 
 export async function POST(request: Request) {
+  const expectedToken = env.MARKET_ALERT_ADMIN_TOKEN?.trim();
+  if (!expectedToken) {
+    return NextResponse.json(
+      {
+        error:
+          "Alert mutations are disabled: MARKET_ALERT_ADMIN_TOKEN is not configured on the server.",
+      },
+      { status: 503 }
+    );
+  }
+  const providedToken = getProvidedAdminToken(request);
+  if (!providedToken || !tokensEqual(expectedToken, providedToken)) {
+    return NextResponse.json(
+      { error: "Unauthorized: missing or invalid admin token." },
+      {
+        status: 401,
+        headers: {
+          "www-authenticate": 'Bearer realm="market-alerts-admin"',
+        },
+      }
+    );
+  }
+
   let body: unknown;
   try {
     body = await request.json();

@@ -40,6 +40,9 @@ const envSchema = z.object({
   // Market alert sink config.
   MARKET_ALERT_SINK_MAX: z.coerce.number().int().min(50).max(2000).optional(),
   MARKET_ALERT_RETENTION_HOURS: z.coerce.number().int().min(1).max(24 * 365).optional(),
+
+  // Admin token required for mutating market-alert operations.
+  MARKET_ALERT_ADMIN_TOKEN: z.string().min(8).optional(),
 });
 
 const parsed = envSchema.parse({
@@ -57,6 +60,7 @@ const parsed = envSchema.parse({
   NFL_MARKET_UNRESOLVED_ALERT_PCT: process.env.NFL_MARKET_UNRESOLVED_ALERT_PCT,
   MARKET_ALERT_SINK_MAX: process.env.MARKET_ALERT_SINK_MAX,
   MARKET_ALERT_RETENTION_HOURS: process.env.MARKET_ALERT_RETENTION_HOURS,
+  MARKET_ALERT_ADMIN_TOKEN: process.env.MARKET_ALERT_ADMIN_TOKEN,
 });
 
 function parseBoolean(value: string | undefined): boolean {
@@ -72,4 +76,5 @@ export const env = {
   NFL_MARKET_UNRESOLVED_ALERT_PCT: parsed.NFL_MARKET_UNRESOLVED_ALERT_PCT ?? 25,
   MARKET_ALERT_SINK_MAX: parsed.MARKET_ALERT_SINK_MAX ?? 300,
   MARKET_ALERT_RETENTION_HOURS: parsed.MARKET_ALERT_RETENTION_HOURS ?? 24 * 7,
+  MARKET_ALERT_ADMIN_TOKEN: parsed.MARKET_ALERT_ADMIN_TOKEN,
 };

@@ -7,6 +7,7 @@ type Check = {
 };
 
 const baseUrl = (process.env.NFL_SMOKE_BASE_URL ?? "http://localhost:3100").replace(/\/$/, "");
+const marketCheckMaxTokens = Number(process.env.NFL_SMOKE_MARKET_MAX_TOKENS ?? "1000");
 const expectSources = (process.env.NFL_SMOKE_EXPECT_SOURCES ?? "")
   .split(",")
   .map((v) => v.trim())
@@ -58,7 +59,7 @@ async function fetchMarketWithRetry(profile: "desktop" | "mobile", attempts = 4)
     | null = null;
 
   for (let i = 0; i < attempts; i += 1) {
-    const marketPath = `/api/sportfun/market?sport=nfl&windowHours=24&trendDays=30&maxTokens=121&cacheBust=${Date.now()}-${i}`;
+    const marketPath = `/api/sportfun/market?sport=nfl&windowHours=24&trendDays=30&maxTokens=${marketCheckMaxTokens}&cacheBust=${Date.now()}-${i}`;
     const market = await fetchText(marketPath, profile);
     if (market.status !== 200) {
       await sleep(300 * (i + 1));
@@ -87,7 +88,7 @@ async function fetchMarketWithRetry(profile: "desktop" | "mobile", attempts = 4)
 
   if (last) return last;
 
-  const marketPath = `/api/sportfun/market?sport=nfl&windowHours=24&trendDays=30&maxTokens=121&cacheBust=${Date.now()}-fallback`;
+  const marketPath = `/api/sportfun/market?sport=nfl&windowHours=24&trendDays=30&maxTokens=${marketCheckMaxTokens}&cacheBust=${Date.now()}-fallback`;
   const market = await fetchText(marketPath, profile);
   const json = JSON.parse(market.text) as {
     stats?: {

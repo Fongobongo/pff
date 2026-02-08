@@ -1,10 +1,10 @@
 # Work in Progress
 
 ## Now
-- **NFL market observability polish:** alerts feed now supports acknowledge/mute controls and type-level suppression.
+- **NFL market observability hardening:** alert mutations now require admin token auth instead of open internal controls.
 
 ## Next
-- Optional: add role-based/auth gate for alert mutations (current controls are internal/trusted-env style).
+- Optional: replace static admin token with user/session-based auth (e.g. wallet allowlist or SSO) for auditability.
 
 ## Status
 - Last updated: 2026-02-08
@@ -52,6 +52,11 @@
     - `ack`, `ack_all`, `mute`, `unmute`.
   - `src/lib/marketAlertSink.ts` now stores `acknowledgedAt` and `muteRules`, and suppresses creation/logging for muted alert types.
   - `/nfl/alerts` now includes operational controls (ack visible, per-type mute/unmute, row-level acknowledge).
+  - Added server-side mutation auth gate for `/api/sportfun/market-alerts`:
+    - requires `MARKET_ALERT_ADMIN_TOKEN`;
+    - accepts token via `x-market-alert-admin-token` or `Authorization: Bearer ...`;
+    - returns `503` when token is not configured, `401` on invalid/missing token.
+  - Added browser token helper panel on `/nfl/alerts` (`AlertAdminTokenPanel`) for internal operator workflows.
 - NFL core gaps (relative to selected `nfl-fun` scope) implemented:
   - **Phase 1:** Team economics + standings fantasy fields.
     - New module: `src/lib/nfl/teamEconomics.ts`.

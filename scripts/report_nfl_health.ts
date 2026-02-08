@@ -6,6 +6,7 @@ const baseUrl = (process.env.NFL_HEALTH_BASE_URL ?? "https://sports-fun.vercel.a
 const season = Number(process.env.NFL_HEALTH_SEASON ?? "2023");
 const week = Number(process.env.NFL_HEALTH_WEEK ?? "5");
 const seasonType = (process.env.NFL_HEALTH_SEASON_TYPE ?? "REG").toUpperCase();
+const marketCheckMaxTokens = Number(process.env.NFL_HEALTH_MARKET_MAX_TOKENS ?? "1000");
 
 async function fetchText(path: string) {
   const url = `${baseUrl}${path}`;
@@ -55,6 +56,7 @@ async function checkMarketJsonWithRetry(attempts = 4) {
   for (let i = 0; i < attempts; i += 1) {
     const result = await checkJson(
       `/api/sportfun/market?sport=nfl&windowHours=24&trendDays=30&maxTokens=121&cacheBust=${Date.now()}-${i}`
+        .replace("maxTokens=121", `maxTokens=${marketCheckMaxTokens}`)
     );
     last = result;
     const tokens = Array.isArray(result.json.tokens) ? result.json.tokens.length : 0;
@@ -62,7 +64,12 @@ async function checkMarketJsonWithRetry(attempts = 4) {
     await sleep(300 * (i + 1));
   }
 
-  return last ?? checkJson("/api/sportfun/market?sport=nfl&windowHours=24&trendDays=30&maxTokens=121");
+  return (
+    last ??
+    checkJson(
+      `/api/sportfun/market?sport=nfl&windowHours=24&trendDays=30&maxTokens=${marketCheckMaxTokens}`
+    )
+  );
 }
 
 async function main() {

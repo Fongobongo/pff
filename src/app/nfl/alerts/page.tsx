@@ -2,6 +2,7 @@ import Link from "next/link";
 import NflPageShell from "../_components/NflPageShell";
 import { getBaseUrl } from "@/lib/serverBaseUrl";
 import AlertActionButton from "./AlertActionButton";
+import AlertAdminTokenPanel from "./AlertAdminTokenPanel";
 
 type MarketAlert = {
   id: string;
@@ -90,6 +91,8 @@ export default async function NflAlertsPage({
     { cache: "no-store" }
   );
   const data = (await res.json()) as MarketAlertsResponse;
+  const mutationsAuthConfigured =
+    String(res.headers.get("x-market-alerts-mutations-auth") ?? "missing") === "configured";
   const muteRules = Array.isArray(data.muteRules) ? data.muteRules : [];
   const muteRuleByType = new Map(
     muteRules
@@ -145,6 +148,8 @@ export default async function NflAlertsPage({
         Sink {data.sink} · total {data.total} · unacknowledged {data.totalUnacknowledged ?? filteredUnackCount} · retention {data.retentionHours}h · max {data.maxEntries} · updated{" "}
         {new Date(data.updatedAt).toLocaleString()}
       </section>
+
+      <AlertAdminTokenPanel mutationsAuthConfigured={mutationsAuthConfigured} />
 
       <section className="mt-4 rounded-xl border border-black/10 bg-white/80 p-3 dark:border-white/10 dark:bg-white/5">
         <div className="flex flex-wrap items-center gap-2">
