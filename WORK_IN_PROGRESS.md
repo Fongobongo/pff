@@ -35,7 +35,9 @@
     - `x-market-fallback-feed-stale-age-ms`
   - Added stale snapshot fallback in `src/lib/nfl/nflFunFallback.ts` (serves last successful dataset if upstream fails within max stale window).
   - Added bundled fallback dataset `src/lib/nfl/nflFunFallback.snapshot.json` for serverless environments where upstream feed is unreachable.
+  - `src/lib/sportfunMarket.ts` now falls back to NFL fallback token IDs when on-chain token universe is temporarily empty, and tolerates price fetch failures by returning degraded-but-non-empty snapshots.
   - Added targeted mobile regression script: `scripts/test_nfl_mobile_regression.ts` (`npm run test:nfl-mobile`).
+  - Stabilized prod smoke/health scripts against stale edge cache artifacts via cache-busting market query param.
 - NFL core gaps (relative to selected `nfl-fun` scope) implemented:
   - **Phase 1:** Team economics + standings fantasy fields.
     - New module: `src/lib/nfl/teamEconomics.ts`.
