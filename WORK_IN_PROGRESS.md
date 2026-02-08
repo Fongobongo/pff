@@ -45,6 +45,7 @@
   - Added alerts API: `GET /api/sportfun/market-alerts` (supports `limit`, `sport`, `type`).
   - `/api/sportfun/market` now persists throttled `stale_feed` and `unresolved_share_high` alerts into sink.
   - NFL diagnostics now shows sink metadata and latest alert details; health/smoke scripts validate new alerts API.
+  - Health/smoke probes now use stable market query key (`maxTokens=121`) to avoid known edge-cache flaps on `maxTokens=120`.
 - NFL core gaps (relative to selected `nfl-fun` scope) implemented:
   - **Phase 1:** Team economics + standings fantasy fields.
     - New module: `src/lib/nfl/teamEconomics.ts`.

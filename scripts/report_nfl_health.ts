@@ -54,7 +54,7 @@ async function checkMarketJsonWithRetry(attempts = 4) {
 
   for (let i = 0; i < attempts; i += 1) {
     const result = await checkJson(
-      `/api/sportfun/market?sport=nfl&windowHours=24&trendDays=30&maxTokens=120&cacheBust=${Date.now()}-${i}`
+      `/api/sportfun/market?sport=nfl&windowHours=24&trendDays=30&maxTokens=121&cacheBust=${Date.now()}-${i}`
     );
     last = result;
     const tokens = Array.isArray(result.json.tokens) ? result.json.tokens.length : 0;
@@ -62,7 +62,7 @@ async function checkMarketJsonWithRetry(attempts = 4) {
     await sleep(300 * (i + 1));
   }
 
-  return last ?? checkJson("/api/sportfun/market?sport=nfl&windowHours=24&trendDays=30&maxTokens=120");
+  return last ?? checkJson("/api/sportfun/market?sport=nfl&windowHours=24&trendDays=30&maxTokens=121");
 }
 
 async function main() {

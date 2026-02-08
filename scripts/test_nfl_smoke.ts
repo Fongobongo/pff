@@ -58,7 +58,7 @@ async function fetchMarketWithRetry(profile: "desktop" | "mobile", attempts = 4)
     | null = null;
 
   for (let i = 0; i < attempts; i += 1) {
-    const marketPath = `/api/sportfun/market?sport=nfl&windowHours=24&trendDays=30&maxTokens=120&cacheBust=${Date.now()}-${i}`;
+    const marketPath = `/api/sportfun/market?sport=nfl&windowHours=24&trendDays=30&maxTokens=121&cacheBust=${Date.now()}-${i}`;
     const market = await fetchText(marketPath, profile);
     if (market.status !== 200) {
       await sleep(300 * (i + 1));
@@ -87,7 +87,7 @@ async function fetchMarketWithRetry(profile: "desktop" | "mobile", attempts = 4)
 
   if (last) return last;
 
-  const marketPath = `/api/sportfun/market?sport=nfl&windowHours=24&trendDays=30&maxTokens=120&cacheBust=${Date.now()}-fallback`;
+  const marketPath = `/api/sportfun/market?sport=nfl&windowHours=24&trendDays=30&maxTokens=121&cacheBust=${Date.now()}-fallback`;
   const market = await fetchText(marketPath, profile);
   const json = JSON.parse(market.text) as {
     stats?: {
