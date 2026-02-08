@@ -183,8 +183,29 @@ type SportfunMarketTokenLite = {
   attributes?: unknown;
 };
 
+type SportfunMarketTelemetry = {
+  asOf?: string;
+  totalTokens: number;
+  metadataSourceCounts: {
+    onchainOnly: number;
+    fallbackOnly: number;
+    hybrid: number;
+    overrideOnly: number;
+    unresolved: number;
+  };
+  fallbackFeed: {
+    source: string;
+    staleAgeMs?: number;
+  };
+};
+
 type SportfunMarketSnapshotLite = {
+  asOf?: string;
   tokens: SportfunMarketTokenLite[];
+  stats?: {
+    metadataSourceCounts?: Partial<SportfunMarketTelemetry["metadataSourceCounts"]>;
+    fallbackFeed?: Partial<SportfunMarketTelemetry["fallbackFeed"]>;
+  };
 };
 
 function extractAttributeValue(attributes: unknown, matchKey: (key: string) => boolean): unknown {
@@ -311,6 +332,18 @@ function formatUsdc(raw: string, decimals: number): string {
   return formatFixed(raw, decimals);
 }
 
+function formatAgeMs(ms?: number): string {
+  if (typeof ms !== "number" || !Number.isFinite(ms) || ms < 0) return "n/a";
+  const seconds = Math.floor(ms / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h`;
+  const days = Math.floor(hours / 24);
+  return `${days}d`;
+}
+
 export default function SportfunPortfolioDashboard({
   address,
   mode = "sportfun",
@@ -338,6 +371,7 @@ export default function SportfunPortfolioDashboard({
   const [nflTokenMeta, setNflTokenMeta] = useState<Map<string, { position?: string; team?: string }>>(
     new Map()
   );
+  const [nflMarketTelemetry, setNflMarketTelemetry] = useState<SportfunMarketTelemetry | null>(null);
 
   const decimals = data?.assumptions.usdc.decimals ?? 6;
   const tokenLabelMap = useMemo(() => {
@@ -469,13 +503,14 @@ export default function SportfunPortfolioDashboard({
   useEffect(() => {
     if (mode !== "nfl") {
       setNflTokenMeta(new Map());
+      setNflMarketTelemetry(null);
       return;
     }
 
     let cancelled = false;
 
     getJson<SportfunMarketSnapshotLite>(
-      "/api/sportfun/market?sport=nfl&windowHours=24&trendDays=30&maxTokens=1000",
+      `/api/sportfun/market?sport=nfl&windowHours=24&trendDays=30&maxTokens=1000&cacheBust=${Date.now()}`,
       25000
     )
       .then((snapshot) => {
@@ -488,10 +523,28 @@ export default function SportfunPortfolioDashboard({
           });
         }
         setNflTokenMeta(next);
+        const counts = snapshot.stats?.metadataSourceCounts;
+        const feed = snapshot.stats?.fallbackFeed;
+        setNflMarketTelemetry({
+          asOf: snapshot.asOf,
+          totalTokens: Array.isArray(snapshot.tokens) ? snapshot.tokens.length : 0,
+          metadataSourceCounts: {
+            onchainOnly: Number(counts?.onchainOnly ?? 0),
+            fallbackOnly: Number(counts?.fallbackOnly ?? 0),
+            hybrid: Number(counts?.hybrid ?? 0),
+            overrideOnly: Number(counts?.overrideOnly ?? 0),
+            unresolved: Number(counts?.unresolved ?? 0),
+          },
+          fallbackFeed: {
+            source: typeof feed?.source === "string" ? feed.source : "n/a",
+            staleAgeMs: typeof feed?.staleAgeMs === "number" ? feed.staleAgeMs : undefined,
+          },
+        });
       })
       .catch(() => {
         if (cancelled) return;
         setNflTokenMeta(new Map());
+        setNflMarketTelemetry(null);
       });
 
     return () => {
@@ -714,6 +767,20 @@ export default function SportfunPortfolioDashboard({
       byTeam: toRows(byTeam),
     };
   }, [mode, nflTokenMeta, sortedPositions]);
+
+  const nflMarketCoverage = useMemo(() => {
+    if (!nflMarketTelemetry) {
+      return { resolved: 0, total: 0, resolvedPct: 0 };
+    }
+    const counts = nflMarketTelemetry.metadataSourceCounts;
+    const resolved = counts.onchainOnly + counts.fallbackOnly + counts.hybrid + counts.overrideOnly;
+    const total = nflMarketTelemetry.totalTokens;
+    return {
+      resolved,
+      total,
+      resolvedPct: total > 0 ? (resolved / total) * 100 : 0,
+    };
+  }, [nflMarketTelemetry]);
 
   const activityTokenOptions = useMemo(() => {
     const map = new Map<string, { value: string; label: string }>();
@@ -1108,6 +1175,55 @@ export default function SportfunPortfolioDashboard({
                 </tbody>
               </table>
             </div>
+          </div>
+        </section>
+      ) : null}
+
+      {mode === "nfl" ? (
+        <section className="mt-6">
+          <div className={`rounded-xl border p-4 ${cardBorder}`}>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h2 className={`text-lg font-semibold ${cardTextMain}`}>Market Metadata Sources</h2>
+              {nflMarketTelemetry?.asOf ? (
+                <span className={`text-xs ${cardTextMutedStrong}`}>
+                  as of {new Date(nflMarketTelemetry.asOf).toLocaleString()}
+                </span>
+              ) : null}
+            </div>
+            <p className={`mt-1 text-xs ${cardTextMutedStrong}`}>
+              Feed: {nflMarketTelemetry?.fallbackFeed.source ?? "n/a"}
+              {nflMarketTelemetry?.fallbackFeed.source === "stale_snapshot"
+                ? ` · age ${formatAgeMs(nflMarketTelemetry.fallbackFeed.staleAgeMs)}`
+                : ""}
+              {` · resolved ${nflMarketCoverage.resolved}/${nflMarketCoverage.total} (${nflMarketCoverage.resolvedPct.toFixed(1)}%)`}
+            </p>
+
+            {nflMarketTelemetry ? (
+              <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-5">
+                <div className={`rounded-md border p-3 ${cardBorder}`}>
+                  <div className={`text-xs ${cardTextMutedStrong}`}>Onchain</div>
+                  <div className={`mt-1 text-lg ${cardTextMain}`}>{nflMarketTelemetry.metadataSourceCounts.onchainOnly}</div>
+                </div>
+                <div className={`rounded-md border p-3 ${cardBorder}`}>
+                  <div className={`text-xs ${cardTextMutedStrong}`}>Fallback</div>
+                  <div className={`mt-1 text-lg ${cardTextMain}`}>{nflMarketTelemetry.metadataSourceCounts.fallbackOnly}</div>
+                </div>
+                <div className={`rounded-md border p-3 ${cardBorder}`}>
+                  <div className={`text-xs ${cardTextMutedStrong}`}>Hybrid</div>
+                  <div className={`mt-1 text-lg ${cardTextMain}`}>{nflMarketTelemetry.metadataSourceCounts.hybrid}</div>
+                </div>
+                <div className={`rounded-md border p-3 ${cardBorder}`}>
+                  <div className={`text-xs ${cardTextMutedStrong}`}>Override</div>
+                  <div className={`mt-1 text-lg ${cardTextMain}`}>{nflMarketTelemetry.metadataSourceCounts.overrideOnly}</div>
+                </div>
+                <div className={`rounded-md border p-3 ${cardBorder}`}>
+                  <div className={`text-xs ${cardTextMutedStrong}`}>Unresolved</div>
+                  <div className={`mt-1 text-lg ${cardTextMain}`}>{nflMarketTelemetry.metadataSourceCounts.unresolved}</div>
+                </div>
+              </div>
+            ) : (
+              <p className={`mt-3 text-sm ${cardTextMutedStrong}`}>Telemetry unavailable.</p>
+            )}
           </div>
         </section>
       ) : null}
