@@ -126,6 +126,7 @@ const TOKEN_UNIVERSE_START_MS = Date.UTC(2025, 7, 1);
 const LOG_CHUNK_BLOCKS = 2500n;
 const MAX_TRANSFER_PAGES = 20;
 const CACHE_DIR = path.join(process.cwd(), ".cache", "sportfun", "market");
+const MARKET_SNAPSHOT_STALE_MS = 24 * 60 * 60 * 1000;
 
 const PRICE_DISTRIBUTION_BINS: Array<{ label: string; min?: number; max?: number }> = [
   { label: "< $1", max: 1 },
@@ -613,6 +614,35 @@ function tokenCachePath(sport: SportfunMarketSport) {
   return path.join(CACHE_DIR, `tokens-${sport}.json`);
 }
 
+function marketSnapshotPath(sport: SportfunMarketSport) {
+  ensureCacheDir();
+  return path.join(CACHE_DIR, `snapshot-${sport}.json`);
+}
+
+function readMarketSnapshotFallback(sport: SportfunMarketSport): SportfunMarketSnapshot | null {
+  try {
+    const raw = fs.readFileSync(marketSnapshotPath(sport), "utf8");
+    const parsed = JSON.parse(raw) as { updatedAt?: number; snapshot?: SportfunMarketSnapshot };
+    if (!parsed?.snapshot || typeof parsed.updatedAt !== "number") return null;
+    if (Date.now() - parsed.updatedAt > MARKET_SNAPSHOT_STALE_MS) return null;
+    return parsed.snapshot;
+  } catch {
+    return null;
+  }
+}
+
+function writeMarketSnapshotFallback(sport: SportfunMarketSport, snapshot: SportfunMarketSnapshot) {
+  try {
+    fs.writeFileSync(
+      marketSnapshotPath(sport),
+      JSON.stringify({ updatedAt: Date.now(), snapshot }),
+      "utf8"
+    );
+  } catch {
+    // ignore
+  }
+}
+
 function readTokenCache(sport: SportfunMarketSport): { tokenIds: string[]; updatedAt: number } | null {
   try {
     const raw = fs.readFileSync(tokenCachePath(sport), "utf8");
@@ -993,7 +1023,7 @@ export async function getSportfunMarketSnapshot(params: {
       const trendLosers =
         losersSet.size > 0 ? buildTrend(events.filter((e) => losersSet.has(e.tokenIdDec)), trendStart) : [];
 
-      return {
+      const snapshot: SportfunMarketSnapshot = {
         sport: params.sport,
         asOf: new Date(now).toISOString(),
         windowHours,
@@ -1012,9 +1042,29 @@ export async function getSportfunMarketSnapshot(params: {
           },
         },
       };
+      if (snapshot.tokens.length > 0) {
+        writeMarketSnapshotFallback(params.sport, snapshot);
+        return snapshot;
+      }
+
+      const staleSnapshot = readMarketSnapshotFallback(params.sport);
+      if (staleSnapshot?.tokens?.length) {
+        console.warn(
+          `[sportfun-market] using stale market snapshot fallback sport=${params.sport} tokens=${staleSnapshot.tokens.length}`
+        );
+        return staleSnapshot;
+      }
+      return snapshot;
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       console.warn(`[sportfun-market] snapshot build failed sport=${params.sport}: ${message}`);
+      const staleSnapshot = readMarketSnapshotFallback(params.sport);
+      if (staleSnapshot?.tokens?.length) {
+        console.warn(
+          `[sportfun-market] using stale market snapshot fallback sport=${params.sport} after error tokens=${staleSnapshot.tokens.length}`
+        );
+        return staleSnapshot;
+      }
       return {
         sport: params.sport,
         asOf: new Date(now).toISOString(),
