@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getSportfunMarketSnapshot } from "@/lib/sportfunMarket";
+import { env } from "@/lib/env";
 
 export const runtime = "nodejs";
 
@@ -53,11 +54,22 @@ export async function GET(request: Request) {
     unresolved: 0,
   };
   const fallbackFeed = snapshot.stats?.fallbackFeed ?? { source: "n/a", staleAgeMs: undefined };
+  const totalTokens = snapshot.tokens.length;
+  const unresolvedSharePct =
+    totalTokens > 0 ? (metadataSourceCounts.unresolved / totalTokens) * 100 : 0;
   if (fallbackFeed.source === "stale_snapshot") {
     const staleAge = fallbackFeed.staleAgeMs ?? -1;
     logOncePerWindow(
       `market-fallback-stale:${query.sport}`,
       `[sportfun-market] stale fallback feed source=${query.sport} staleAgeMs=${staleAge} onchainOnly=${metadataSourceCounts.onchainOnly} fallbackOnly=${metadataSourceCounts.fallbackOnly} hybrid=${metadataSourceCounts.hybrid} unresolved=${metadataSourceCounts.unresolved}`
+    );
+  }
+  if (query.sport === "nfl" && totalTokens > 0 && unresolvedSharePct >= env.NFL_MARKET_UNRESOLVED_ALERT_PCT) {
+    logOncePerWindow(
+      `market-unresolved-share:${query.sport}`,
+      `[sportfun-market] unresolved metadata share high sport=${query.sport} unresolved=${metadataSourceCounts.unresolved}/${totalTokens} unresolvedPct=${unresolvedSharePct.toFixed(
+        2
+      )} thresholdPct=${env.NFL_MARKET_UNRESOLVED_ALERT_PCT} fallbackFeed=${fallbackFeed.source}`
     );
   }
 
@@ -72,6 +84,8 @@ export async function GET(request: Request) {
       "x-market-fallback-feed-source": String(fallbackFeed.source),
       "x-market-fallback-feed-stale-age-ms":
         fallbackFeed.staleAgeMs !== undefined ? String(fallbackFeed.staleAgeMs) : "n/a",
+      "x-market-unresolved-share-pct": unresolvedSharePct.toFixed(2),
+      "x-market-unresolved-alert-threshold-pct": String(env.NFL_MARKET_UNRESOLVED_ALERT_PCT),
     },
   });
 }

@@ -131,7 +131,7 @@ async function main() {
     `  metadataSources(onchain=${metadataSourceCounts.onchainOnly ?? "n/a"}, fallback=${fallbackOnlyCount}, hybrid=${hybridCount}, unresolved=${unresolvedCount}) feed=${feedSource}`
   );
   console.log(
-    `  headers fallbackFeed=${market.headers.get("x-market-fallback-feed-source") ?? "n/a"} fallbackCount=${market.headers.get("x-market-meta-source-fallback") ?? "n/a"}`
+    `  headers fallbackFeed=${market.headers.get("x-market-fallback-feed-source") ?? "n/a"} fallbackCount=${market.headers.get("x-market-meta-source-fallback") ?? "n/a"} unresolvedSharePct=${market.headers.get("x-market-unresolved-share-pct") ?? "n/a"} thresholdPct=${market.headers.get("x-market-unresolved-alert-threshold-pct") ?? "n/a"}`
   );
   console.log(`- ${economics.path}: status=${economics.status} latencyMs=${economics.elapsedMs} rows=${economicsRows.length}`);
   console.log(`  nonZeroEconomicsRows=${nonZeroEconomicsRows.length}`);
@@ -143,6 +143,10 @@ async function main() {
   assert.ok(
     Boolean(market.headers.get("x-market-fallback-feed-source")),
     "expected fallback feed source header"
+  );
+  assert.ok(
+    Boolean(market.headers.get("x-market-unresolved-share-pct")),
+    "expected unresolved share header"
   );
   assert.ok(nonZeroEconomicsRows.length > 0, "expected at least one non-zero economics row");
 

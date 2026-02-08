@@ -33,6 +33,9 @@ const envSchema = z.object({
 
   // Optional fallback source for NFL token metadata enrichment.
   NFL_FUN_PLAYERS_DATA_URL: z.string().url().optional(),
+
+  // Alert threshold for unresolved metadata share in NFL market API responses (0..100).
+  NFL_MARKET_UNRESOLVED_ALERT_PCT: z.coerce.number().min(0).max(100).optional(),
 });
 
 const parsed = envSchema.parse({
@@ -47,6 +50,7 @@ const parsed = envSchema.parse({
   SLEEPER_PROJECTIONS_ENABLED: process.env.SLEEPER_PROJECTIONS_ENABLED,
   FUN_REWARD_TIERS_JSON: process.env.FUN_REWARD_TIERS_JSON,
   NFL_FUN_PLAYERS_DATA_URL: process.env.NFL_FUN_PLAYERS_DATA_URL,
+  NFL_MARKET_UNRESOLVED_ALERT_PCT: process.env.NFL_MARKET_UNRESOLVED_ALERT_PCT,
 });
 
 function parseBoolean(value: string | undefined): boolean {
@@ -59,4 +63,5 @@ export const env = {
   ...parsed,
   BASE_RPC_URL: parsed.BASE_RPC_URL ?? "https://mainnet.base.org",
   SLEEPER_PROJECTIONS_ENABLED: parseBoolean(parsed.SLEEPER_PROJECTIONS_ENABLED),
+  NFL_MARKET_UNRESOLVED_ALERT_PCT: parsed.NFL_MARKET_UNRESOLVED_ALERT_PCT ?? 25,
 };

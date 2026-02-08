@@ -169,6 +169,10 @@ async function runApiChecks() {
     Boolean(market.headers.get("x-market-meta-source-fallback")),
     "market response must expose metadata source count headers"
   );
+  assert.ok(
+    Boolean(market.headers.get("x-market-unresolved-share-pct")),
+    "market response must expose unresolved share header"
+  );
   console.log(
     `[api] ok /api/sportfun/market enriched=${enrichedCount}/${marketJson.tokens.length} fallback=${fallbackOnly} hybrid=${hybrid} feed=${fallbackFeed?.source ?? "n/a"}`
   );
