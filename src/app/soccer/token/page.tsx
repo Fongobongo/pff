@@ -1,3 +1,4 @@
+import Image from "next/image";
 import Link from "next/link";
 import SoccerPageShell from "../_components/SoccerPageShell";
 import {
@@ -24,10 +25,13 @@ export default async function SoccerTokenPage() {
     <SoccerPageShell title="$FUN token" description="On-chain snapshot for the Sport.fun ecosystem token.">
       <section className="mt-6 flex items-center gap-4">
         {meta?.logoUrl ? (
-          <img
+          <Image
             src={meta.logoUrl}
             alt={meta.symbol ?? "$FUN"}
+            width={48}
+            height={48}
             className="h-12 w-12 rounded-full border border-black/10 object-cover dark:border-white/10"
+            unoptimized
           />
         ) : null}
         <div>

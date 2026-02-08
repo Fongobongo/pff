@@ -11,7 +11,9 @@
     "db:migrate": "drizzle-kit up:pg",
     "sportfun:discover": "node scripts/sportfun_discover.mjs",
     "sportfun:probe": "node scripts/sportfun_metadata_probe.mjs",
-    "test:stats": "tsx scripts/test_stats.ts"
+    "test:stats": "tsx scripts/test_stats.ts",
+    "test:nfl-smoke": "tsx scripts/test_nfl_smoke.ts",
+    "report:nfl-health": "tsx scripts/report_nfl_health.ts"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.90.20",

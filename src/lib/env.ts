@@ -25,6 +25,11 @@ const envSchema = z.object({
   // StatsBomb scoring concurrency (optional).
   STATSBOMB_SCORE_CONCURRENCY: z.coerce.number().int().min(1).max(6).optional(),
 
+  // Enable external Sleeper projections in NFL projections API.
+  SLEEPER_PROJECTIONS_ENABLED: z.string().optional(),
+
+  // Optional JSON override for FUN reward tiers.
+  FUN_REWARD_TIERS_JSON: z.string().optional(),
 });
 
 const parsed = envSchema.parse({
@@ -36,9 +41,18 @@ const parsed = envSchema.parse({
   FOOTBALL_TIER_OVERRIDES: process.env.FOOTBALL_TIER_OVERRIDES,
   STATSBOMB_STORAGE_MODE: process.env.STATSBOMB_STORAGE_MODE,
   STATSBOMB_SCORE_CONCURRENCY: process.env.STATSBOMB_SCORE_CONCURRENCY,
+  SLEEPER_PROJECTIONS_ENABLED: process.env.SLEEPER_PROJECTIONS_ENABLED,
+  FUN_REWARD_TIERS_JSON: process.env.FUN_REWARD_TIERS_JSON,
 });
+
+function parseBoolean(value: string | undefined): boolean {
+  if (!value) return false;
+  const normalized = value.trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes";
+}
 
 export const env = {
   ...parsed,
   BASE_RPC_URL: parsed.BASE_RPC_URL ?? "https://mainnet.base.org",
+  SLEEPER_PROJECTIONS_ENABLED: parseBoolean(parsed.SLEEPER_PROJECTIONS_ENABLED),
 };

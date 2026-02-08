@@ -4,6 +4,7 @@ import { getSportfunMarketSnapshot, toUsdNumber } from "@/lib/sportfunMarket";
 import { buildNflTokenPlayerIndex } from "@/lib/sportfunPlayerMap";
 import { fetchNflWeeklyStats, type NflWeeklyRow } from "@/lib/stats/nflverse";
 import { scoreNfl } from "@/lib/stats/nfl";
+import { getNflProjections, type NflProjectionRow } from "@/lib/stats/nflProjections";
 
 const SAMPLE_SEASONS = [2021, 2022, 2023];
 const SEASON_TYPES = ["REG", "POST", "PRE"] as const;
@@ -29,10 +30,11 @@ const TOP_MODE_OPTIONS = [
   { key: "pos", label: "By position" },
 ] as const;
 
-
 const SEASON_SORT_OPTIONS = [
   { key: "fpts", label: "FPts" },
   { key: "fppg", label: "FPPG" },
+  { key: "proj_ppr_desc", label: "Proj PPR ↓" },
+  { key: "proj_ppr_asc", label: "Proj PPR ↑" },
   { key: "l3", label: "L3 Avg" },
   { key: "avg_rank", label: "Avg Rank" },
   { key: "tp_rate", label: "TP Rate" },
@@ -43,6 +45,8 @@ const SEASON_SORT_OPTIONS = [
 const WEEKLY_SORT_OPTIONS = [
   { key: "week_score", label: "Week FPts" },
   { key: "week_rank", label: "Week Rank" },
+  { key: "proj_ppr_desc", label: "Proj PPR ↓" },
+  { key: "proj_ppr_asc", label: "Proj PPR ↑" },
   { key: "l3", label: "L3 Avg" },
   { key: "avg_rank", label: "Avg Rank" },
   { key: "tp_rate", label: "TP Rate" },
@@ -83,6 +87,7 @@ type PlayerAgg = {
   weekRank?: number;
   weeks: WeekScore[];
   token?: TokenInfo;
+  projection?: NflProjectionRow;
 };
 
 function parseNumber(value: string | undefined, fallback: number, min: number, max: number): number {
@@ -127,6 +132,15 @@ function formatRank(value?: number): string {
   return `${value}`;
 }
 
+function formatMatchup(projection?: NflProjectionRow): string {
+  if (!projection) return "—";
+  if (projection.isByeWeek) return "BYE";
+  if (!projection.opponentTeam) return "—";
+  if (projection.homeAway === "home") return `vs ${projection.opponentTeam}`;
+  if (projection.homeAway === "away") return `@ ${projection.opponentTeam}`;
+  return projection.opponentTeam;
+}
+
 function buildQuery(params: Record<string, string | undefined>) {
   const query = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
@@ -169,9 +183,7 @@ function groupWeeks(rows: NflWeeklyRow[], scores: Map<string, number>) {
 
   for (const [week, weekRows] of weekMap.entries()) {
     const getScore = (row: NflWeeklyRow) => scores.get(`${row.player_id}:${row.week}`) ?? 0;
-    const sorted = weekRows
-      .slice()
-      .sort((a, b) => getScore(b) - getScore(a));
+    const sorted = weekRows.slice().sort((a, b) => getScore(b) - getScore(a));
 
     const rankMap = new Map<string, number>();
     sorted.forEach((row, idx) => rankMap.set(row.player_id, idx + 1));
@@ -187,9 +199,7 @@ function groupWeeks(rows: NflWeeklyRow[], scores: Map<string, number>) {
 
     const posRanks = new Map<string, Map<string, number>>();
     for (const [pos, posRows] of posMap.entries()) {
-      const sortedPos = posRows
-        .slice()
-        .sort((a, b) => getScore(b) - getScore(a));
+      const sortedPos = posRows.slice().sort((a, b) => getScore(b) - getScore(a));
       const posRankMap = new Map<string, number>();
       sortedPos.forEach((row, idx) => posRankMap.set(row.player_id, idx + 1));
       posRanks.set(pos, posRankMap);
@@ -243,17 +253,20 @@ export default async function NflPlayersPage({
     Promise.resolve(buildTokenIndex(tokens)),
   ]);
 
-  const weeks = Array.from(new Set(weeklyData.rows.map((row) => row.week).filter(Boolean))).sort(
-    (a, b) => a - b
-  );
+  const weeks = Array.from(new Set(weeklyData.rows.map((row) => row.week).filter(Boolean))).sort((a, b) => a - b);
   const latestWeek = weeks.length ? weeks[weeks.length - 1] : 1;
   const selectedWeek = parseNumber(params.week, latestWeek, 1, 25);
   const viewWeek = weeks.includes(selectedWeek) ? selectedWeek : latestWeek;
 
-  const analysisRows =
-    view === "weekly"
-      ? weeklyData.rows.filter((row) => row.week <= viewWeek)
-      : weeklyData.rows;
+  const projectionRows = await getNflProjections({
+    season,
+    week: viewWeek,
+    seasonType,
+    source: "auto",
+  });
+  const projectionByPlayerId = new Map(projectionRows.map((row) => [row.playerId, row]));
+
+  const analysisRows = view === "weekly" ? weeklyData.rows.filter((row) => row.week <= viewWeek) : weeklyData.rows;
 
   const scores = new Map<string, number>();
   for (const row of analysisRows) {
@@ -268,6 +281,8 @@ export default async function NflPlayersPage({
   for (const row of analysisRows) {
     if (!row.player_id) continue;
     const playerName = row.player_display_name || row.player_name || row.player_id;
+    const projection = projectionByPlayerId.get(row.player_id);
+
     const entry = players.get(row.player_id) ?? {
       playerId: row.player_id,
       playerName,
@@ -280,7 +295,10 @@ export default async function NflPlayersPage({
       tpRate: 0,
       weeks: [],
       token: tokenLookup.get(row.player_id) ?? tokenIndex.get(normalizeName(playerName)),
+      projection,
     };
+
+    if (!entry.projection && projection) entry.projection = projection;
 
     const score = scores.get(`${row.player_id}:${row.week}`) ?? 0;
     entry.games += 1;
@@ -301,9 +319,7 @@ export default async function NflPlayersPage({
   const rows: PlayerAgg[] = Array.from(players.values()).map((entry) => {
     entry.weeks.sort((a, b) => a.week - b.week);
     const last3 = entry.weeks.slice(-3);
-    entry.l3Avg = last3.length
-      ? last3.reduce((acc, val) => acc + val.score, 0) / last3.length
-      : 0;
+    entry.l3Avg = last3.length ? last3.reduce((acc, val) => acc + val.score, 0) / last3.length : 0;
 
     const rankValues = entry.weeks.map((w) => w.rank).filter((v): v is number => Boolean(v));
     const posRankValues = entry.weeks.map((w) => w.posRank).filter((v): v is number => Boolean(v));
@@ -319,6 +335,7 @@ export default async function NflPlayersPage({
     const tpCount = topMode === "top12" ? tpBy12 : topMode === "top24" ? tpBy24 : tpByPos;
     entry.tpCount = tpCount;
     entry.tpRate = entry.games ? tpCount / entry.games : 0;
+
     if (topMode === "pos") {
       entry.avgRank = posRankValues.length
         ? posRankValues.reduce((acc, val) => acc + val, 0) / posRankValues.length
@@ -356,11 +373,24 @@ export default async function NflPlayersPage({
   }
 
   const sorted = filtered.slice().sort((a, b) => {
+    const projA = a.projection?.isByeWeek ? null : a.projection?.projectedPpr;
+    const projB = b.projection?.isByeWeek ? null : b.projection?.projectedPpr;
+
     switch (sort) {
       case "fpts":
         return b.total - a.total;
       case "fppg":
         return b.total / Math.max(1, b.games) - a.total / Math.max(1, a.games);
+      case "proj_ppr_desc": {
+        const aValue = projA ?? -Infinity;
+        const bValue = projB ?? -Infinity;
+        return bValue - aValue;
+      }
+      case "proj_ppr_asc": {
+        const aValue = projA ?? Infinity;
+        const bValue = projB ?? Infinity;
+        return aValue - bValue;
+      }
       case "l3":
         return b.l3Avg - a.l3Avg;
       case "avg_rank":
@@ -389,7 +419,7 @@ export default async function NflPlayersPage({
   const pageRows = sorted.slice(pageStart, pageStart + PAGE_SIZE);
 
   return (
-    <NflPageShell title="NFL players" description="Season and weekly fantasy leaders with Sport.fun pricing.">
+    <NflPageShell title="NFL players" description="Season and weekly fantasy leaders with matchup and projection.">
       <form className="mt-6 flex flex-wrap items-end gap-3" method="GET">
         <label className="text-xs text-zinc-600 dark:text-zinc-400">
           Search
@@ -492,7 +522,7 @@ export default async function NflPlayersPage({
           <select
             name="sort"
             defaultValue={sort}
-            className="mt-1 block w-36 rounded-md border border-black/10 bg-white px-3 py-2 text-sm text-black dark:border-white/10 dark:bg-white/5 dark:text-white"
+            className="mt-1 block w-40 rounded-md border border-black/10 bg-white px-3 py-2 text-sm text-black dark:border-white/10 dark:bg-white/5 dark:text-white"
           >
             {sortOptions.map((opt) => (
               <option key={opt.key} value={opt.key}>
@@ -511,20 +541,21 @@ export default async function NflPlayersPage({
 
       <section className="mt-4 text-sm text-zinc-600 dark:text-zinc-400">
         <p>
-          Showing {pageRows.length} of {filtered.length} players · page {safePage} / {totalPages}. TP Mode: {
-            topMode === "top12" ? "Top 12 overall" : topMode === "top24" ? "Top 24 overall" : "Position top"
-          }.
+          Showing {pageRows.length} of {filtered.length} players · page {safePage} / {totalPages}. Projection week: {viewWeek}. TP Mode: {" "}
+          {topMode === "top12" ? "Top 12 overall" : topMode === "top24" ? "Top 24 overall" : "Position top"}.
         </p>
       </section>
 
       <section className="mt-8">
         <div className="overflow-x-auto rounded-xl border border-black/10 bg-white dark:border-white/10 dark:bg-white/5">
-          <table className="w-full min-w-[900px] text-left text-sm">
+          <table className="w-full min-w-[1140px] text-left text-sm">
             <thead className="bg-zinc-100 text-xs uppercase tracking-wide text-zinc-500 dark:bg-white/10 dark:text-zinc-400">
               <tr>
                 <th className="px-3 py-2">Player</th>
                 <th className="px-3 py-2">Pos</th>
                 <th className="px-3 py-2">Team</th>
+                <th className="px-3 py-2">Matchup</th>
+                <th className="px-3 py-2">Proj PPR</th>
                 <th className="px-3 py-2">Price</th>
                 <th className="px-3 py-2">Δ (24h)</th>
                 {view === "weekly" ? (
@@ -539,9 +570,7 @@ export default async function NflPlayersPage({
                   </>
                 )}
                 <th className="px-3 py-2">L3 Avg</th>
-                <th className="px-3 py-2">
-                  Avg Rank {topMode === "pos" ? "(Pos)" : "(All)"}
-                </th>
+                <th className="px-3 py-2">Avg Rank {topMode === "pos" ? "(Pos)" : "(All)"}</th>
                 <th className="px-3 py-2">TP Rate</th>
                 <th className="px-3 py-2">TP Total</th>
                 <th className="px-3 py-2">TP/Price</th>
@@ -553,11 +582,28 @@ export default async function NflPlayersPage({
                   ? toUsdNumber(row.token.currentPriceUsdcRaw)
                   : undefined;
                 const tpPerPrice = priceValue ? row.tpCount / priceValue : undefined;
+                const projection = row.projection;
+
                 return (
                   <tr key={row.playerId} className="border-t border-black/10 dark:border-white/10">
-                    <td className="px-3 py-2 text-black dark:text-white">{row.playerName}</td>
+                    <td className="px-3 py-2 text-black dark:text-white">
+                      <Link
+                        href={`/nfl/player/${row.playerId}${buildQuery({
+                          season: String(season),
+                          season_type: seasonType,
+                          week: view === "weekly" ? String(viewWeek) : undefined,
+                        })}`}
+                        className="hover:underline"
+                      >
+                        {row.playerName}
+                      </Link>
+                    </td>
                     <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{row.position ?? "—"}</td>
                     <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{row.team ?? "—"}</td>
+                    <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{formatMatchup(projection)}</td>
+                    <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400" title={projection?.source ?? ""}>
+                      {projection?.isByeWeek ? "—" : formatNumber(projection?.projectedPpr ?? undefined, 2)}
+                    </td>
                     <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
                       {formatUsd(row.token?.currentPriceUsdcRaw)}
                     </td>
@@ -568,9 +614,7 @@ export default async function NflPlayersPage({
                     </td>
                     {view === "weekly" ? (
                       <>
-                        <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
-                          {formatNumber(row.weekScore, 2)}
-                        </td>
+                        <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{formatNumber(row.weekScore, 2)}</td>
                         <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{formatRank(row.weekRank)}</td>
                       </>
                     ) : (
@@ -595,7 +639,7 @@ export default async function NflPlayersPage({
               })}
               {pageRows.length === 0 ? (
                 <tr>
-                  <td className="px-3 py-4 text-zinc-600 dark:text-zinc-400" colSpan={12}>
+                  <td className="px-3 py-4 text-zinc-600 dark:text-zinc-400" colSpan={14}>
                     No players match the filters.
                   </td>
                 </tr>
@@ -606,25 +650,27 @@ export default async function NflPlayersPage({
       </section>
 
       <section className="mt-6 flex flex-wrap gap-2 text-sm text-zinc-600 dark:text-zinc-400">
-        {Array.from({ length: totalPages }, (_, idx) => idx + 1).slice(0, 8).map((p) => (
-          <Link
-            key={p}
-            className={p === safePage ? "text-black dark:text-white" : "hover:underline"}
-            href={`/nfl/players${buildQuery({
-              q: params.q,
-              sort,
-              page: String(p),
-              position: positionFilter ?? undefined,
-              view,
-              season: String(season),
-              week: view === "weekly" ? String(viewWeek) : undefined,
-              season_type: seasonType,
-              top_mode: topMode,
-            })}`}
-          >
-            {p}
-          </Link>
-        ))}
+        {Array.from({ length: totalPages }, (_, idx) => idx + 1)
+          .slice(0, 8)
+          .map((p) => (
+            <Link
+              key={p}
+              className={p === safePage ? "text-black dark:text-white" : "hover:underline"}
+              href={`/nfl/players${buildQuery({
+                q: params.q,
+                sort,
+                page: String(p),
+                position: positionFilter ?? undefined,
+                view,
+                season: String(season),
+                week: view === "weekly" ? String(viewWeek) : undefined,
+                season_type: seasonType,
+                top_mode: topMode,
+              })}`}
+            >
+              {p}
+            </Link>
+          ))}
         {totalPages > 8 ? <span>…</span> : null}
       </section>
     </NflPageShell>

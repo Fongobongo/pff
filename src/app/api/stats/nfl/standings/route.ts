@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { fetchNflSchedule, fetchNflTeams } from "@/lib/stats/nflverse";
+import { getSportfunMarketSnapshot } from "@/lib/sportfunMarket";
+import { computeNflTeamEconomicsRows, type NflTeamEconomicsAsset } from "@/lib/nfl/teamEconomics";
 
 const querySchema = z.object({
   season: z.coerce.number().int().min(1999),
@@ -22,6 +24,10 @@ type StandingRow = {
   pointsAgainst: number;
   pointDiff: number;
   logo?: string;
+  tradeablePlayers: number;
+  squadValueUsd: number;
+  avgPlayerPriceUsd: number;
+  topAssets: NflTeamEconomicsAsset[];
 };
 
 export async function GET(request: Request) {
@@ -32,8 +38,22 @@ export async function GET(request: Request) {
     game_type: url.searchParams.get("game_type") ?? undefined,
   });
 
-  const [schedule, teams] = await Promise.all([fetchNflSchedule(), fetchNflTeams()]);
+  const [schedule, teams, market] = await Promise.all([
+    fetchNflSchedule(),
+    fetchNflTeams(),
+    getSportfunMarketSnapshot({
+      sport: "nfl",
+      windowHours: 24,
+      trendDays: 30,
+      maxTokens: 1000,
+    }),
+  ]);
   const gameType = query.game_type?.toUpperCase() ?? "REG";
+  const economicsRows = computeNflTeamEconomicsRows({
+    teams: teams.rows,
+    tokens: market.tokens,
+  });
+  const economicsByTeam = new Map(economicsRows.map((row) => [row.teamAbbr, row]));
 
   const teamMeta = new Map(
     teams.rows.map((team) => [
@@ -67,6 +87,10 @@ export async function GET(request: Request) {
         pointsAgainst: 0,
         pointDiff: 0,
         logo: meta?.logo,
+        tradeablePlayers: 0,
+        squadValueUsd: 0,
+        avgPlayerPriceUsd: 0,
+        topAssets: [],
       };
       standings.set(teamAbbr, entry);
     }
@@ -110,10 +134,15 @@ export async function GET(request: Request) {
 
   const rows = Array.from(standings.values()).map((entry) => {
     const winPct = entry.games > 0 ? (entry.wins + entry.ties * 0.5) / entry.games : 0;
+    const economics = economicsByTeam.get(entry.teamAbbr);
     return {
       ...entry,
       winPct: Number(winPct.toFixed(3)),
       pointDiff: entry.pointsFor - entry.pointsAgainst,
+      tradeablePlayers: economics?.tradeablePlayers ?? 0,
+      squadValueUsd: economics?.squadValueUsd ?? 0,
+      avgPlayerPriceUsd: economics?.avgPlayerPriceUsd ?? 0,
+      topAssets: economics?.topAssets ?? [],
     };
   });
 
@@ -124,13 +153,21 @@ export async function GET(request: Request) {
     return a.teamAbbr.localeCompare(b.teamAbbr);
   });
 
-  return NextResponse.json({
-    sport: "nfl",
-    source: "nflverse_data",
-    season: query.season,
-    week: query.week ?? null,
-    gameType,
-    sourceUrl: schedule.sourceUrl,
-    rows,
-  });
+  return NextResponse.json(
+    {
+      sport: "nfl",
+      source: "nflverse_data",
+      season: query.season,
+      week: query.week ?? null,
+      gameType,
+      sourceUrl: schedule.sourceUrl,
+      asOf: market.asOf,
+      rows,
+    },
+    {
+      headers: {
+        "cache-control": "s-maxage=120, stale-while-revalidate=600",
+      },
+    }
+  );
 }
