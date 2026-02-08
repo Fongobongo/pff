@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { withCache } from "@/lib/stats/cache";
 import { alchemyRpc } from "@/lib/alchemy";
+import { getNflFallbackTokenMetaMap } from "@/lib/nfl/nflFunFallback";
 import { getSportfunNameOverride, getSportfunSportLabel, type SportfunSport } from "@/lib/sportfunNames";
 import {
   getSportfunMetadataCacheEntry,
@@ -44,6 +45,7 @@ export type SportfunMarketToken = {
   volume24hSharesRaw?: string;
   trades24h: number;
   lastTradeAt?: string;
+  isTradeable?: boolean;
 };
 
 export type SportfunMarketSummary = {
@@ -874,23 +876,37 @@ export async function getSportfunMarketSnapshot(params: {
       });
 
       const metaByToken = new Map(meta.map((m) => [m.tokenIdDec, m.metadata]));
+      const nflFallbackByToken = params.sport === "nfl" ? await getNflFallbackTokenMetaMap() : null;
 
       const decoratedTokens = tokens.map((token) => {
         const metaEntry = metaByToken.get(token.tokenIdDec);
+        const fallbackMeta = nflFallbackByToken?.get(token.tokenIdDec);
         const override = getSportfunNameOverride(contracts[0].playerToken, token.tokenIdDec);
-        const attributes = metaEntry?.attributes;
-        const position = extractPosition(attributes);
-        const team = extractTeam(attributes);
-        const supply = extractSupply(attributes);
+        const fallbackAttributes = fallbackMeta
+          ? [
+              ...(fallbackMeta.position
+                ? [{ trait_type: "position", value: fallbackMeta.position }]
+                : []),
+              ...(fallbackMeta.team ? [{ trait_type: "team", value: fallbackMeta.team }] : []),
+              ...(fallbackMeta.supply !== undefined
+                ? [{ trait_type: "circulating_supply", value: fallbackMeta.supply }]
+                : []),
+            ]
+          : undefined;
+        const attributes = metaEntry?.attributes ?? fallbackAttributes;
+        const position = extractPosition(attributes) ?? fallbackMeta?.position;
+        const team = extractTeam(attributes) ?? fallbackMeta?.team;
+        const supply = extractSupply(attributes) ?? fallbackMeta?.supply;
         return {
           ...token,
-          name: override ?? metaEntry?.name ?? undefined,
-          image: metaEntry?.image ?? undefined,
+          name: override ?? metaEntry?.name ?? fallbackMeta?.name ?? undefined,
+          image: metaEntry?.image ?? fallbackMeta?.image ?? undefined,
           description: metaEntry?.description ?? undefined,
           attributes,
           position: position ?? undefined,
           team: team ?? undefined,
           supply: supply ?? undefined,
+          isTradeable: fallbackMeta?.isTradeable,
         };
       });
 

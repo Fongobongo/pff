@@ -32,6 +32,9 @@ export type NflTeamEconomicsSnapshot = {
 };
 
 const MANUAL_TEAM_ALIASES: Record<string, string> = {
+  JAC: "JAX",
+  LA: "LAR",
+  WSH: "WAS",
   ARIZONA: "ARI",
   ATLANTA: "ATL",
   BALTIMORE: "BAL",
@@ -190,6 +193,7 @@ export function computeNflTeamEconomicsRows(params: {
 
   for (const token of params.tokens) {
     if (!token.currentPriceUsdcRaw) continue;
+    if (token.isTradeable === false) continue;
 
     const teamHint = token.team ?? extractTeam(token.attributes);
     const teamAbbr = normalizeNflTeamAbbr(teamHint, aliasMap);

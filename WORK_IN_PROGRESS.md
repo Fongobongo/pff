@@ -1,19 +1,27 @@
 # Work in Progress
 
 ## Now
-- **NFL core parity hardening (post-implementation):** monitor production behavior for new endpoints/UI blocks and track provider fallback rate (`Sleeper -> internal_fallback`).
+- **NFL metadata reliability hardening:** keep player/team labeling stable even when `api.sport.fun` metadata is unavailable.
 
 ## Next
-- Add targeted UI regression pass for `/nfl/players`, `/nfl/standings`, `/nfl/teams`, `/nfl/portfolio`, `/nfl/token` on mobile breakpoints.
-- Decide whether to migrate token logo `<img>` blocks to `next/image` (currently lint warning only).
-- Add optional lightweight telemetry around projections source mix and projection cache hit-rate.
+- Deploy metadata-fallback update to production and confirm `Teams/Standings/Players` economics remain non-empty.
+- Add lightweight counters for fallback metadata source usage (on-chain URI vs nfl-fun JSON fallback).
+- Add a targeted mobile visual regression pass for `/nfl/players`, `/nfl/standings`, `/nfl/teams`, `/nfl/portfolio`, `/nfl/token`.
 
 ## Status
-- Last updated: 2026-02-07
+- Last updated: 2026-02-08
 - Build + checks completed:
   - `npm run test:stats`
-  - `npm run lint` (no errors; 2 existing `<img>` warnings)
+  - `npx eslint src/lib/nfl/nflFunFallback.ts src/lib/sportfunMarket.ts src/lib/nfl/teamEconomics.ts scripts/test_nfl_smoke.ts scripts/report_nfl_health.ts scripts/test_stats.ts src/lib/env.ts`
   - `npm run build`
+  - `NFL_SMOKE_BASE_URL=http://localhost:3100 npm run test:nfl-smoke`
+  - `NFL_HEALTH_BASE_URL=http://localhost:3100 npm run report:nfl-health`
+- Data-quality gap fix completed:
+  - Added fallback module: `src/lib/nfl/nflFunFallback.ts`.
+  - `src/lib/sportfunMarket.ts` now enriches NFL tokens from fallback (`name/team/position/isTradeable/supply`) when on-chain metadata is missing.
+  - Added env support: `NFL_FUN_PLAYERS_DATA_URL` (`src/lib/env.ts`, `.env.example`).
+  - Team alias normalization extended (`JAC -> JAX`, `LA -> LAR`, `WSH -> WAS`) and non-tradeable tokens excluded in economics aggregation (`src/lib/nfl/teamEconomics.ts`).
+  - Updated smoke/health checks to assert enrichment and non-zero team economics.
 - NFL core gaps (relative to selected `nfl-fun` scope) implemented:
   - **Phase 1:** Team economics + standings fantasy fields.
     - New module: `src/lib/nfl/teamEconomics.ts`.

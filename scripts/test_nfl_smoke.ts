@@ -59,6 +59,24 @@ async function runPageChecks() {
 }
 
 async function runApiChecks() {
+  const market = await fetchText(
+    "/api/sportfun/market?sport=nfl&windowHours=24&trendDays=30&maxTokens=120",
+    "desktop"
+  );
+  assert.equal(market.status, 200, "market API should return 200");
+  const marketJson = JSON.parse(market.text) as {
+    tokens: Array<{ name?: string; team?: string; position?: string }>;
+  };
+  assert.ok(Array.isArray(marketJson.tokens), "market tokens must be an array");
+  const enrichedCount = marketJson.tokens.filter(
+    (token) => Boolean(token.name) && Boolean(token.team) && Boolean(token.position)
+  ).length;
+  assert.ok(
+    enrichedCount > 0,
+    "market tokens should include fallback-enriched name/team/position"
+  );
+  console.log(`[api] ok /api/sportfun/market enriched=${enrichedCount}/${marketJson.tokens.length}`);
+
   const teamEconomics = await fetchText(
     "/api/stats/nfl/team-economics?sort=squad_value&dir=desc",
     "desktop"
@@ -70,6 +88,10 @@ async function runApiChecks() {
   assert.ok(Array.isArray(teamJson.rows), "team-economics rows must be an array");
   assert.ok(teamJson.rows.every((row) => row.tradeablePlayers >= 0), "tradeablePlayers must be >= 0");
   assert.ok(teamJson.rows.every((row) => row.squadValueUsd >= 0), "squadValueUsd must be >= 0");
+  assert.ok(
+    teamJson.rows.some((row) => row.tradeablePlayers > 0 && row.squadValueUsd > 0),
+    "team-economics should have at least one team with non-zero squad value"
+  );
   console.log("[api] ok /api/stats/nfl/team-economics");
 
   const standings = await fetchText("/api/stats/nfl/standings?season=2023&game_type=REG", "desktop");

@@ -52,6 +52,7 @@ async function main() {
   const projections = await checkJson(
     `/api/stats/nfl/projections?season=${season}&week=${week}&season_type=${seasonType}&source=auto`
   );
+  const market = await checkJson("/api/sportfun/market?sport=nfl&windowHours=24&trendDays=30&maxTokens=120");
   const standings = await checkJson(`/api/stats/nfl/standings?season=${season}&game_type=${seasonType}`);
   const economics = await checkJson(`/api/stats/nfl/team-economics?sort=squad_value&dir=desc`);
 
@@ -76,10 +77,26 @@ async function main() {
   );
 
   const standingsRows = (standings.json.rows as unknown[]) ?? [];
-  const economicsRows = (economics.json.rows as unknown[]) ?? [];
+  const marketTokens = (market.json.tokens as Array<Record<string, unknown>> | undefined) ?? [];
+  const economicsRows = (economics.json.rows as Array<Record<string, unknown>> | undefined) ?? [];
+  const enrichedMarketTokens = marketTokens.filter(
+    (token) => typeof token.name === "string" && typeof token.team === "string" && typeof token.position === "string"
+  );
+  const nonZeroEconomicsRows = economicsRows.filter((row) => {
+    const tradeablePlayers = Number(row.tradeablePlayers ?? 0);
+    const squadValueUsd = Number(row.squadValueUsd ?? 0);
+    return Number.isFinite(tradeablePlayers) && Number.isFinite(squadValueUsd) && tradeablePlayers > 0 && squadValueUsd > 0;
+  });
 
   console.log(`- ${standings.path}: status=${standings.status} latencyMs=${standings.elapsedMs} rows=${standingsRows.length}`);
+  console.log(
+    `- ${market.path}: status=${market.status} latencyMs=${market.elapsedMs} enriched=${enrichedMarketTokens.length}/${marketTokens.length}`
+  );
   console.log(`- ${economics.path}: status=${economics.status} latencyMs=${economics.elapsedMs} rows=${economicsRows.length}`);
+  console.log(`  nonZeroEconomicsRows=${nonZeroEconomicsRows.length}`);
+
+  assert.ok(enrichedMarketTokens.length > 0, "expected enriched market tokens (name/team/position)");
+  assert.ok(nonZeroEconomicsRows.length > 0, "expected at least one non-zero economics row");
 
   console.log("\nnfl health report passed");
 }

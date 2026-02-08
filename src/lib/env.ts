@@ -30,6 +30,9 @@ const envSchema = z.object({
 
   // Optional JSON override for FUN reward tiers.
   FUN_REWARD_TIERS_JSON: z.string().optional(),
+
+  // Optional fallback source for NFL token metadata enrichment.
+  NFL_FUN_PLAYERS_DATA_URL: z.string().url().optional(),
 });
 
 const parsed = envSchema.parse({
@@ -43,6 +46,7 @@ const parsed = envSchema.parse({
   STATSBOMB_SCORE_CONCURRENCY: process.env.STATSBOMB_SCORE_CONCURRENCY,
   SLEEPER_PROJECTIONS_ENABLED: process.env.SLEEPER_PROJECTIONS_ENABLED,
   FUN_REWARD_TIERS_JSON: process.env.FUN_REWARD_TIERS_JSON,
+  NFL_FUN_PLAYERS_DATA_URL: process.env.NFL_FUN_PLAYERS_DATA_URL,
 });
 
 function parseBoolean(value: string | undefined): boolean {

@@ -99,6 +99,8 @@ function runTeamEconomicsUnitTests() {
   const aliasMap = buildNflTeamAliasMap(teams);
   assert.equal(normalizeNflTeamAbbr("Kansas City Chiefs", aliasMap), "KC");
   assert.equal(normalizeNflTeamAbbr("Buffalo", aliasMap), "BUF");
+  assert.equal(normalizeNflTeamAbbr("JAC", aliasMap), "JAX");
+  assert.equal(normalizeNflTeamAbbr("LA", aliasMap), "LAR");
 
   const tokens = [
     {
@@ -118,6 +120,16 @@ function runTeamEconomicsUnitTests() {
       currentPriceUsdcRaw: "12000000",
       trades24h: 1,
       attributes: [{ trait_type: "Team", value: "KC" }],
+    },
+    {
+      tokenIdDec: "3",
+      name: "Bench asset",
+      team: "BUF",
+      position: "WR",
+      currentPriceUsdcRaw: "999999",
+      trades24h: 0,
+      isTradeable: false,
+      attributes: [{ trait_type: "Team", value: "BUF" }],
     },
   ] as SportfunMarketToken[];
 
