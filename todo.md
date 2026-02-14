@@ -11,11 +11,13 @@
 - [x] Theme toggle (light/dark) in global layout
 - [x] Top status bar with `Data updated: ...`
 - [x] Shared footer with disclaimer
-- [ ] Landing page parity with prod hero/cards (root route `/`)
+- [x] Landing page parity with prod hero/cards (root route `/`)
 
 ## 3) Optional consistency checks after implementation
 - [x] Verify status `200` for `/soccer/players/[playerId]`
   - Verified locally on 2026-02-14: `GET /soccer/players/00661683-b4e1-4767-8a4f-5bd31a44ec0e` -> `200`
+- [x] Verify status `200` for `/` and updated hero/cards rendering
+  - Verified locally on 2026-02-14: `GET /` -> `200`, content includes `FunStats Dashboard` and `Quick tools`
 
 ## 4) Missing features vs `https://tenero.io` (`sports.fun`)
 - [ ] Add route `/sportsfun` (sports.fun hub page)
