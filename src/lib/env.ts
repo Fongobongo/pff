@@ -53,6 +53,12 @@ const envSchema = z.object({
   SPORTFUN_PRICE_SYNC_ENABLED: z.string().optional(),
   SPORTFUN_PRICE_REFRESH_MINUTES: z.coerce.number().int().min(5).max(60).optional(),
   SPORTFUN_EXTERNAL_PRICE_TOKENS: z.string().optional(),
+  // Optional override for Sport.fun app API (auth-gated players/tournament data).
+  SPORTFUN_APP_API_BASE_URL: z.string().url().optional(),
+  // Optional bearer token for Sport.fun app API calls.
+  SPORTFUN_AUTH_BEARER_TOKEN: z.string().min(1).optional(),
+  // Optional throttle for background TP sync interval.
+  SPORTFUN_GAME_TP_SYNC_INTERVAL_MINUTES: z.coerce.number().int().min(1).max(240).optional(),
 
   // Optional Tenero API base URL override (defaults to public api.tenero.io).
   TENERO_API_BASE_URL: z.string().url().optional(),
@@ -83,6 +89,9 @@ const parsed = envSchema.parse({
   SPORTFUN_PRICE_SYNC_ENABLED: process.env.SPORTFUN_PRICE_SYNC_ENABLED,
   SPORTFUN_PRICE_REFRESH_MINUTES: process.env.SPORTFUN_PRICE_REFRESH_MINUTES,
   SPORTFUN_EXTERNAL_PRICE_TOKENS: process.env.SPORTFUN_EXTERNAL_PRICE_TOKENS,
+  SPORTFUN_APP_API_BASE_URL: process.env.SPORTFUN_APP_API_BASE_URL,
+  SPORTFUN_AUTH_BEARER_TOKEN: process.env.SPORTFUN_AUTH_BEARER_TOKEN,
+  SPORTFUN_GAME_TP_SYNC_INTERVAL_MINUTES: process.env.SPORTFUN_GAME_TP_SYNC_INTERVAL_MINUTES,
   TENERO_API_BASE_URL: process.env.TENERO_API_BASE_URL,
   TENERO_AUTH_BEARER_TOKEN: process.env.TENERO_AUTH_BEARER_TOKEN,
 });
@@ -106,5 +115,8 @@ export const env = {
       ? true
       : parseBoolean(parsed.SPORTFUN_PRICE_SYNC_ENABLED),
   SPORTFUN_PRICE_REFRESH_MINUTES: parsed.SPORTFUN_PRICE_REFRESH_MINUTES ?? 10,
+  SPORTFUN_APP_API_BASE_URL: parsed.SPORTFUN_APP_API_BASE_URL ?? "https://app.sport.fun/api",
+  SPORTFUN_AUTH_BEARER_TOKEN: parsed.SPORTFUN_AUTH_BEARER_TOKEN?.trim(),
+  SPORTFUN_GAME_TP_SYNC_INTERVAL_MINUTES: parsed.SPORTFUN_GAME_TP_SYNC_INTERVAL_MINUTES ?? 10,
   SUPABASE_SERVICE_ROLE_KEY: parsed.SUPABASE_SERVICE_ROLE_KEY ?? parsed.SUPABASE_SECRET_KEY,
 };

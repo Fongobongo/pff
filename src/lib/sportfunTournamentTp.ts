@@ -32,6 +32,7 @@ export type SportfunTournamentTpLookupRow = {
   team?: string;
   position?: string;
   tpTotal: number;
+  source?: string;
   asOf?: string;
 };
 
@@ -228,26 +229,48 @@ type SupabaseTournamentTpLookupRow = {
   team?: string | null;
   position?: string | null;
   tp_total?: number | string;
+  source?: string | null;
   as_of?: string | null;
 };
 
-export async function getSportfunTournamentTpRowsByAthleteNames(params: {
+type TournamentTpLookupSourceFilter = string | string[] | undefined;
+
+function buildSourceFilterQuery(query: URLSearchParams, source: TournamentTpLookupSourceFilter) {
+  if (!source) return;
+  if (typeof source === "string") {
+    const normalized = source.trim();
+    if (!normalized) return;
+    query.set("source", `eq.${normalized}`);
+    return;
+  }
+  const normalized = source
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0);
+  if (!normalized.length) return;
+  query.set("source", `in.(${toPostgrestInString([...new Set(normalized)])})`);
+}
+
+type LookupByParams = {
   sport: SportfunTournamentTpSport;
-  athleteNames: string[];
+  field: "athlete_name" | "athlete_id";
+  values: string[];
+  source?: TournamentTpLookupSourceFilter;
   chunkSize?: number;
-}): Promise<SportfunTournamentTpLookupRow[]> {
-  const rawNames = params.athleteNames
-    .map((name) => name.trim())
-    .filter((name) => name.length > 0);
-  if (!rawNames.length) return [];
+};
+
+async function getSportfunTournamentTpRowsByField(params: LookupByParams): Promise<SportfunTournamentTpLookupRow[]> {
+  const rawValues = params.values
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0);
+  if (!rawValues.length) return [];
   if (!isSportfunTournamentTpStoreConfigured()) {
     warnNoSupabaseOnce();
     return [];
   }
 
-  const names = [...new Set(rawNames)];
+  const values = [...new Set(rawValues)];
   const chunkSize = Math.max(1, Math.min(100, Math.trunc(params.chunkSize ?? 40)));
-  const chunks = chunkArray(names, chunkSize);
+  const chunks = chunkArray(values, chunkSize);
 
   const rows: SportfunTournamentTpLookupRow[] = [];
   const dedupe = new Set<string>();
@@ -256,10 +279,11 @@ export async function getSportfunTournamentTpRowsByAthleteNames(params: {
     const query = new URLSearchParams();
     query.set(
       "select",
-      "sport,tournament_key,athlete_id,athlete_name,team,position,tp_total,as_of"
+      "sport,tournament_key,athlete_id,athlete_name,team,position,tp_total,source,as_of"
     );
     query.set("sport", `eq.${params.sport}`);
-    query.set("athlete_name", `in.(${toPostgrestInString(chunk)})`);
+    query.set(params.field, `in.(${toPostgrestInString(chunk)})`);
+    buildSourceFilterQuery(query, params.source);
     query.set("limit", "5000");
 
     try {
@@ -290,6 +314,7 @@ export async function getSportfunTournamentTpRowsByAthleteNames(params: {
           team: normalizeText(row.team ?? undefined) ?? undefined,
           position: normalizeText(row.position ?? undefined) ?? undefined,
           tpTotal,
+          source: normalizeText(row.source ?? undefined) ?? undefined,
           asOf: normalizeText(row.as_of ?? undefined) ?? undefined,
         });
       }
@@ -305,4 +330,34 @@ export async function getSportfunTournamentTpRowsByAthleteNames(params: {
   }
 
   return rows;
+}
+
+export async function getSportfunTournamentTpRowsByAthleteNames(params: {
+  sport: SportfunTournamentTpSport;
+  athleteNames: string[];
+  source?: TournamentTpLookupSourceFilter;
+  chunkSize?: number;
+}): Promise<SportfunTournamentTpLookupRow[]> {
+  return getSportfunTournamentTpRowsByField({
+    sport: params.sport,
+    field: "athlete_name",
+    values: params.athleteNames,
+    source: params.source,
+    chunkSize: params.chunkSize,
+  });
+}
+
+export async function getSportfunTournamentTpRowsByAthleteIds(params: {
+  sport: SportfunTournamentTpSport;
+  athleteIds: string[];
+  source?: TournamentTpLookupSourceFilter;
+  chunkSize?: number;
+}): Promise<SportfunTournamentTpLookupRow[]> {
+  return getSportfunTournamentTpRowsByField({
+    sport: params.sport,
+    field: "athlete_id",
+    values: params.athleteIds,
+    source: params.source,
+    chunkSize: params.chunkSize,
+  });
 }

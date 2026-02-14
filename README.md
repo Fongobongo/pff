@@ -17,3 +17,6 @@ Fan site built with **React / Next.js** for the game **pro.football.fun**.
   - `docs/FREE_TIER_SOURCES.md`
 - Sport.fun soccer name refresh runbook:
   - `docs/SPORTFUN_SOCCER_NAMES_RUNBOOK.md`
+- Sport.fun TP sync from in-game API (`app.sport.fun`):
+  - `npm run sportfun:tp-sync-game`
+  - API: `GET/POST /api/sportfun/tp/sync-game`

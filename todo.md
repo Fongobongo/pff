@@ -103,3 +103,17 @@
   - Verified locally on 2026-02-14: `/api/sportsfun/auth/tracked-wallets`, `/api/sportsfun/auth/portfolio-wallets`, `/api/sportsfun/auth/wallet-remarks` return `401 auth_required` when token is not configured
 - [x] Verify generated Tenero enums and contract smoke tests
   - Verified locally on 2026-02-14: `npm run generate:tenero-types` and `npm run test:sportsfun-contracts` pass
+
+## 9) TP parity vs in-game API (`app.sport.fun`)
+- [x] Add strict TP source from game API player records
+  - Implemented source tag: `sportfun_game_api_record` in `sportfun_athlete_tournament_tp`
+- [x] Add TP sync entrypoints for Supabase refresh
+  - API route: `GET/POST /api/sportfun/tp/sync-game`
+  - CLI: `npm run sportfun:tp-sync-game`
+- [x] Switch portfolio TP mode to strict game API by default
+  - `GET /api/sportfun/portfolio/[address]` now defaults to `tpMode=game_api`
+  - Client requests include `tpMode=game_api`
+- [x] Run parity verification after sync (wallet-level and athlete-level) and record diff report
+  - Verified locally on 2026-02-14 for wallet `0x82c117A68fD47A2d53b997049F4BE44714D57455`
+  - Comparison basis: game API `record` average with `null => 0` across full record length
+  - Result: `compared=88`, `MAE=0`, `maxAbsDiff=0`

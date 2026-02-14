@@ -52,11 +52,16 @@ import {
   upsertStoredSportfunPrices,
 } from "@/lib/sportfunPrices";
 import {
+  getSportfunTournamentTpRowsByAthleteIds,
   getSportfunTournamentTpRowsByAthleteNames,
   normalizeSportfunAthleteName,
   type SportfunTournamentTpLookupRow,
   type SportfunTournamentTpSport,
 } from "@/lib/sportfunTournamentTp";
+import {
+  SPORTFUN_GAME_API_TP_SOURCE,
+  triggerSportfunGameApiTpSync,
+} from "@/lib/sportfunGameApiTp";
 
 export const runtime = "nodejs";
 
@@ -79,6 +84,7 @@ const querySchema = z.object({
   jobId: z.string().optional(),
   // Higher caps + best-effort full history scan (may still truncate if it risks timeouts).
   scanMode: z.enum(["default", "full"]).optional(),
+  tpMode: z.enum(["game_api", "legacy", "all"]).optional(),
 });
 
 type AlchemyTransfer = {
@@ -122,7 +128,7 @@ const SCAN_START_BLOCK_LOOKUP_TIMEOUT_MS =
     : 8000;
 const CONTRACT_RENEWAL_LOGS_CACHE_TTL_MS = 1000 * 60 * 10; // 10m
 const TX_CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 14; // 14 days
-const PORTFOLIO_CACHE_SCHEMA_VERSION = 12;
+const PORTFOLIO_CACHE_SCHEMA_VERSION = 13;
 const SPORTFUN_FUN_TOKEN_ADDRESS = "0x16ee7ecac70d1028e7712751e2ee6ba808a7dd92";
 const PACK_OPEN_SELECTORS = new Set<string>([
   // Legacy pack open flow (observed on 2025-10/11 transactions).
@@ -1874,6 +1880,7 @@ type PositionTournamentTpAggregate = {
   averageTpPerTournament: number;
   tournamentsCount: number;
   tournamentTpTotal: number;
+  source?: string;
   lastTournamentAt?: string;
 };
 
@@ -1884,28 +1891,31 @@ function getTournamentTpSport(contractAddress: string): SportfunTournamentTpSpor
   return null;
 }
 
-function buildTournamentTpAggregateByName(
-  rows: SportfunTournamentTpLookupRow[]
+function buildTournamentTpAggregateByKey(
+  rows: SportfunTournamentTpLookupRow[],
+  keyForRow: (row: SportfunTournamentTpLookupRow) => string
 ): Map<string, PositionTournamentTpAggregate> {
-  const byName = new Map<
+  const byKey = new Map<
     string,
     {
       tpTotal: number;
       tournaments: Set<string>;
       latestTs: number;
       latestAsOf?: string;
+      source?: string;
       dedupe: Set<string>;
     }
   >();
 
   for (const row of rows) {
-    const normalized = normalizeSportfunAthleteName(row.athleteName);
-    if (!normalized) continue;
-    const current = byName.get(normalized) ?? {
+    const key = keyForRow(row);
+    if (!key) continue;
+    const current = byKey.get(key) ?? {
       tpTotal: 0,
       tournaments: new Set<string>(),
       latestTs: Number.NaN,
       latestAsOf: undefined,
+      source: undefined,
       dedupe: new Set<string>(),
     };
     const dedupeKey = `${row.athleteId}:${row.tournamentKey}`;
@@ -1915,26 +1925,42 @@ function buildTournamentTpAggregateByName(
     current.dedupe.add(dedupeKey);
     current.tpTotal += row.tpTotal;
     current.tournaments.add(row.tournamentKey);
+    if (!current.source && row.source) {
+      current.source = row.source;
+    }
     const rowTs = Date.parse(row.asOf ?? "");
     if (Number.isFinite(rowTs) && (!Number.isFinite(current.latestTs) || rowTs > current.latestTs)) {
       current.latestTs = rowTs;
       current.latestAsOf = row.asOf;
     }
-    byName.set(normalized, current);
+    byKey.set(key, current);
   }
 
   const out = new Map<string, PositionTournamentTpAggregate>();
-  for (const [name, entry] of byName.entries()) {
+  for (const [key, entry] of byKey.entries()) {
     const tournamentsCount = entry.tournaments.size;
     if (tournamentsCount <= 0) continue;
-    out.set(name, {
+    out.set(key, {
       averageTpPerTournament: entry.tpTotal / tournamentsCount,
       tournamentsCount,
       tournamentTpTotal: entry.tpTotal,
+      source: entry.source,
       lastTournamentAt: entry.latestAsOf,
     });
   }
   return out;
+}
+
+function buildTournamentTpAggregateByName(
+  rows: SportfunTournamentTpLookupRow[]
+): Map<string, PositionTournamentTpAggregate> {
+  return buildTournamentTpAggregateByKey(rows, (row) => normalizeSportfunAthleteName(row.athleteName));
+}
+
+function buildTournamentTpAggregateByAthleteId(
+  rows: SportfunTournamentTpLookupRow[]
+): Map<string, PositionTournamentTpAggregate> {
+  return buildTournamentTpAggregateByKey(rows, (row) => row.athleteId.trim());
 }
 
 export async function GET(request: Request, context: { params: Promise<{ address: string }> }) {
@@ -1947,6 +1973,7 @@ export async function GET(request: Request, context: { params: Promise<{ address
   const walletLc = wallet.toLowerCase();
 
   const scanMode = q.scanMode ?? "default";
+  const tpMode = q.tpMode ?? "game_api";
   const scanStartBlock = await getScanStartBlockHex();
   const isVercel = Boolean(process.env.VERCEL);
   // Keep the request budget for the expensive transfer/receipt work, not for initial setup.
@@ -1981,12 +2008,14 @@ export async function GET(request: Request, context: { params: Promise<{ address
     includePrices ? "1" : "0",
     includeMetadata ? "1" : "0",
     includeUri ? "1" : "0",
+    tpMode,
     metadataLimit ?? "",
     scanStartBlock,
     activityCursor,
   ].join(":");
   const cacheKey = `sportfun:portfolio:${sha1Hex(cacheKeyRaw)}`;
-  const cacheTtl = scanMode === "full" ? 900 : 300;
+  const cacheTtl =
+    tpMode === "game_api" ? (scanMode === "full" ? 120 : 60) : scanMode === "full" ? 900 : 300;
 
   async function buildPayload() {
   const depositCounterparties = getSportfunDepositCounterparties();
@@ -3782,9 +3811,16 @@ export async function GET(request: Request, context: { params: Promise<{ address
   }
 
   const tpNamesBySport = new Map<SportfunTournamentTpSport, Set<string>>();
+  const tpAthleteIdsBySport = new Map<SportfunTournamentTpSport, Set<string>>();
   for (const h of holdingsEnriched) {
     const tpSport = getTournamentTpSport(h.contractAddress);
     if (!tpSport) continue;
+    const athleteId = h.tokenIdDec?.trim();
+    if (athleteId) {
+      const idsBucket = tpAthleteIdsBySport.get(tpSport) ?? new Set<string>();
+      idsBucket.add(athleteId);
+      tpAthleteIdsBySport.set(tpSport, idsBucket);
+    }
     const name = h.metadata?.name ?? getSportfunNameOverride(h.contractAddress, h.tokenIdDec);
     if (!name) continue;
     const bucket = tpNamesBySport.get(tpSport) ?? new Set<string>();
@@ -3792,28 +3828,77 @@ export async function GET(request: Request, context: { params: Promise<{ address
     tpNamesBySport.set(tpSport, bucket);
   }
 
+  const includeNflTpSync = (tpAthleteIdsBySport.get("nfl")?.size ?? 0) > 0;
+  const includeFootballTpSync = (tpAthleteIdsBySport.get("football")?.size ?? 0) > 0;
+  if (tpMode === "game_api" && (includeNflTpSync || includeFootballTpSync)) {
+    try {
+      await Promise.race([
+        triggerSportfunGameApiTpSync({
+          includeNfl: includeNflTpSync,
+          includeFootball: includeFootballTpSync,
+        }),
+        new Promise((resolve) => setTimeout(resolve, 5_000)),
+      ]);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`[sportfun-portfolio] game API TP sync failed: ${message}`);
+    }
+  }
+
   const [nflTpRows, footballTpRows] = await Promise.all([
     (async () => {
+      if (tpMode === "game_api") {
+        const athleteIds = [...(tpAthleteIdsBySport.get("nfl") ?? new Set<string>())];
+        if (!athleteIds.length) return [] as SportfunTournamentTpLookupRow[];
+        return getSportfunTournamentTpRowsByAthleteIds({
+          sport: "nfl",
+          athleteIds,
+          source: SPORTFUN_GAME_API_TP_SOURCE,
+        });
+      }
+
       const names = [...(tpNamesBySport.get("nfl") ?? new Set<string>())];
       if (!names.length) return [] as SportfunTournamentTpLookupRow[];
       return getSportfunTournamentTpRowsByAthleteNames({
         sport: "nfl",
         athleteNames: names,
+        source: tpMode === "legacy" ? "nflverse_data" : undefined,
       });
     })(),
     (async () => {
+      if (tpMode === "game_api") {
+        const athleteIds = [...(tpAthleteIdsBySport.get("football") ?? new Set<string>())];
+        if (!athleteIds.length) return [] as SportfunTournamentTpLookupRow[];
+        return getSportfunTournamentTpRowsByAthleteIds({
+          sport: "football",
+          athleteIds,
+          source: SPORTFUN_GAME_API_TP_SOURCE,
+        });
+      }
+
       const names = [...(tpNamesBySport.get("football") ?? new Set<string>())];
       if (!names.length) return [] as SportfunTournamentTpLookupRow[];
       return getSportfunTournamentTpRowsByAthleteNames({
         sport: "football",
         athleteNames: names,
+        source: tpMode === "legacy" ? "statsbomb_open_data" : undefined,
       });
     })(),
   ]);
 
-  const tpAggregateBySport = new Map<SportfunTournamentTpSport, Map<string, PositionTournamentTpAggregate>>([
+  const tpAggregateBySportByName = new Map<
+    SportfunTournamentTpSport,
+    Map<string, PositionTournamentTpAggregate>
+  >([
     ["nfl", buildTournamentTpAggregateByName(nflTpRows)],
     ["football", buildTournamentTpAggregateByName(footballTpRows)],
+  ]);
+  const tpAggregateBySportByAthleteId = new Map<
+    SportfunTournamentTpSport,
+    Map<string, PositionTournamentTpAggregate>
+  >([
+    ["nfl", buildTournamentTpAggregateByAthleteId(nflTpRows)],
+    ["football", buildTournamentTpAggregateByAthleteId(footballTpRows)],
   ]);
 
   const positionsByToken = holdingsEnriched
@@ -3822,10 +3907,16 @@ export async function GET(request: Request, context: { params: Promise<{ address
       const playerName = h.metadata?.name ?? getSportfunNameOverride(h.contractAddress, h.tokenIdDec);
       const tpSport = getTournamentTpSport(h.contractAddress);
       const normalizedPlayerName = normalizeSportfunAthleteName(playerName);
-      const tpAggregate =
-        tpSport && normalizedPlayerName
-          ? tpAggregateBySport.get(tpSport)?.get(normalizedPlayerName)
-          : undefined;
+      const tpAggregate = (() => {
+        if (!tpSport) return undefined;
+        if (tpMode === "game_api") {
+          const athleteId = h.tokenIdDec?.trim();
+          if (!athleteId) return undefined;
+          return tpAggregateBySportByAthleteId.get(tpSport)?.get(athleteId);
+        }
+        if (!normalizedPlayerName) return undefined;
+        return tpAggregateBySportByName.get(tpSport)?.get(normalizedPlayerName);
+      })();
 
       const holdingShares = BigInt(h.balanceRaw);
       const tracked = positionByKey.get(key);
@@ -3897,6 +3988,7 @@ export async function GET(request: Request, context: { params: Promise<{ address
         averageTpPerTournament: tpAggregate?.averageTpPerTournament,
         tournamentsCount: tpAggregate?.tournamentsCount,
         tournamentTpTotal: tpAggregate?.tournamentTpTotal,
+        tpSource: tpAggregate?.source,
         tpLastTournamentAt: tpAggregate?.lastTournamentAt,
 
         totals: flow
@@ -3933,6 +4025,7 @@ export async function GET(request: Request, context: { params: Promise<{ address
       maxPages,
       maxCount,
       maxActivity,
+      tpMode,
       includeTrades,
       includePrices,
       includeReceipts,

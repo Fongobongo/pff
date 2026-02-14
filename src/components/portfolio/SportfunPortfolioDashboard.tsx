@@ -17,6 +17,7 @@ type SportfunPortfolioSnapshot = {
   address: string;
   query?: {
     scanMode?: "default" | "full";
+    tpMode?: "game_api" | "legacy" | "all";
     maxPages?: number;
     maxCount?: string;
     maxActivity?: number;
@@ -547,6 +548,7 @@ export default function SportfunPortfolioDashboard({
       query.set("maxPages", String(params.maxPages));
       query.set("maxCount", "0x3e8");
       query.set("maxActivity", String(params.maxActivity));
+      query.set("tpMode", "game_api");
       if (params.activityCursor !== undefined) query.set("activityCursor", String(params.activityCursor));
       if (params.metadataLimit !== undefined) query.set("metadataLimit", String(params.metadataLimit));
       query.set("includeTrades", params.includeTrades ? "1" : "0");

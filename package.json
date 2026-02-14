@@ -17,6 +17,7 @@
     "report:nfl-health": "tsx scripts/report_nfl_health.ts",
     "sportfun:names": "tsx scripts/generate_sportfun_name_overrides.ts",
     "sportfun:tp-backfill": "tsx scripts/backfill_sportfun_tournament_tp.ts",
+    "sportfun:tp-sync-game": "tsx scripts/sync_sportfun_game_tp.ts",
     "generate:tenero-types": "tsx scripts/generate_tenero_types.ts",
     "test:sportsfun-contracts": "tsx scripts/test_sportsfun_contracts.ts"
   },
