@@ -80,13 +80,13 @@
   - `GET /v1/sportsfun/market/hourly_netflow`
 - [x] Implement resilience for unstable endpoints
   - Note: `GET /v1/sportsfun/wallets/{address}/pnl_distribution` can return `500` for some wallets; UI should degrade gracefully
-- [ ] Handle auth-gated Tenero features behind our own auth/proxy
+- [x] Handle auth-gated Tenero features behind our own auth/proxy
   - `GET /v1/sportsfun/tracked_wallets` returns `401` without auth
   - `GET /v1/sportsfun/portfolio_wallets` returns `401` without auth
   - `GET /v1/sportsfun/wallet_remarks` returns `401` without auth
-- [ ] Add server-side rate-limit handling and caching
+- [x] Add server-side rate-limit handling and caching
   - Observed headers: `x-ratelimit-limit: 200` and `x-ratelimit-remaining`
-- [ ] Add integration fallback if CORS policy changes
+- [x] Add integration fallback if CORS policy changes
   - Current observation: origin reflection is permissive for tested origins, but this should not be relied on long-term
 - [ ] Run legal review before production rollout
   - Tenero ToS indicates data/content ownership restrictions (copying/redistribution/modification may require explicit permission)
@@ -99,3 +99,5 @@
   - Verified locally on 2026-02-14 via `curl` against `next dev`
 - [x] Verify status `200` for `/sportsfun/wallet/[address]` and `tab=transfers`
   - Verified locally on 2026-02-14: `/sportsfun/wallet/0x82c117A68fD47A2d53b997049F4BE44714D57455` and `/sportsfun/wallet/0x82c117A68fD47A2d53b997049F4BE44714D57455?tab=transfers&timeframe=7d`
+- [x] Verify auth proxy endpoints for gated Tenero APIs
+  - Verified locally on 2026-02-14: `/api/sportsfun/auth/tracked-wallets`, `/api/sportsfun/auth/portfolio-wallets`, `/api/sportsfun/auth/wallet-remarks` return `401 auth_required` when token is not configured

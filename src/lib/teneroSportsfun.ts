@@ -3,6 +3,7 @@ import { withCache } from "@/lib/stats/cache";
 
 const DEFAULT_TENERO_BASE_URL = "https://api.tenero.io";
 const REQUEST_TIMEOUT_MS = 12_000;
+const MAX_RATE_LIMIT_RETRIES = 2;
 
 type QueryPrimitive = string | number | boolean;
 type QueryValue = QueryPrimitive | QueryPrimitive[] | null | undefined;
@@ -405,6 +406,15 @@ function getTeneroBaseUrl(): string {
   return DEFAULT_TENERO_BASE_URL;
 }
 
+function getTeneroAuthBearerToken(): string | undefined {
+  const token = env.TENERO_AUTH_BEARER_TOKEN?.trim();
+  return token ? token : undefined;
+}
+
+export function hasTeneroAuthBearerToken(): boolean {
+  return Boolean(getTeneroAuthBearerToken());
+}
+
 function buildUrl(pathname: string, params?: QueryParams): string {
   const url = new URL(pathname, getTeneroBaseUrl());
   if (params) {
@@ -420,20 +430,36 @@ function buildUrl(pathname: string, params?: QueryParams): string {
   return url.toString();
 }
 
-async function fetchWithTimeout(url: string): Promise<Response> {
+async function fetchWithTimeout(url: string, headers: Record<string, string>): Promise<Response> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
     return await fetch(url, {
       signal: controller.signal,
-      headers: {
-        accept: "application/json",
-      },
+      headers,
       cache: "no-store",
     });
   } finally {
     clearTimeout(timeout);
   }
+}
+
+function parseRateLimitDelayMs(response: Response, attempt: number): number {
+  const retryAfter = Number(response.headers.get("retry-after"));
+  if (Number.isFinite(retryAfter) && retryAfter > 0) {
+    return Math.min(5_000, Math.trunc(retryAfter * 1000));
+  }
+
+  const resetSeconds = Number(response.headers.get("x-ratelimit-reset"));
+  if (Number.isFinite(resetSeconds) && resetSeconds > 0) {
+    return Math.min(5_000, Math.trunc(resetSeconds * 1000));
+  }
+
+  return Math.min(4_000, 400 * 2 ** attempt);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function decodeEnvelope<T>(response: Response, url: string): Promise<T> {
@@ -472,10 +498,33 @@ async function requestTenero<T>(opts: {
   pathname: string;
   params?: QueryParams;
   cacheTtlSeconds?: number;
+  requiresAuth?: boolean;
 }): Promise<T> {
   const url = buildUrl(opts.pathname, opts.params);
   const loader = async () => {
-    const response = await fetchWithTimeout(url);
+    const authToken = opts.requiresAuth ? getTeneroAuthBearerToken() : undefined;
+    if (opts.requiresAuth && !authToken) {
+      throw new TeneroRequestError(
+        "Tenero auth token is not configured on server",
+        401,
+        url
+      );
+    }
+
+    const headers: Record<string, string> = {
+      accept: "application/json",
+    };
+    if (authToken) headers.authorization = `Bearer ${authToken}`;
+
+    let response = await fetchWithTimeout(url, headers);
+    let retry = 0;
+    while (response.status === 429 && retry < MAX_RATE_LIMIT_RETRIES) {
+      const delayMs = parseRateLimitDelayMs(response, retry);
+      retry += 1;
+      await sleep(delayMs);
+      response = await fetchWithTimeout(url, headers);
+    }
+
     return decodeEnvelope<T>(response, url);
   };
   const ttl = Math.max(0, Math.trunc(opts.cacheTtlSeconds ?? 0));
@@ -494,10 +543,14 @@ function timeframeToFromDate(timeframe: SportsfunWalletTradeStatsTimeframe): str
 }
 
 async function requestAuthGated<T>(pathname: string): Promise<SportsfunAuthGateResult<T>> {
+  if (!hasTeneroAuthBearerToken()) {
+    return { data: null, authRequired: true };
+  }
   try {
     const data = await requestTenero<T>({
       pathname,
       cacheTtlSeconds: 20,
+      requiresAuth: true,
     });
     return { data, authRequired: false };
   } catch (error: unknown) {
@@ -707,7 +760,9 @@ export async function getSportsfunWalletRemarks(): Promise<SportsfunAuthGateResu
 export const teneroSportsfunConfig = {
   baseUrl: getTeneroBaseUrl(),
   requestTimeoutMs: REQUEST_TIMEOUT_MS,
+  maxRateLimitRetries: MAX_RATE_LIMIT_RETRIES,
   // For quick debug pages we expose current auth config check.
   hasCustomBaseUrl: Boolean(env.TENERO_API_BASE_URL?.trim()),
+  hasAuthBearerToken: hasTeneroAuthBearerToken(),
   allowSignedTls: parseBoolean(process.env.NODE_TLS_REJECT_UNAUTHORIZED),
 } as const;

@@ -56,6 +56,9 @@ const envSchema = z.object({
 
   // Optional Tenero API base URL override (defaults to public api.tenero.io).
   TENERO_API_BASE_URL: z.string().url().optional(),
+
+  // Optional server-side auth token for Tenero auth-gated endpoints.
+  TENERO_AUTH_BEARER_TOKEN: z.string().min(1).optional(),
 });
 
 const parsed = envSchema.parse({
@@ -81,6 +84,7 @@ const parsed = envSchema.parse({
   SPORTFUN_PRICE_REFRESH_MINUTES: process.env.SPORTFUN_PRICE_REFRESH_MINUTES,
   SPORTFUN_EXTERNAL_PRICE_TOKENS: process.env.SPORTFUN_EXTERNAL_PRICE_TOKENS,
   TENERO_API_BASE_URL: process.env.TENERO_API_BASE_URL,
+  TENERO_AUTH_BEARER_TOKEN: process.env.TENERO_AUTH_BEARER_TOKEN,
 });
 
 function parseBoolean(value: string | undefined): boolean {
