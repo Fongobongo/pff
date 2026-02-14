@@ -34,6 +34,14 @@ export default function Home() {
 
           <Link
             className="rounded-xl border border-black/10 bg-white p-4 hover:bg-zinc-50 dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10"
+            href="/sportfun/prices"
+          >
+            <div className="text-sm text-zinc-600 dark:text-zinc-400">Sport.fun prices</div>
+            <div className="mt-1 text-lg font-medium text-black dark:text-white">Supabase price feed</div>
+          </Link>
+
+          <Link
+            className="rounded-xl border border-black/10 bg-white p-4 hover:bg-zinc-50 dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10"
             href="/football"
           >
             <div className="text-sm text-zinc-600 dark:text-zinc-400">Football stats (StatsBomb)</div>

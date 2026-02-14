@@ -4,6 +4,11 @@ const envSchema = z.object({
   // Optional in early development when we want to run without a database.
   DATABASE_URL: z.string().min(1).optional(),
 
+  // Supabase REST config (service role key recommended for server-side writes).
+  SUPABASE_PROJECT_URL: z.string().url().optional(),
+  SUPABASE_SECRET_KEY: z.string().min(1).optional(),
+  SUPABASE_SERVICE_ROLE_KEY: z.string().min(1).optional(),
+
   // Optional: default to the public Base RPC.
   BASE_RPC_URL: z.string().url().optional(),
 
@@ -43,10 +48,18 @@ const envSchema = z.object({
 
   // Admin token required for mutating market-alert operations.
   MARKET_ALERT_ADMIN_TOKEN: z.string().min(8).optional(),
+
+  // External price sync (GeckoTerminal + DexScreener) for Sport.fun.
+  SPORTFUN_PRICE_SYNC_ENABLED: z.string().optional(),
+  SPORTFUN_PRICE_REFRESH_MINUTES: z.coerce.number().int().min(5).max(60).optional(),
+  SPORTFUN_EXTERNAL_PRICE_TOKENS: z.string().optional(),
 });
 
 const parsed = envSchema.parse({
   DATABASE_URL: process.env.DATABASE_URL,
+  SUPABASE_PROJECT_URL: process.env.SUPABASE_PROJECT_URL,
+  SUPABASE_SECRET_KEY: process.env.SUPABASE_SECRET_KEY,
+  SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY,
   BASE_RPC_URL: process.env.BASE_RPC_URL,
   ETHERSCAN_API_KEY: process.env.ETHERSCAN_API_KEY,
   ALCHEMY_API_KEY: process.env.ALCHEMY_API_KEY,
@@ -61,6 +74,9 @@ const parsed = envSchema.parse({
   MARKET_ALERT_SINK_MAX: process.env.MARKET_ALERT_SINK_MAX,
   MARKET_ALERT_RETENTION_HOURS: process.env.MARKET_ALERT_RETENTION_HOURS,
   MARKET_ALERT_ADMIN_TOKEN: process.env.MARKET_ALERT_ADMIN_TOKEN,
+  SPORTFUN_PRICE_SYNC_ENABLED: process.env.SPORTFUN_PRICE_SYNC_ENABLED,
+  SPORTFUN_PRICE_REFRESH_MINUTES: process.env.SPORTFUN_PRICE_REFRESH_MINUTES,
+  SPORTFUN_EXTERNAL_PRICE_TOKENS: process.env.SPORTFUN_EXTERNAL_PRICE_TOKENS,
 });
 
 function parseBoolean(value: string | undefined): boolean {
@@ -77,4 +93,10 @@ export const env = {
   MARKET_ALERT_SINK_MAX: parsed.MARKET_ALERT_SINK_MAX ?? 300,
   MARKET_ALERT_RETENTION_HOURS: parsed.MARKET_ALERT_RETENTION_HOURS ?? 24 * 7,
   MARKET_ALERT_ADMIN_TOKEN: parsed.MARKET_ALERT_ADMIN_TOKEN,
+  SPORTFUN_PRICE_SYNC_ENABLED:
+    parsed.SPORTFUN_PRICE_SYNC_ENABLED === undefined
+      ? true
+      : parseBoolean(parsed.SPORTFUN_PRICE_SYNC_ENABLED),
+  SPORTFUN_PRICE_REFRESH_MINUTES: parsed.SPORTFUN_PRICE_REFRESH_MINUTES ?? 10,
+  SUPABASE_SERVICE_ROLE_KEY: parsed.SUPABASE_SERVICE_ROLE_KEY ?? parsed.SUPABASE_SECRET_KEY,
 };
