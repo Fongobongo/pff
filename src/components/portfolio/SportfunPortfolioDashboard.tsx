@@ -110,6 +110,10 @@ type SportfunPortfolioSnapshot = {
       unrealizedPnlTrackedUsdcRaw?: string;
       unrealizedPnlTrackedExcludingPromotionsUsdcRaw?: string;
       unrealizedPnlTrackedExcludingFreeUsdcRaw?: string;
+      averageTpPerTournament?: number;
+      tournamentsCount?: number;
+      tournamentTpTotal?: number;
+      tpLastTournamentAt?: string;
 
       totals?: {
         boughtSharesRaw: string;
@@ -432,6 +436,11 @@ function formatAgeMs(ms?: number): string {
   if (hours < 24) return `${hours}h`;
   const days = Math.floor(hours / 24);
   return `${days}d`;
+}
+
+function formatTpAverage(value: number | undefined): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "—";
+  return value.toFixed(2);
 }
 
 export default function SportfunPortfolioDashboard({
@@ -1056,6 +1065,9 @@ export default function SportfunPortfolioDashboard({
       "playerName",
       "playerToken",
       "tokenIdDec",
+      "averageTpPerTournament",
+      "tpTournamentsCount",
+      "tpTournamentTotal",
       "holdingShares",
       "spentUsdc",
       "avgCostUsdcPerShare",
@@ -1088,6 +1100,9 @@ export default function SportfunPortfolioDashboard({
       })(),
       p.playerToken,
       p.tokenIdDec,
+      p.averageTpPerTournament ?? "",
+      p.tournamentsCount ?? "",
+      p.tournamentTpTotal ?? "",
       p.holdingSharesRaw,
       p.totals?.spentUsdcRaw ?? "0",
       p.avgCostUsdcPerShareRaw ?? "",
@@ -1555,6 +1570,7 @@ export default function SportfunPortfolioDashboard({
                 <tr>
                   <th className="p-3">Sport</th>
                   <th className="p-3">Player</th>
+                  <th className="p-3">Average TP</th>
                   <th className="p-3">Holding shares</th>
                   <th className="p-3">Spent</th>
                   <th className="p-3">Avg cost/share</th>
@@ -1579,6 +1595,12 @@ export default function SportfunPortfolioDashboard({
                         {getSportfunSportLabel(p.playerToken).toUpperCase()}
                       </td>
                       <td className="p-3 whitespace-nowrap">{renderTokenLabel(p.playerToken, p.tokenIdDec)}</td>
+                      <td className="p-3 whitespace-nowrap">
+                        {formatTpAverage(p.averageTpPerTournament)}
+                        {typeof p.tournamentsCount === "number" && p.tournamentsCount > 0 ? (
+                          <span className={`ml-1 text-xs ${cardTextMutedStrong}`}>({p.tournamentsCount})</span>
+                        ) : null}
+                      </td>
                       <td className="p-3 whitespace-nowrap">{formatShares(p.holdingSharesRaw)}</td>
                       <td className="p-3 whitespace-nowrap">{p.totals ? formatUsdc(p.totals.spentUsdcRaw, decimals) : "—"}</td>
                       <td className="p-3 whitespace-nowrap">
@@ -1609,14 +1631,14 @@ export default function SportfunPortfolioDashboard({
                 })}
                 {sortedPositions.length === 0 ? (
                   <tr>
-                    <td className={`p-3 ${cardTextMutedStrong}`} colSpan={10}>
+                    <td className={`p-3 ${cardTextMutedStrong}`} colSpan={11}>
                       No positions for selected filters.
                     </td>
                   </tr>
                 ) : null}
                 {sortedPositions.length > 400 ? (
                   <tr>
-                    <td className={`p-3 ${cardTextMutedStrong}`} colSpan={10}>
+                    <td className={`p-3 ${cardTextMutedStrong}`} colSpan={11}>
                       Showing top 400. Use CSV for full export.
                     </td>
                   </tr>

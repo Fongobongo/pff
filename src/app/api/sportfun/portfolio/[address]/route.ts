@@ -51,6 +51,12 @@ import {
   triggerSportfunExternalPricesRefresh,
   upsertStoredSportfunPrices,
 } from "@/lib/sportfunPrices";
+import {
+  getSportfunTournamentTpRowsByAthleteNames,
+  normalizeSportfunAthleteName,
+  type SportfunTournamentTpLookupRow,
+  type SportfunTournamentTpSport,
+} from "@/lib/sportfunTournamentTp";
 
 export const runtime = "nodejs";
 
@@ -1862,6 +1868,73 @@ function decodeReceiptForSportfun(params: {
 
 function tokenKey(playerToken: string, tokenIdDec: string): string {
   return `${playerToken.toLowerCase()}:${tokenIdDec}`;
+}
+
+type PositionTournamentTpAggregate = {
+  averageTpPerTournament: number;
+  tournamentsCount: number;
+  tournamentTpTotal: number;
+  lastTournamentAt?: string;
+};
+
+function getTournamentTpSport(contractAddress: string): SportfunTournamentTpSport | null {
+  const sport = getSportfunSportLabel(contractAddress);
+  if (sport === "nfl") return "nfl";
+  if (sport === "soccer") return "football";
+  return null;
+}
+
+function buildTournamentTpAggregateByName(
+  rows: SportfunTournamentTpLookupRow[]
+): Map<string, PositionTournamentTpAggregate> {
+  const byName = new Map<
+    string,
+    {
+      tpTotal: number;
+      tournaments: Set<string>;
+      latestTs: number;
+      latestAsOf?: string;
+      dedupe: Set<string>;
+    }
+  >();
+
+  for (const row of rows) {
+    const normalized = normalizeSportfunAthleteName(row.athleteName);
+    if (!normalized) continue;
+    const current = byName.get(normalized) ?? {
+      tpTotal: 0,
+      tournaments: new Set<string>(),
+      latestTs: Number.NaN,
+      latestAsOf: undefined,
+      dedupe: new Set<string>(),
+    };
+    const dedupeKey = `${row.athleteId}:${row.tournamentKey}`;
+    if (current.dedupe.has(dedupeKey)) {
+      continue;
+    }
+    current.dedupe.add(dedupeKey);
+    current.tpTotal += row.tpTotal;
+    current.tournaments.add(row.tournamentKey);
+    const rowTs = Date.parse(row.asOf ?? "");
+    if (Number.isFinite(rowTs) && (!Number.isFinite(current.latestTs) || rowTs > current.latestTs)) {
+      current.latestTs = rowTs;
+      current.latestAsOf = row.asOf;
+    }
+    byName.set(normalized, current);
+  }
+
+  const out = new Map<string, PositionTournamentTpAggregate>();
+  for (const [name, entry] of byName.entries()) {
+    const tournamentsCount = entry.tournaments.size;
+    if (tournamentsCount <= 0) continue;
+    out.set(name, {
+      averageTpPerTournament: entry.tpTotal / tournamentsCount,
+      tournamentsCount,
+      tournamentTpTotal: entry.tpTotal,
+      lastTournamentAt: entry.latestAsOf,
+    });
+  }
+  return out;
 }
 
 export async function GET(request: Request, context: { params: Promise<{ address: string }> }) {
@@ -3708,10 +3781,51 @@ export async function GET(request: Request, context: { params: Promise<{ address
     unrealizedPnlExcludingFreeUsdcRaw += valueExcludingFree - pos.costUsdc;
   }
 
+  const tpNamesBySport = new Map<SportfunTournamentTpSport, Set<string>>();
+  for (const h of holdingsEnriched) {
+    const tpSport = getTournamentTpSport(h.contractAddress);
+    if (!tpSport) continue;
+    const name = h.metadata?.name ?? getSportfunNameOverride(h.contractAddress, h.tokenIdDec);
+    if (!name) continue;
+    const bucket = tpNamesBySport.get(tpSport) ?? new Set<string>();
+    bucket.add(name);
+    tpNamesBySport.set(tpSport, bucket);
+  }
+
+  const [nflTpRows, footballTpRows] = await Promise.all([
+    (async () => {
+      const names = [...(tpNamesBySport.get("nfl") ?? new Set<string>())];
+      if (!names.length) return [] as SportfunTournamentTpLookupRow[];
+      return getSportfunTournamentTpRowsByAthleteNames({
+        sport: "nfl",
+        athleteNames: names,
+      });
+    })(),
+    (async () => {
+      const names = [...(tpNamesBySport.get("football") ?? new Set<string>())];
+      if (!names.length) return [] as SportfunTournamentTpLookupRow[];
+      return getSportfunTournamentTpRowsByAthleteNames({
+        sport: "football",
+        athleteNames: names,
+      });
+    })(),
+  ]);
+
+  const tpAggregateBySport = new Map<SportfunTournamentTpSport, Map<string, PositionTournamentTpAggregate>>([
+    ["nfl", buildTournamentTpAggregateByName(nflTpRows)],
+    ["football", buildTournamentTpAggregateByName(footballTpRows)],
+  ]);
+
   const positionsByToken = holdingsEnriched
     .map((h) => {
       const key = tokenKey(h.contractAddress, h.tokenIdDec);
       const playerName = h.metadata?.name ?? getSportfunNameOverride(h.contractAddress, h.tokenIdDec);
+      const tpSport = getTournamentTpSport(h.contractAddress);
+      const normalizedPlayerName = normalizeSportfunAthleteName(playerName);
+      const tpAggregate =
+        tpSport && normalizedPlayerName
+          ? tpAggregateBySport.get(tpSport)?.get(normalizedPlayerName)
+          : undefined;
 
       const holdingShares = BigInt(h.balanceRaw);
       const tracked = positionByKey.get(key);
@@ -3779,6 +3893,11 @@ export async function GET(request: Request, context: { params: Promise<{ address
           unrealizedPnlTrackedExcludingPromotionsUsdcRaw?.toString(10),
         unrealizedPnlTrackedExcludingFreeUsdcRaw:
           unrealizedPnlTrackedExcludingFreeUsdcRaw?.toString(10),
+
+        averageTpPerTournament: tpAggregate?.averageTpPerTournament,
+        tournamentsCount: tpAggregate?.tournamentsCount,
+        tournamentTpTotal: tpAggregate?.tournamentTpTotal,
+        tpLastTournamentAt: tpAggregate?.lastTournamentAt,
 
         totals: flow
           ? {

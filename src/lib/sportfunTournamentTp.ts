@@ -22,6 +22,19 @@ export type SportfunTournamentTpUpsertRow = {
   providerPayload?: unknown;
 };
 
+export type SportfunTournamentTpSport = "nfl" | "football";
+
+export type SportfunTournamentTpLookupRow = {
+  sport: SportfunTournamentTpSport;
+  tournamentKey: string;
+  athleteId: string;
+  athleteName: string;
+  team?: string;
+  position?: string;
+  tpTotal: number;
+  asOf?: string;
+};
+
 const SPORTFUN_TOURNAMENT_TP_TABLE = "sportfun_athlete_tournament_tp";
 const SUPABASE_REQUEST_TIMEOUT_MS = 12_000;
 
@@ -58,6 +71,41 @@ function normalizeText(value: string | undefined): string | null {
 function normalizeNumber(value: number | undefined): number | null {
   if (typeof value !== "number" || !Number.isFinite(value)) return null;
   return value;
+}
+
+function toFiniteNumber(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+}
+
+function chunkArray<T>(items: T[], chunkSize: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += chunkSize) {
+    out.push(items.slice(i, i + chunkSize));
+  }
+  return out;
+}
+
+function toPostgrestInString(values: string[]): string {
+  return values
+    .map((value) => `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`)
+    .join(",");
+}
+
+export function normalizeSportfunAthleteName(value: string | undefined): string {
+  if (!value) return "";
+  return value
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\b(jr|sr|ii|iii|iv|v)\b/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 async function fetchJsonWithTimeout<T>(url: string, init: RequestInit, timeoutMs: number): Promise<T> {
@@ -170,4 +218,91 @@ export async function upsertSportfunTournamentTpRows(rows: SportfunTournamentTpU
     }
     return 0;
   }
+}
+
+type SupabaseTournamentTpLookupRow = {
+  sport?: string;
+  tournament_key?: string;
+  athlete_id?: string;
+  athlete_name?: string;
+  team?: string | null;
+  position?: string | null;
+  tp_total?: number | string;
+  as_of?: string | null;
+};
+
+export async function getSportfunTournamentTpRowsByAthleteNames(params: {
+  sport: SportfunTournamentTpSport;
+  athleteNames: string[];
+  chunkSize?: number;
+}): Promise<SportfunTournamentTpLookupRow[]> {
+  const rawNames = params.athleteNames
+    .map((name) => name.trim())
+    .filter((name) => name.length > 0);
+  if (!rawNames.length) return [];
+  if (!isSportfunTournamentTpStoreConfigured()) {
+    warnNoSupabaseOnce();
+    return [];
+  }
+
+  const names = [...new Set(rawNames)];
+  const chunkSize = Math.max(1, Math.min(100, Math.trunc(params.chunkSize ?? 40)));
+  const chunks = chunkArray(names, chunkSize);
+
+  const rows: SportfunTournamentTpLookupRow[] = [];
+  const dedupe = new Set<string>();
+
+  for (const chunk of chunks) {
+    const query = new URLSearchParams();
+    query.set(
+      "select",
+      "sport,tournament_key,athlete_id,athlete_name,team,position,tp_total,as_of"
+    );
+    query.set("sport", `eq.${params.sport}`);
+    query.set("athlete_name", `in.(${toPostgrestInString(chunk)})`);
+    query.set("limit", "5000");
+
+    try {
+      const result = await supabaseRequest<SupabaseTournamentTpLookupRow[]>(
+        `${SPORTFUN_TOURNAMENT_TP_TABLE}?${query.toString()}`,
+        {
+          method: "GET",
+        }
+      );
+      for (const row of result) {
+        const sport = row.sport === "football" ? "football" : row.sport === "nfl" ? "nfl" : null;
+        if (!sport) continue;
+        const tournamentKey = normalizeText(row.tournament_key ?? undefined);
+        const athleteId = normalizeText(row.athlete_id ?? undefined);
+        const athleteName = normalizeText(row.athlete_name ?? undefined);
+        const tpTotal = toFiniteNumber(row.tp_total);
+        if (!tournamentKey || !athleteId || !athleteName || tpTotal === null) continue;
+
+        const dedupeKey = `${sport}:${tournamentKey}:${athleteId}`;
+        if (dedupe.has(dedupeKey)) continue;
+        dedupe.add(dedupeKey);
+
+        rows.push({
+          sport,
+          tournamentKey,
+          athleteId,
+          athleteName,
+          team: normalizeText(row.team ?? undefined) ?? undefined,
+          position: normalizeText(row.position ?? undefined) ?? undefined,
+          tpTotal,
+          asOf: normalizeText(row.as_of ?? undefined) ?? undefined,
+        });
+      }
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!message.includes("supabase_not_configured")) {
+        warnTpStoreOnce(
+          `Unable to read ${SPORTFUN_TOURNAMENT_TP_TABLE} by athlete names (${message}).`
+        );
+      }
+      return [];
+    }
+  }
+
+  return rows;
 }

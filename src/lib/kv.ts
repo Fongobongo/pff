@@ -1,4 +1,6 @@
-import "server-only";
+if (typeof window !== "undefined") {
+  throw new Error("src/lib/kv.ts is server-only.");
+}
 
 type KvResult<T> = {
   result?: T;

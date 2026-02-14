@@ -16,6 +16,7 @@
     "test:nfl-mobile": "tsx scripts/test_nfl_mobile_regression.ts",
     "report:nfl-health": "tsx scripts/report_nfl_health.ts",
     "sportfun:names": "tsx scripts/generate_sportfun_name_overrides.ts",
+    "sportfun:tp-backfill": "tsx scripts/backfill_sportfun_tournament_tp.ts",
     "generate:tenero-types": "tsx scripts/generate_tenero_types.ts",
     "test:sportsfun-contracts": "tsx scripts/test_sportsfun_contracts.ts"
   },
@@ -26,6 +27,7 @@
     "pg": "^8.18.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
+    "server-only": "^0.0.1",
     "viem": "^2.45.1",
     "zod": "^4.3.6"
   },
