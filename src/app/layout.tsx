@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import GlobalFooter from "@/components/layout/GlobalFooter";
+import GlobalStatusBar from "@/components/layout/GlobalStatusBar";
 import ThemeToggle from "@/components/theme/ThemeToggle";
 import "./globals.css";
 
@@ -46,7 +48,9 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
         <ThemeToggle />
+        <GlobalStatusBar />
         {children}
+        <GlobalFooter />
       </body>
     </html>
   );
