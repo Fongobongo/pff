@@ -15,7 +15,9 @@
     "test:nfl-smoke": "tsx scripts/test_nfl_smoke.ts",
     "test:nfl-mobile": "tsx scripts/test_nfl_mobile_regression.ts",
     "report:nfl-health": "tsx scripts/report_nfl_health.ts",
-    "sportfun:names": "tsx scripts/generate_sportfun_name_overrides.ts"
+    "sportfun:names": "tsx scripts/generate_sportfun_name_overrides.ts",
+    "generate:tenero-types": "tsx scripts/generate_tenero_types.ts",
+    "test:sportsfun-contracts": "tsx scripts/test_sportsfun_contracts.ts"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.90.20",

@@ -90,7 +90,7 @@
   - Current observation: origin reflection is permissive for tested origins, but this should not be relied on long-term
 - [ ] Run legal review before production rollout
   - Tenero ToS indicates data/content ownership restrictions (copying/redistribution/modification may require explicit permission)
-- [ ] Optional: generate types from `https://api.tenero.io/api-docs/json` and pin contract tests for critical endpoints
+- [x] Optional: generate types from `https://api.tenero.io/api-docs/json` and pin contract tests for critical endpoints
 
 ## 8) Verification log
 - [x] Verify status `200` for `/sportsfun`, `/sportsfun/tokens`, `/sportsfun/pools`, `/sportsfun/market`
@@ -101,3 +101,5 @@
   - Verified locally on 2026-02-14: `/sportsfun/wallet/0x82c117A68fD47A2d53b997049F4BE44714D57455` and `/sportsfun/wallet/0x82c117A68fD47A2d53b997049F4BE44714D57455?tab=transfers&timeframe=7d`
 - [x] Verify auth proxy endpoints for gated Tenero APIs
   - Verified locally on 2026-02-14: `/api/sportsfun/auth/tracked-wallets`, `/api/sportsfun/auth/portfolio-wallets`, `/api/sportsfun/auth/wallet-remarks` return `401 auth_required` when token is not configured
+- [x] Verify generated Tenero enums and contract smoke tests
+  - Verified locally on 2026-02-14: `npm run generate:tenero-types` and `npm run test:sportsfun-contracts` pass
