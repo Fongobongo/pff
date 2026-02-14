@@ -17,3 +17,8 @@ out/
 # OS
 .DS_Store
 .vercel
+
+# Local artifacts
+players.txt
+test-results/
+tsconfig.tsbuildinfo
