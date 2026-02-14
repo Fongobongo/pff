@@ -5,6 +5,7 @@ const NAV_ITEMS = [
   { href: "/sportsfun/tokens", label: "Tokens" },
   { href: "/sportsfun/pools", label: "Pools" },
   { href: "/sportsfun/market", label: "Market flow" },
+  { href: "/sportsfun/search", label: "Search" },
   { href: "/sportsfun/tracker", label: "Tracker" },
   { href: "/sportsfun/portfolio", label: "Portfolio" },
   { href: "/sportsfun/watchlist", label: "Watchlist" },

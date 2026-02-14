@@ -28,13 +28,13 @@
   - Scope: pool-level table with liquidity/holders/tx metrics and filters
 - [x] Add route `/sportsfun/market` (market flow analytics)
   - Scope: `Top inflows`, `Top outflows`, `Whale trades`, `Market net flow`
-- [ ] Add route `/sportsfun/tracker` (wallet tracker module)
+- [x] Add route `/sportsfun/tracker` (wallet tracker module)
   - Scope: tracked wallets, wallet groups, wallet remarks, grouped trade feed
-- [ ] Add route `/sportsfun/portfolio` (multi-wallet portfolio center)
+- [x] Add route `/sportsfun/portfolio` (multi-wallet portfolio center)
   - Scope: portfolio management across saved wallets + aggregated analytics
-- [ ] Add global `sports.fun` search input
+- [x] Add global `sports.fun` search input
   - Scope: search by token symbol/name/address/wallet across sports.fun pages
-- [ ] Add `watchlist` and standalone `top gainers` market tool for sports.fun
+- [x] Add `watchlist` and standalone `top gainers` market tool for sports.fun
   - Note: we have gainers on NFL/Soccer pages, but no dedicated sports.fun watchlist module
 
 ## 5) Notes about access-gated parity (tenero)
@@ -94,4 +94,6 @@
 
 ## 8) Verification log
 - [x] Verify status `200` for `/sportsfun`, `/sportsfun/tokens`, `/sportsfun/pools`, `/sportsfun/market`
+  - Verified locally on 2026-02-14 via `curl` against `next dev`
+- [x] Verify status `200` for `/sportsfun/search`, `/sportsfun/watchlist`, `/sportsfun/portfolio`, `/sportsfun/tracker`
   - Verified locally on 2026-02-14 via `curl` against `next dev`
