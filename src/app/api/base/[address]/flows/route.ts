@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { isAddress } from "viem";
 import { alchemyRpc } from "@/lib/alchemy";
 import { FUN_TOKEN_ADDRESS } from "@/lib/funToken";
 import { BASE_USDC, SPORTFUN_ERC1155_CONTRACTS } from "@/lib/sportfun";
@@ -13,6 +14,9 @@ const querySchema = z.object({
 });
 
 type Transfer = {
+  uniqueId?: string;
+  hash?: string;
+  blockNum?: string;
   from?: string;
   to?: string;
   asset?: string;
@@ -32,11 +36,35 @@ function normalizeAddr(a?: string) {
   return (a ?? "").toLowerCase();
 }
 
+function invalidAddressResponse(address: string) {
+  return NextResponse.json(
+    {
+      error: "invalid_address",
+      message: `Invalid EVM address: ${address}`,
+    },
+    { status: 400 }
+  );
+}
+
+function transferKey(t: Transfer): string {
+  if (t.uniqueId) return t.uniqueId;
+  return [
+    t.hash ?? "",
+    t.blockNum ?? "",
+    t.from ?? "",
+    t.to ?? "",
+    t.category ?? "",
+    t.rawContract?.address ?? "",
+    String(t.value ?? ""),
+  ].join(":");
+}
+
 export async function GET(
   request: Request,
   context: { params: Promise<{ address: string }> }
 ) {
   const { address } = paramsSchema.parse(await context.params);
+  if (!isAddress(address)) return invalidAddressResponse(address);
   const url = new URL(request.url);
   const q = querySchema.parse(Object.fromEntries(url.searchParams.entries()));
 
@@ -45,7 +73,7 @@ export async function GET(
   const baseParams = {
     fromBlock: "0x0",
     toBlock: "latest",
-    category: ["external", "erc20", "erc721", "erc1155"],
+    category: ["erc20", "erc1155"],
     withMetadata: true,
     maxCount,
     order: "desc" as const,
@@ -69,14 +97,16 @@ export async function GET(
   const allowedErc20 = new Set([BASE_USDC, FUN_TOKEN_ADDRESS].map((a) => a.toLowerCase()));
   const allowedErc1155 = new Set(SPORTFUN_ERC1155_CONTRACTS.map((a) => a.toLowerCase()));
 
-  const transfers: Transfer[] = [
-    ...(incoming?.transfers ?? []),
-    ...(outgoing?.transfers ?? []),
-  ].filter((t) => {
+  const deduped = new Map<string, Transfer>();
+  for (const t of [...(incoming?.transfers ?? []), ...(outgoing?.transfers ?? [])]) {
+    deduped.set(transferKey(t), t);
+  }
+
+  const transfers: Transfer[] = [...deduped.values()].filter((t) => {
     const category = (t.category ?? "").toLowerCase();
     const contract = t.rawContract?.address?.toLowerCase();
-    if (category === "erc20") return contract ? allowedErc20.has(contract) : false;
-    if (category === "erc1155") return contract ? allowedErc1155.has(contract) : false;
+    if (category === "erc20") return Boolean(contract && allowedErc20.has(contract));
+    if (category === "erc1155") return Boolean(contract && allowedErc1155.has(contract));
     return false;
   });
 
