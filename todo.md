@@ -20,13 +20,13 @@
   - Verified locally on 2026-02-14: `GET /` -> `200`, content includes `FunStats Dashboard` and `Quick tools`
 
 ## 4) Missing features vs `https://tenero.io` (`sports.fun`)
-- [ ] Add route `/sportsfun` (sports.fun hub page)
+- [x] Add route `/sportsfun` (sports.fun hub page)
   - Scope: chain-level overview cards and stats (volume, netflow, active traders, top market)
-- [ ] Add route `/sportsfun/tokens` (token screener)
+- [x] Add route `/sportsfun/tokens` (token screener)
   - Scope: unified token table with filters/sorting/timeframe (`Price`, `Mcap`, `Holders`, `Pools`, `Txs`)
-- [ ] Add route `/sportsfun/pools` (pool screener)
+- [x] Add route `/sportsfun/pools` (pool screener)
   - Scope: pool-level table with liquidity/holders/tx metrics and filters
-- [ ] Add route `/sportsfun/market` (market flow analytics)
+- [x] Add route `/sportsfun/market` (market flow analytics)
   - Scope: `Top inflows`, `Top outflows`, `Whale trades`, `Market net flow`
 - [ ] Add route `/sportsfun/tracker` (wallet tracker module)
   - Scope: tracked wallets, wallet groups, wallet remarks, grouped trade feed
@@ -91,3 +91,7 @@
 - [ ] Run legal review before production rollout
   - Tenero ToS indicates data/content ownership restrictions (copying/redistribution/modification may require explicit permission)
 - [ ] Optional: generate types from `https://api.tenero.io/api-docs/json` and pin contract tests for critical endpoints
+
+## 8) Verification log
+- [x] Verify status `200` for `/sportsfun`, `/sportsfun/tokens`, `/sportsfun/pools`, `/sportsfun/market`
+  - Verified locally on 2026-02-14 via `curl` against `next dev`

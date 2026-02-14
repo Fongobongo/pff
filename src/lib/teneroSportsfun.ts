@@ -560,7 +560,7 @@ export async function getSportsfunWhaleTrades(
   minAmountUsd: 5000 | 10000 | 20000 | 50000 | 100000 | 200000 = 10_000,
   limit = 100
 ): Promise<SportsfunWhaleTradeRow[]> {
-  return requestTenero<SportsfunWhaleTradeRow[]>({
+  const page = await requestTenero<TeneroCursorPage<SportsfunWhaleTradeRow>>({
     pathname: "/v1/sportsfun/market/whale_trades",
     params: {
       min_amount_usd: minAmountUsd,
@@ -568,6 +568,7 @@ export async function getSportsfunWhaleTrades(
     },
     cacheTtlSeconds: 20,
   });
+  return page.rows;
 }
 
 export async function getSportsfunHourlyNetflow(
