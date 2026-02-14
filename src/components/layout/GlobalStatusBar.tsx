@@ -16,20 +16,21 @@ function formatTimestamp(value: Date): string {
 }
 
 export default function GlobalStatusBar() {
-  const [updatedAt, setUpdatedAt] = useState(() => new Date());
+  const [updatedAtLabel, setUpdatedAtLabel] = useState("—");
 
   useEffect(() => {
-    const timer = window.setInterval(() => setUpdatedAt(new Date()), 60_000);
+    const refresh = () => setUpdatedAtLabel(formatTimestamp(new Date()));
+    refresh();
+    const timer = window.setInterval(refresh, 60_000);
     return () => window.clearInterval(timer);
   }, []);
 
   return (
     <header className="sticky top-0 z-[110] border-b border-black/10 bg-white/85 backdrop-blur dark:border-white/10 dark:bg-zinc-950/80">
       <div className="mx-auto flex h-10 max-w-7xl items-center justify-between px-4">
-        <span className="text-xs text-zinc-600 dark:text-zinc-400">Data updated: {formatTimestamp(updatedAt)}</span>
+        <span className="text-xs text-zinc-600 dark:text-zinc-400">Data updated: {updatedAtLabel}</span>
         <span className="text-[11px] uppercase tracking-wide text-zinc-500 dark:text-zinc-500">sports.fun analytics</span>
       </div>
     </header>
   );
 }
-

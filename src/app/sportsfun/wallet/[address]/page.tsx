@@ -528,8 +528,11 @@ export default async function SportsfunWalletPage({
                 </tr>
               </thead>
               <tbody>
-                {trades.map((trade) => (
-                  <tr key={`${trade.tx_id}-${trade.event_index}`} className="border-t border-black/10 dark:border-white/10">
+                {trades.map((trade, index) => (
+                  <tr
+                    key={`${trade.tx_id}-${trade.tx_index}-${trade.event_index}-${trade.pool_id}-${index}`}
+                    className="border-t border-black/10 dark:border-white/10"
+                  >
                     <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{formatDateTime(trade.block_time)}</td>
                     <td className="px-3 py-2 text-zinc-700 dark:text-zinc-300">{trade.event_type}</td>
                     <td className="px-3 py-2 text-zinc-700 dark:text-zinc-300">
@@ -562,8 +565,11 @@ export default async function SportsfunWalletPage({
                 </tr>
               </thead>
               <tbody>
-                {transfers.map((transfer) => (
-                  <tr key={`${transfer.tx_id}-${transfer.event_index}`} className="border-t border-black/10 dark:border-white/10">
+                {transfers.map((transfer, index) => (
+                  <tr
+                    key={`${transfer.tx_id}-${transfer.tx_index}-${transfer.event_index}-${transfer.token_address}-${index}`}
+                    className="border-t border-black/10 dark:border-white/10"
+                  >
                     <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{formatDateTime(transfer.block_time)}</td>
                     <td className="px-3 py-2 text-zinc-700 dark:text-zinc-300">{transfer.token?.symbol ?? transfer.token_address}</td>
                     <td className="px-3 py-2 text-zinc-700 dark:text-zinc-300">{shortenAddress(transfer.from_address)}</td>
@@ -603,8 +609,8 @@ export default async function SportsfunWalletPage({
             </tr>
           </thead>
           <tbody>
-            {holdingsRows.map((row) => (
-              <tr key={row.token_address} className="border-t border-black/10 dark:border-white/10">
+            {holdingsRows.map((row, index) => (
+              <tr key={`${row.token_address}-${index}`} className="border-t border-black/10 dark:border-white/10">
                 <td className="px-3 py-2">
                   <div className="font-medium text-black dark:text-white">{row.token?.name}</div>
                   <div className="text-xs text-zinc-500 dark:text-zinc-400">{row.token?.symbol}</div>
