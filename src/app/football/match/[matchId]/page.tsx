@@ -33,7 +33,17 @@ export default async function MatchPage({
   const res = await fetch(`${baseUrl}/api/stats/football/score-from-match?${query.toString()}`, {
     next: { revalidate: 3600 },
   });
-  const data = (await res.json()) as ScoreFromMatchResponse;
+  let data: ScoreFromMatchResponse = {};
+  let loadError: string | null = null;
+  if (!res.ok) {
+    loadError = `Failed to load match score (${res.status} ${res.statusText})`;
+  } else {
+    try {
+      data = (await res.json()) as ScoreFromMatchResponse;
+    } catch {
+      loadError = "Received invalid match payload";
+    }
+  }
 
   return (
     <div className="min-h-screen bg-zinc-50 font-sans dark:bg-black">
@@ -63,6 +73,11 @@ export default async function MatchPage({
         </section>
 
         <section className="mt-8">
+          {loadError ? (
+            <div className="mb-4 rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+              {loadError}
+            </div>
+          ) : null}
           <div className="overflow-hidden rounded-xl border border-black/10 bg-white dark:border-white/10 dark:bg-white/5">
             <table className="w-full text-left text-sm">
               <thead className="bg-zinc-100 text-xs uppercase tracking-wide text-zinc-500 dark:bg-white/10 dark:text-zinc-400">
@@ -88,6 +103,13 @@ export default async function MatchPage({
                     </td>
                   </tr>
                 ))}
+                {(data.players ?? []).length === 0 ? (
+                  <tr className="border-t border-black/10 dark:border-white/10">
+                    <td className="px-3 py-3 text-zinc-600 dark:text-zinc-400" colSpan={5}>
+                      No player scores available for this match.
+                    </td>
+                  </tr>
+                ) : null}
               </tbody>
             </table>
           </div>

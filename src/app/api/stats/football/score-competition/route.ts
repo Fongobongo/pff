@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { statsApiErrorResponse } from "@/lib/stats/apiError";
 import { buildStatsBombMatchStats, getCompetitionTierById, getStatsBombMatches } from "@/lib/stats/statsbomb";
 import { scoreFootball } from "@/lib/stats/football";
 import { getCached, setCached } from "@/lib/stats/cache";
@@ -42,84 +43,88 @@ async function mapWithConcurrency<T, R>(
 }
 
 export async function GET(request: Request) {
-  const url = new URL(request.url);
-  const query = querySchema.parse({
-    competition_id: url.searchParams.get("competition_id"),
-    season_id: url.searchParams.get("season_id"),
-    limit: url.searchParams.get("limit") ?? undefined,
-    include_players: url.searchParams.get("include_players") ?? undefined,
-    recent: url.searchParams.get("recent") ?? undefined,
-    refresh: url.searchParams.get("refresh") ?? undefined,
-  });
-
-  const includePlayers = query.include_players ?? true;
-  const cacheKey = `statsbomb:score-competition:${query.competition_id}:${query.season_id}:${
-    query.limit ?? "all"
-  }:${query.recent ? "recent" : "all"}:${includePlayers ? "players" : "teams"}`;
-
-  if (!query.refresh) {
-    const cached = getCached<ScoreCompetitionResponse>(cacheKey);
-    if (cached) return NextResponse.json(cached);
-  }
-
-  const competitionTier = await getCompetitionTierById(query.competition_id);
-  const matches = await getStatsBombMatches(query.competition_id, query.season_id);
-  const ordered = [...matches].sort((a, b) => {
-    const aDate = a.match_date ?? "";
-    const bDate = b.match_date ?? "";
-    return aDate.localeCompare(bDate);
-  });
-
-  const limited = query.limit
-    ? query.recent
-      ? ordered.slice(-query.limit)
-      : ordered.slice(0, query.limit)
-    : ordered;
-
-  const scored = await mapWithConcurrency(limited, SCORE_COMPETITION_CONCURRENCY, async (match) => {
-    const stats = await buildStatsBombMatchStats({
-      matchId: match.match_id,
-      competitionId: query.competition_id,
-      seasonId: query.season_id,
-      refresh: query.refresh,
+  try {
+    const url = new URL(request.url);
+    const query = querySchema.parse({
+      competition_id: url.searchParams.get("competition_id"),
+      season_id: url.searchParams.get("season_id"),
+      limit: url.searchParams.get("limit") ?? undefined,
+      include_players: url.searchParams.get("include_players") ?? undefined,
+      recent: url.searchParams.get("recent") ?? undefined,
+      refresh: url.searchParams.get("refresh") ?? undefined,
     });
 
-    const players = includePlayers
-      ? stats.players.map((player) => ({
-          ...player,
-          score: scoreFootball(player.stats, {
-            position: player.position,
-            competitionTier,
-            result: player.matchResult,
-            minutesPlayed: player.minutesPlayed,
-          }),
-        }))
-      : [];
+    const includePlayers = query.include_players ?? true;
+    const cacheKey = `statsbomb:score-competition:${query.competition_id}:${query.season_id}:${
+      query.limit ?? "all"
+    }:${query.recent ? "recent" : "all"}:${includePlayers ? "players" : "teams"}`;
 
-    return {
-      matchId: match.match_id,
-      matchDate: match.match_date,
-      homeTeam: match.home_team?.home_team_name,
-      awayTeam: match.away_team?.away_team_name,
-      homeScore: match.home_score,
-      awayScore: match.away_score,
-      players,
-      coverage: stats.coverage,
+    if (!query.refresh) {
+      const cached = getCached<ScoreCompetitionResponse>(cacheKey);
+      if (cached) return NextResponse.json(cached);
+    }
+
+    const competitionTier = await getCompetitionTierById(query.competition_id);
+    const matches = await getStatsBombMatches(query.competition_id, query.season_id);
+    const ordered = [...matches].sort((a, b) => {
+      const aDate = a.match_date ?? "";
+      const bDate = b.match_date ?? "";
+      return aDate.localeCompare(bDate);
+    });
+
+    const limited = query.limit
+      ? query.recent
+        ? ordered.slice(-query.limit)
+        : ordered.slice(0, query.limit)
+      : ordered;
+
+    const scored = await mapWithConcurrency(limited, SCORE_COMPETITION_CONCURRENCY, async (match) => {
+      const stats = await buildStatsBombMatchStats({
+        matchId: match.match_id,
+        competitionId: query.competition_id,
+        seasonId: query.season_id,
+        refresh: query.refresh,
+      });
+
+      const players = includePlayers
+        ? stats.players.map((player) => ({
+            ...player,
+            score: scoreFootball(player.stats, {
+              position: player.position,
+              competitionTier,
+              result: player.matchResult,
+              minutesPlayed: player.minutesPlayed,
+            }),
+          }))
+        : [];
+
+      return {
+        matchId: match.match_id,
+        matchDate: match.match_date,
+        homeTeam: match.home_team?.home_team_name,
+        awayTeam: match.away_team?.away_team_name,
+        homeScore: match.home_score,
+        awayScore: match.away_score,
+        players,
+        coverage: stats.coverage,
+      };
+    });
+
+    const response: ScoreCompetitionResponse = {
+      sport: "football",
+      source: "statsbomb_open_data",
+      competitionId: query.competition_id,
+      seasonId: query.season_id,
+      competitionTier,
+      matchCount: limited.length,
+      matches: scored,
     };
-  });
 
-  const response: ScoreCompetitionResponse = {
-    sport: "football",
-    source: "statsbomb_open_data",
-    competitionId: query.competition_id,
-    seasonId: query.season_id,
-    competitionTier,
-    matchCount: limited.length,
-    matches: scored,
-  };
-
-  setCached(cacheKey, response, SCORE_COMPETITION_CACHE_TTL_SECONDS);
-  return NextResponse.json(response);
+    setCached(cacheKey, response, SCORE_COMPETITION_CACHE_TTL_SECONDS);
+    return NextResponse.json(response);
+  } catch (error) {
+    return statsApiErrorResponse(error, "Failed to score competition");
+  }
 }
 
 type ScoreCompetitionResponse = {

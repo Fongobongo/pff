@@ -26,7 +26,17 @@ export default async function CompetitionScoresPage({
     `${baseUrl}/api/stats/football/score-competition?competition_id=${competitionId}&season_id=${seasonId}&limit=5&include_players=false`,
     { next: { revalidate: 3600 } }
   );
-  const data = (await res.json()) as CompetitionScoreResponse;
+  let data: CompetitionScoreResponse = {};
+  let loadError: string | null = null;
+  if (!res.ok) {
+    loadError = `Failed to load competition scores (${res.status} ${res.statusText})`;
+  } else {
+    try {
+      data = (await res.json()) as CompetitionScoreResponse;
+    } catch {
+      loadError = "Received invalid competition score payload";
+    }
+  }
 
   return (
     <div className="min-h-screen bg-zinc-50 font-sans dark:bg-black">
@@ -58,6 +68,11 @@ export default async function CompetitionScoresPage({
         </section>
 
         <section className="mt-8">
+          {loadError ? (
+            <div className="mb-4 rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+              {loadError}
+            </div>
+          ) : null}
           <div className="overflow-hidden rounded-xl border border-black/10 bg-white dark:border-white/10 dark:bg-white/5">
             <table className="w-full text-left text-sm">
               <thead className="bg-zinc-100 text-xs uppercase tracking-wide text-zinc-500 dark:bg-white/10 dark:text-zinc-400">
@@ -79,6 +94,13 @@ export default async function CompetitionScoresPage({
                     <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{match.matchDate}</td>
                   </tr>
                 ))}
+                {(data.matches ?? []).length === 0 ? (
+                  <tr className="border-t border-black/10 dark:border-white/10">
+                    <td className="px-3 py-3 text-zinc-600 dark:text-zinc-400" colSpan={3}>
+                      No competition score rows available.
+                    </td>
+                  </tr>
+                ) : null}
               </tbody>
             </table>
           </div>

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { footballDataFetch } from "@/lib/footballdata";
 import { resolveCompetitionTierFromFootballData } from "@/lib/footballTier";
+import { statsApiErrorResponse } from "@/lib/stats/apiError";
 import {
   buildStatsBombMatchStats,
   getStatsBombMatches,
@@ -12,7 +13,8 @@ import { scoreFootball } from "@/lib/stats/football";
 import { findBestStatsBombMatch } from "@/lib/footballTeamMatch";
 
 const querySchema = z.object({
-  competition: z.string().min(1),
+  competition: z.string().min(1).optional(),
+  competition_id: z.string().min(1).optional(),
   season: z.coerce.number().int().min(1900).optional(),
   status: z.string().optional(),
   statsbomb_competition_id: z.coerce.number().int().min(1),
@@ -104,114 +106,130 @@ function findBestMatch(
 }
 
 export async function GET(request: Request) {
-  const url = new URL(request.url);
-  const query = querySchema.parse({
-    competition: url.searchParams.get("competition"),
-    season: url.searchParams.get("season") ?? undefined,
-    status: url.searchParams.get("status") ?? undefined,
-    statsbomb_competition_id: url.searchParams.get("statsbomb_competition_id"),
-    statsbomb_season_id: url.searchParams.get("statsbomb_season_id"),
-    limit: url.searchParams.get("limit") ?? undefined,
-    include_scores: url.searchParams.get("include_scores") ?? undefined,
-    refresh: url.searchParams.get("refresh") ?? undefined,
-  });
+  try {
+    const url = new URL(request.url);
+    const query = querySchema.parse({
+      competition: url.searchParams.get("competition") ?? undefined,
+      competition_id: url.searchParams.get("competition_id") ?? undefined,
+      season: url.searchParams.get("season") ?? undefined,
+      status: url.searchParams.get("status") ?? undefined,
+      statsbomb_competition_id: url.searchParams.get("statsbomb_competition_id"),
+      statsbomb_season_id: url.searchParams.get("statsbomb_season_id"),
+      limit: url.searchParams.get("limit") ?? undefined,
+      include_scores: url.searchParams.get("include_scores") ?? undefined,
+      refresh: url.searchParams.get("refresh") ?? undefined,
+    });
 
-  const data = await footballDataFetch<FootballDataMatchesResponse>(
-    `/competitions/${query.competition}/matches`,
-    {
-      season: query.season,
-      status: query.status,
-    },
-    300
-  );
-
-  const fixtures: FixtureMatch[] = data.matches ?? [];
-  const limited = query.limit ? fixtures.slice(0, query.limit) : fixtures;
-
-  const statsBombMatches = await getStatsBombMatches(
-    query.statsbomb_competition_id,
-    query.statsbomb_season_id
-  );
-  const statsBombByDate = new Map<string, StatsBombMatch[]>();
-  for (const match of statsBombMatches) {
-    if (!match.match_date) continue;
-    const list = statsBombByDate.get(match.match_date) ?? [];
-    list.push(match);
-    statsBombByDate.set(match.match_date, list);
-  }
-
-  const competitionTier = resolveCompetitionTierFromFootballData(query.competition);
-
-  const mapped = await mapWithConcurrency(limited, 2, async (fixture) => {
-    const fixtureDate = fixture.utcDate?.slice(0, 10);
-    const candidates = getCandidatesByDate(statsBombByDate, fixtureDate);
-    const { match, swapped, score, confidence, reason } = findBestMatch(
-      fixture,
-      candidates,
-      fixtureDate,
-      query.competition
-    );
-
-    let scored: ScoredMatch | undefined = undefined;
-    if (query.include_scores && match) {
-      const stats = await buildStatsBombMatchStats({
-        matchId: match.match_id,
-        competitionId: query.statsbomb_competition_id,
-        seasonId: query.statsbomb_season_id,
-        refresh: query.refresh,
-      });
-
-      const players = stats.players.map((player) => ({
-        ...player,
-        score: scoreFootball(player.stats, {
-          position: player.position,
-          competitionTier,
-          result: player.matchResult,
-          minutesPlayed: player.minutesPlayed,
-        }),
-      }));
-
-      scored = {
-        matchId: match.match_id,
-        teams: stats.teams,
-        coverage: stats.coverage,
-        players,
-      };
+    const competition = query.competition ?? query.competition_id;
+    if (!competition) {
+      return NextResponse.json(
+        {
+          error: "invalid_query",
+          message: "Provide `competition` (or legacy `competition_id`) query parameter.",
+        },
+        { status: 400 }
+      );
     }
 
-    return {
-      fixtureId: fixture.id,
-      fixtureDate,
-      status: fixture.status,
-      homeTeam: fixture.homeTeam?.name,
-      awayTeam: fixture.awayTeam?.name,
-      score: fixture.score?.fullTime ?? null,
-      statsbombMatchId: match?.match_id ?? null,
-      statsbombMatchDate: match?.match_date ?? null,
-      matchSwapped: swapped,
-      matchScore: score,
-      matchConfidence: confidence ?? null,
-      matchReason: reason ?? null,
-      scoreFromMatchUrl: match
-        ? `/api/stats/football/score-from-match?match_id=${match.match_id}&competition_id=${query.statsbomb_competition_id}&season_id=${query.statsbomb_season_id}`
-        : null,
-      scoreFromMatch: scored,
-    };
-  });
+    const data = await footballDataFetch<FootballDataMatchesResponse>(
+      `/competitions/${competition}/matches`,
+      {
+        season: query.season,
+        status: query.status,
+      },
+      300
+    );
 
-  const matchedCount = mapped.filter((item) => item.statsbombMatchId).length;
+    const fixtures: FixtureMatch[] = data.matches ?? [];
+    const limited = query.limit ? fixtures.slice(0, query.limit) : fixtures;
 
-  return NextResponse.json({
-    source: "football-data.org",
-    competition: query.competition,
-    season: query.season,
-    statsbombCompetitionId: query.statsbomb_competition_id,
-    statsbombSeasonId: query.statsbomb_season_id,
-    competitionTier,
-    totalFixtures: fixtures.length,
-    returnedFixtures: mapped.length,
-    matchedFixtures: matchedCount,
-    unmatchedFixtures: mapped.length - matchedCount,
-    fixtures: mapped,
-  });
+    const statsBombMatches = await getStatsBombMatches(
+      query.statsbomb_competition_id,
+      query.statsbomb_season_id
+    );
+    const statsBombByDate = new Map<string, StatsBombMatch[]>();
+    for (const match of statsBombMatches) {
+      if (!match.match_date) continue;
+      const list = statsBombByDate.get(match.match_date) ?? [];
+      list.push(match);
+      statsBombByDate.set(match.match_date, list);
+    }
+
+    const competitionTier = resolveCompetitionTierFromFootballData(competition);
+
+    const mapped = await mapWithConcurrency(limited, 2, async (fixture) => {
+      const fixtureDate = fixture.utcDate?.slice(0, 10);
+      const candidates = getCandidatesByDate(statsBombByDate, fixtureDate);
+      const { match, swapped, score, confidence, reason } = findBestMatch(
+        fixture,
+        candidates,
+        fixtureDate,
+        competition
+      );
+
+      let scored: ScoredMatch | undefined = undefined;
+      if (query.include_scores && match) {
+        const stats = await buildStatsBombMatchStats({
+          matchId: match.match_id,
+          competitionId: query.statsbomb_competition_id,
+          seasonId: query.statsbomb_season_id,
+          refresh: query.refresh,
+        });
+
+        const players = stats.players.map((player) => ({
+          ...player,
+          score: scoreFootball(player.stats, {
+            position: player.position,
+            competitionTier,
+            result: player.matchResult,
+            minutesPlayed: player.minutesPlayed,
+          }),
+        }));
+
+        scored = {
+          matchId: match.match_id,
+          teams: stats.teams,
+          coverage: stats.coverage,
+          players,
+        };
+      }
+
+      return {
+        fixtureId: fixture.id,
+        fixtureDate,
+        status: fixture.status,
+        homeTeam: fixture.homeTeam?.name,
+        awayTeam: fixture.awayTeam?.name,
+        score: fixture.score?.fullTime ?? null,
+        statsbombMatchId: match?.match_id ?? null,
+        statsbombMatchDate: match?.match_date ?? null,
+        matchSwapped: swapped,
+        matchScore: score,
+        matchConfidence: confidence ?? null,
+        matchReason: reason ?? null,
+        scoreFromMatchUrl: match
+          ? `/api/stats/football/score-from-match?match_id=${match.match_id}&competition_id=${query.statsbomb_competition_id}&season_id=${query.statsbomb_season_id}`
+          : null,
+        scoreFromMatch: scored,
+      };
+    });
+
+    const matchedCount = mapped.filter((item) => item.statsbombMatchId).length;
+
+    return NextResponse.json({
+      source: "football-data.org",
+      competition,
+      season: query.season,
+      statsbombCompetitionId: query.statsbomb_competition_id,
+      statsbombSeasonId: query.statsbomb_season_id,
+      competitionTier,
+      totalFixtures: fixtures.length,
+      returnedFixtures: mapped.length,
+      matchedFixtures: matchedCount,
+      unmatchedFixtures: mapped.length - matchedCount,
+      fixtures: mapped,
+    });
+  } catch (error) {
+    return statsApiErrorResponse(error, "Failed to bridge football-data fixtures with StatsBomb");
+  }
 }

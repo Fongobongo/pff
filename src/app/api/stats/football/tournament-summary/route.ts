@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { statsApiErrorResponse } from "@/lib/stats/apiError";
 import { buildStatsBombMatchStats, getCompetitionTierById, getStatsBombMatches } from "@/lib/stats/statsbomb";
 import { scoreFootball } from "@/lib/stats/football";
 import { getCached, setCached } from "@/lib/stats/cache";
@@ -218,97 +219,101 @@ async function runTournamentSummaryJob(options: {
 }
 
 export async function GET(request: Request) {
-  const url = new URL(request.url);
-  const query = querySchema.parse({
-    competition_id: url.searchParams.get("competition_id"),
-    season_id: url.searchParams.get("season_id"),
-    limit: url.searchParams.get("limit") ?? undefined,
-    top: url.searchParams.get("top") ?? undefined,
-    refresh: url.searchParams.get("refresh") ?? undefined,
-    format: url.searchParams.get("format") ?? undefined,
-    mode: url.searchParams.get("mode") ?? undefined,
-  });
+  try {
+    const url = new URL(request.url);
+    const query = querySchema.parse({
+      competition_id: url.searchParams.get("competition_id"),
+      season_id: url.searchParams.get("season_id"),
+      limit: url.searchParams.get("limit") ?? undefined,
+      top: url.searchParams.get("top") ?? undefined,
+      refresh: url.searchParams.get("refresh") ?? undefined,
+      format: url.searchParams.get("format") ?? undefined,
+      mode: url.searchParams.get("mode") ?? undefined,
+    });
 
-  const cacheKey = `statsbomb:tournament-summary:${query.competition_id}:${query.season_id}:${
-    query.limit ?? "all"
-  }:${query.top ?? "50"}`;
+    const cacheKey = `statsbomb:tournament-summary:${query.competition_id}:${query.season_id}:${
+      query.limit ?? "all"
+    }:${query.top ?? "50"}`;
 
-  const format = query.format ?? "json";
-  const cached = query.refresh ? undefined : getCached<TournamentSummary>(cacheKey);
-  if (cached) {
-    return respondSummary(cached, format);
-  }
-
-  const competitionTier = await getCompetitionTierById(query.competition_id);
-  const matches = await getStatsBombMatches(query.competition_id, query.season_id);
-  const ordered = [...matches].sort((a, b) => {
-    const aDate = a.match_date ?? "";
-    const bDate = b.match_date ?? "";
-    return aDate.localeCompare(bDate);
-  });
-
-  const limited = query.limit ? ordered.slice(0, query.limit) : ordered;
-  const topCount = query.top ?? 50;
-  const wantsAsync = query.mode === "async" || (!query.limit && query.mode !== "sync");
-
-  if (wantsAsync && !query.limit) {
-    const jobKeyBase = `statsbomb:tournament-summary-job:${query.competition_id}:${query.season_id}:${topCount}`;
-    const jobKey = query.refresh ? `${jobKeyBase}:${Date.now()}` : jobKeyBase;
-    const existingJob = await getJobByKey<TournamentSummary>(jobKey);
-    const job = existingJob ?? (await createJob<TournamentSummary>(jobKey, limited.length));
-
-    if (job.status === "completed" && job.result) {
-      setCached(cacheKey, job.result, 3600);
-      return respondSummary(job.result, format);
+    const format = query.format ?? "json";
+    const cached = query.refresh ? undefined : getCached<TournamentSummary>(cacheKey);
+    if (cached) {
+      return respondSummary(cached, format);
     }
 
-    if (job.status === "pending") {
-      void runTournamentSummaryJob({
+    const competitionTier = await getCompetitionTierById(query.competition_id);
+    const matches = await getStatsBombMatches(query.competition_id, query.season_id);
+    const ordered = [...matches].sort((a, b) => {
+      const aDate = a.match_date ?? "";
+      const bDate = b.match_date ?? "";
+      return aDate.localeCompare(bDate);
+    });
+
+    const limited = query.limit ? ordered.slice(0, query.limit) : ordered;
+    const topCount = query.top ?? 50;
+    const wantsAsync = query.mode === "async" || (!query.limit && query.mode !== "sync");
+
+    if (wantsAsync && !query.limit) {
+      const jobKeyBase = `statsbomb:tournament-summary-job:${query.competition_id}:${query.season_id}:${topCount}`;
+      const jobKey = query.refresh ? `${jobKeyBase}:${Date.now()}` : jobKeyBase;
+      const existingJob = await getJobByKey<TournamentSummary>(jobKey);
+      const job = existingJob ?? (await createJob<TournamentSummary>(jobKey, limited.length));
+
+      if (job.status === "completed" && job.result) {
+        setCached(cacheKey, job.result, 3600);
+        return respondSummary(job.result, format);
+      }
+
+      if (job.status === "pending") {
+        void runTournamentSummaryJob({
+          jobId: job.id,
+          cacheKey,
+          competitionId: query.competition_id,
+          seasonId: query.season_id,
+          matches: limited,
+          competitionTier,
+          topCount,
+          refresh: query.refresh,
+        });
+      }
+
+      if (format === "csv") {
+        return NextResponse.json(
+          {
+            status: job.status,
+            jobId: job.id,
+            competitionId: query.competition_id,
+            seasonId: query.season_id,
+            matchesTotal: job.total ?? limited.length,
+            matchesProcessed: job.processed ?? 0,
+            message: "CSV not ready yet.",
+          },
+          { status: 202 }
+        );
+      }
+
+      return NextResponse.json({
+        status: job.status,
         jobId: job.id,
-        cacheKey,
         competitionId: query.competition_id,
         seasonId: query.season_id,
-        matches: limited,
-        competitionTier,
-        topCount,
-        refresh: query.refresh,
+        matchesTotal: job.total ?? limited.length,
+        matchesProcessed: job.processed ?? 0,
+        top: topCount,
       });
     }
 
-    if (format === "csv") {
-      return NextResponse.json(
-        {
-          status: job.status,
-          jobId: job.id,
-          competitionId: query.competition_id,
-          seasonId: query.season_id,
-          matchesTotal: job.total ?? limited.length,
-          matchesProcessed: job.processed ?? 0,
-          message: "CSV not ready yet.",
-        },
-        { status: 202 }
-      );
-    }
-
-    return NextResponse.json({
-      status: job.status,
-      jobId: job.id,
+    const summary = await buildTournamentSummary({
       competitionId: query.competition_id,
       seasonId: query.season_id,
-      matchesTotal: job.total ?? limited.length,
-      matchesProcessed: job.processed ?? 0,
-      top: topCount,
+      matches: limited,
+      competitionTier,
+      topCount,
+      refresh: query.refresh,
     });
+    setCached(cacheKey, summary, 3600);
+    return respondSummary(summary, format);
+  } catch (error) {
+    return statsApiErrorResponse(error, "Failed to build tournament summary");
   }
-
-  const summary = await buildTournamentSummary({
-    competitionId: query.competition_id,
-    seasonId: query.season_id,
-    matches: limited,
-    competitionTier,
-    topCount,
-    refresh: query.refresh,
-  });
-  setCached(cacheKey, summary, 3600);
-  return respondSummary(summary, format);
 }

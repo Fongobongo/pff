@@ -13,7 +13,18 @@ export default async function CompetitionPage({
     `${baseUrl}/api/stats/football/matches?competition_id=${competitionId}&season_id=${seasonId}`,
     { next: { revalidate: 3600 } }
   );
-  const data = (await res.json()) as { matches?: StatsBombMatch[] };
+  let matches: StatsBombMatch[] = [];
+  let loadError: string | null = null;
+  if (!res.ok) {
+    loadError = `Failed to load matches (${res.status} ${res.statusText})`;
+  } else {
+    try {
+      const data = (await res.json()) as { matches?: StatsBombMatch[] };
+      matches = data.matches ?? [];
+    } catch {
+      loadError = "Received invalid matches payload";
+    }
+  }
 
   return (
     <div className="min-h-screen bg-zinc-50 font-sans dark:bg-black">
@@ -51,6 +62,11 @@ export default async function CompetitionPage({
         </section>
 
         <section className="mt-8">
+          {loadError ? (
+            <div className="mb-4 rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+              {loadError}
+            </div>
+          ) : null}
           <div className="overflow-hidden rounded-xl border border-black/10 bg-white dark:border-white/10 dark:bg-white/5">
             <table className="w-full text-left text-sm">
               <thead className="bg-zinc-100 text-xs uppercase tracking-wide text-zinc-500 dark:bg-white/10 dark:text-zinc-400">
@@ -61,7 +77,7 @@ export default async function CompetitionPage({
                 </tr>
               </thead>
               <tbody>
-                {(data.matches ?? []).map((match) => (
+                {matches.map((match) => (
                   <tr key={match.match_id} className="border-t border-black/10 dark:border-white/10">
                     <td className="px-3 py-2">
                       <Link
@@ -77,6 +93,13 @@ export default async function CompetitionPage({
                     <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{match.match_date}</td>
                   </tr>
                 ))}
+                {matches.length === 0 ? (
+                  <tr className="border-t border-black/10 dark:border-white/10">
+                    <td className="px-3 py-3 text-zinc-600 dark:text-zinc-400" colSpan={3}>
+                      No matches found for this competition/season.
+                    </td>
+                  </tr>
+                ) : null}
               </tbody>
             </table>
           </div>
