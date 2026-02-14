@@ -7,8 +7,9 @@ import { shortenAddress } from "@/lib/format";
 import { getSportfunNameOverride, getSportfunSportLabel } from "@/lib/sportfunNames";
 
 type SortKey = "value" | "pnl" | "spent" | "shares";
-type ActivityKindFilter = "all" | "buy" | "sell";
+type ActivityKindFilter = "all" | "buy" | "sell" | "scam";
 type DashboardMode = "sportfun" | "nfl";
+type FreeTokenMode = "include" | "exclude";
 
 type SportfunPortfolioSnapshot = {
   chain: string;
@@ -34,6 +35,11 @@ type SportfunPortfolioSnapshot = {
     activityCount: number;
     decodedTradeCount?: number;
     decodedPromotionCount?: number;
+    decodedContractRenewalCount?: number;
+    decodedPackOpenCount?: number;
+    funTransferCount?: number;
+    decodedDepositCount?: number;
+    decodedScamCount?: number;
     shareDeltaMismatchCount?: number;
     shareDeltaMismatchTxCount?: number;
     activityCountTotal?: number;
@@ -61,17 +67,36 @@ type SportfunPortfolioSnapshot = {
     realizedPnlUsdcRaw: string;
     realizedPnlEconomicUsdcRaw?: string;
     unrealizedPnlUsdcRaw: string;
+    unrealizedPnlExcludingPromotionsUsdcRaw?: string;
+    unrealizedPnlExcludingFreeUsdcRaw?: string;
     totalCostBasisUsdcRaw: string;
     currentValueUsdcRaw: string;
+    currentValueExcludingPromotionsUsdcRaw?: string;
+    currentValueExcludingFreeUsdcRaw?: string;
     currentValueAllHoldingsUsdcRaw?: string;
     holdingsPricedCount?: number;
     costBasisUnknownTradeCount: number;
+    contractRenewalSpentUsdcRaw?: string;
+    contractRenewalAppliedCount?: number;
+    contractRenewalUnresolvedCount?: number;
+    contractRenewalNoSharesCount?: number;
+    contractRenewalUnsupportedPaymentCount?: number;
+    packOpenFreeSharesRaw?: string;
+    depositToGameWalletUsdcRaw?: string;
+    depositFromGameWalletUsdcRaw?: string;
+    funIncomingRaw?: string;
+    funOutgoingRaw?: string;
     positionsByToken?: Array<{
       playerToken: string;
       tokenIdDec: string;
+      playerName?: string;
 
       holdingSharesRaw: string;
       trackedSharesRaw: string;
+      promoSharesHeldRaw?: string;
+      freeSharesHeldRaw?: string;
+      trackedSharesExcludingPromotionsRaw?: string;
+      trackedSharesExcludingFreeRaw?: string;
 
       costBasisUsdcRaw: string;
       avgCostUsdcPerShareRaw?: string;
@@ -79,8 +104,12 @@ type SportfunPortfolioSnapshot = {
       currentPriceUsdcPerShareRaw?: string;
       currentValueHoldingUsdcRaw?: string;
       currentValueTrackedUsdcRaw?: string;
+      currentValueTrackedExcludingPromotionsUsdcRaw?: string;
+      currentValueTrackedExcludingFreeUsdcRaw?: string;
 
       unrealizedPnlTrackedUsdcRaw?: string;
+      unrealizedPnlTrackedExcludingPromotionsUsdcRaw?: string;
+      unrealizedPnlTrackedExcludingFreeUsdcRaw?: string;
 
       totals?: {
         boughtSharesRaw: string;
@@ -89,6 +118,12 @@ type SportfunPortfolioSnapshot = {
         receivedUsdcRaw: string;
         freeSharesInRaw: string;
         freeEvents: number;
+        promotionSharesInRaw?: string;
+        promotionEvents?: number;
+        packOpenSharesInRaw?: string;
+        packOpenEvents?: number;
+        contractRenewalSpentUsdcRaw?: string;
+        contractRenewalEvents?: number;
       };
     }>;
     note: string;
@@ -113,8 +148,9 @@ type SportfunPortfolioSnapshot = {
   activity: Array<{
     hash: string;
     timestamp?: string;
-    kind?: "buy" | "sell" | "unknown";
+    kind?: "buy" | "sell" | "scam" | "unknown";
     usdcDeltaRaw: string;
+    funDeltaRaw?: string;
     erc1155Changes: Array<{
       contractAddress: string;
       tokenIdHex: string;
@@ -131,6 +167,8 @@ type SportfunPortfolioSnapshot = {
         feeRaw: string;
         walletShareDeltaRaw: string;
         walletCurrencyDeltaRaw: string;
+        walletCurrencyDeltaEventRaw?: string;
+        walletCurrencyDeltaSource?: "event" | "receipt_reconciled";
         priceUsdcPerShareRaw?: string;
         priceUsdcPerShareIncFeeRaw?: string;
       }>;
@@ -140,6 +178,41 @@ type SportfunPortfolioSnapshot = {
         tokenIdDec: string;
         shareAmountRaw: string;
         walletShareDeltaRaw: string;
+      }>;
+      contractRenewals?: Array<{
+        kind: "contract_renewal";
+        renewalContract: string;
+        playerToken?: string;
+        tokenIdDec: string;
+        amountPaidRaw: string;
+        paymentToken: string;
+        matchCountRaw: string;
+      }>;
+      packOpens?: Array<{
+        kind: "pack_open";
+        packContract?: string;
+        opener?: string;
+        selector?: string;
+        playerToken: string;
+        tokenIdDec: string;
+        shareAmountRaw: string;
+      }>;
+      deposits?: Array<{
+        kind: "deposit";
+        direction: "to_game_wallet" | "from_game_wallet";
+        counterparty: string;
+        amountRaw: string;
+        paymentToken: string;
+      }>;
+      scams?: Array<{
+        kind: "scam";
+        category: "erc20" | "erc721" | "erc1155";
+        counterparty: string;
+        contractAddress?: string;
+        tokenIdHex?: string;
+        tokenIdDec?: string;
+        amountRaw?: string;
+        reason: string;
       }>;
     };
   }>;
@@ -272,11 +345,24 @@ function activityHasToken(activity: ActivityItem, key: string): boolean {
     }
   }
 
+  if (activity.decoded?.contractRenewals) {
+    for (const renewal of activity.decoded.contractRenewals) {
+      if (makeTokenKey(renewal.playerToken, renewal.tokenIdDec) === keyLc) return true;
+    }
+  }
+
+  if (activity.decoded?.packOpens) {
+    for (const pack of activity.decoded.packOpens) {
+      if (makeTokenKey(pack.playerToken, pack.tokenIdDec) === keyLc) return true;
+    }
+  }
+
   return false;
 }
 
 function activityHasKind(activity: ActivityItem, kind: ActivityKindFilter): boolean {
   if (kind === "all") return true;
+  if (kind === "scam") return Boolean(activity.decoded?.scams?.length);
   if (activity.kind === kind) return true;
   if (activity.decoded?.trades?.some((trade) => trade.kind === kind)) return true;
   return false;
@@ -332,6 +418,10 @@ function formatUsdc(raw: string, decimals: number): string {
   return formatFixed(raw, decimals);
 }
 
+function hasValue(raw: string | undefined | null): raw is string {
+  return raw !== undefined && raw !== null;
+}
+
 function formatAgeMs(ms?: number): string {
   if (typeof ms !== "number" || !Number.isFinite(ms) || ms < 0) return "n/a";
   const seconds = Math.floor(ms / 1000);
@@ -361,6 +451,8 @@ export default function SportfunPortfolioDashboard({
   const [sortKey, setSortKey] = useState<SortKey>("value");
   const [sortDir, setSortDir] = useState<"desc" | "asc">("desc");
   const [sportFilter, setSportFilter] = useState<string>(lockedSportFilter ?? "all");
+  const [tokenQuery, setTokenQuery] = useState("");
+  const [freeTokenMode, setFreeTokenMode] = useState<FreeTokenMode>("include");
   const [activityTokenFilter, setActivityTokenFilter] = useState<string>("all");
   const [activityKindFilter, setActivityKindFilter] = useState<ActivityKindFilter>("all");
   const [fullScanLoading, setFullScanLoading] = useState(false);
@@ -376,8 +468,7 @@ export default function SportfunPortfolioDashboard({
   const decimals = data?.assumptions.usdc.decimals ?? 6;
   const tokenLabelMap = useMemo(() => {
     const map = new Map<string, string>();
-    if (!data?.holdings) return map;
-    for (const holding of data.holdings) {
+    for (const holding of data?.holdings ?? []) {
       const name =
         holding.metadata?.name?.trim() ??
         getSportfunNameOverride(holding.contractAddress, holding.tokenIdDec);
@@ -385,8 +476,14 @@ export default function SportfunPortfolioDashboard({
         map.set(`${holding.contractAddress.toLowerCase()}:${holding.tokenIdDec}`, name);
       }
     }
+    for (const position of data?.analytics?.positionsByToken ?? []) {
+      const name = position.playerName?.trim();
+      if (!name) continue;
+      const key = `${position.playerToken.toLowerCase()}:${position.tokenIdDec}`;
+      if (!map.has(key)) map.set(key, name);
+    }
     return map;
-  }, [data?.holdings]);
+  }, [data?.analytics?.positionsByToken, data?.holdings]);
 
   const getTokenLabel = useMemo(() => {
     return (contractAddress?: string, tokenIdDec?: string): string => {
@@ -456,11 +553,12 @@ export default function SportfunPortfolioDashboard({
   const fullScanParams = useMemo(
     () => ({
       scanMode: "full" as const,
-      maxPages: 100,
+      maxPages: 200,
       maxActivity: 200,
       includeTrades: true,
       includePrices: true,
-      includeMetadata: false,
+      includeMetadata: true,
+      includeUri: true,
     }),
     []
   );
@@ -479,6 +577,9 @@ export default function SportfunPortfolioDashboard({
       if (next.status === "failed" && next.error) {
         setFullScanError(next.error);
       }
+      if (next.status === "failed") {
+        setLoading(false);
+      }
     }
     if ("jobId" in next && next.jobId) {
       setFullScanJobId(next.jobId);
@@ -488,10 +589,12 @@ export default function SportfunPortfolioDashboard({
         setFullScanStatus("completed");
       }
       applySnapshot(next);
+      setLoading(false);
       return;
     }
     if ("snapshot" in next && next.snapshot) {
       applySnapshot(next.snapshot);
+      setLoading(false);
     }
   }, [applySnapshot]);
 
@@ -558,47 +661,35 @@ export default function SportfunPortfolioDashboard({
     async function run() {
       setLoading(true);
       setError(null);
-      setAttemptPages([]);
+      setAttemptPages([fullScanParams.maxPages]);
       setActivityCursor(null);
       setActivityDone(false);
       setActivityTokenFilter("all");
       setActivityKindFilter("all");
+      setFullScanAttempts([fullScanParams.maxPages]);
+      setFullScanError(null);
+      setFullScanStatus("pending");
+      setFullScanJobId(null);
 
-      // Quick scan first so the UI is responsive, then optionally run a deeper scan.
-      const caps = [3, 6, 10];
-
-      for (const pages of caps) {
-        if (cancelled) return;
-        setAttemptPages((x) => [...x, pages]);
-
-        const next = await getJson<SportfunPortfolioResponse>(
-          buildRequestUrl({
-            scanMode: "default",
-            maxPages: pages,
-            maxActivity: 150,
-            includePrices: true,
-          })
-        );
-        if (cancelled) return;
-
-        applySnapshot(next);
-
-        if (!next.summary.scanIncomplete) break;
-      }
-
-      setLoading(false);
+      const next = await getJson<SportfunPortfolioApiResponse>(
+        buildRequestUrl({ ...fullScanParams, mode: "async" }),
+        45000
+      );
+      if (cancelled) return;
+      applyApiResponse(next);
     }
 
     run().catch((e: unknown) => {
       if (cancelled) return;
       setError(e instanceof Error ? e.message : String(e));
+      setFullScanStatus("failed");
       setLoading(false);
     });
 
     return () => {
       cancelled = true;
     };
-  }, [applySnapshot, buildRequestUrl]);
+  }, [applyApiResponse, buildRequestUrl, fullScanParams]);
 
   useEffect(() => {
     if (!fullScanJobId) return;
@@ -651,6 +742,9 @@ export default function SportfunPortfolioDashboard({
             maxActivity: data.query?.maxActivity ?? 150,
             activityCursor,
             includeTrades: Boolean(data.query?.includeTrades),
+            includePrices: false,
+            includeMetadata: false,
+            includeUri: false,
           })
         )
           .then((next) => {
@@ -691,13 +785,63 @@ export default function SportfunPortfolioDashboard({
   }, [activityCursor, activityDone, activityLoading, data, buildRequestUrl]);
 
   const positions = useMemo(() => data?.analytics?.positionsByToken ?? [], [data?.analytics?.positionsByToken]);
+  const normalizedTokenQuery = tokenQuery.trim().toLowerCase();
+
+  const getPositionPnlRaw = useCallback(
+    (position: (typeof positions)[number]): string => {
+      if (freeTokenMode === "exclude") {
+        return (
+          position.unrealizedPnlTrackedExcludingFreeUsdcRaw ??
+          position.unrealizedPnlTrackedExcludingPromotionsUsdcRaw ??
+          position.unrealizedPnlTrackedUsdcRaw ??
+          "0"
+        );
+      }
+      return position.unrealizedPnlTrackedUsdcRaw ?? "0";
+    },
+    [freeTokenMode]
+  );
+
+  const getPositionValueRaw = useCallback(
+    (position: (typeof positions)[number]): string => {
+      if (freeTokenMode === "exclude") {
+        return (
+          position.currentValueTrackedExcludingFreeUsdcRaw ??
+          position.currentValueTrackedExcludingPromotionsUsdcRaw ??
+          position.currentValueTrackedUsdcRaw ??
+          position.currentValueHoldingUsdcRaw ??
+          "0"
+        );
+      }
+      return position.currentValueHoldingUsdcRaw ?? "0";
+    },
+    [freeTokenMode]
+  );
 
   const filteredPositions = useMemo(() => {
     return positions.filter((p) => {
-      if (sportFilter === "all") return true;
-      return getSportfunSportLabel(p.playerToken) === sportFilter;
+      if (sportFilter !== "all" && getSportfunSportLabel(p.playerToken) !== sportFilter) {
+        return false;
+      }
+
+      if (freeTokenMode === "exclude") {
+        const freeSharesHeld = BigInt(p.freeSharesHeldRaw ?? p.promoSharesHeldRaw ?? "0");
+        const trackedExFree = BigInt(
+          p.trackedSharesExcludingFreeRaw ?? p.trackedSharesExcludingPromotionsRaw ?? p.trackedSharesRaw
+        );
+        if (freeSharesHeld > 0n && trackedExFree === 0n) return false;
+      }
+
+      if (normalizedTokenQuery) {
+        const label = getTokenLabel(p.playerToken, p.tokenIdDec).toLowerCase();
+        if (!label.includes(normalizedTokenQuery) && !p.tokenIdDec.toLowerCase().includes(normalizedTokenQuery)) {
+          return false;
+        }
+      }
+
+      return true;
     });
-  }, [positions, sportFilter]);
+  }, [positions, sportFilter, freeTokenMode, normalizedTokenQuery, getTokenLabel]);
 
   const sortedPositions = useMemo(() => {
     return [...filteredPositions].sort((a, b) => {
@@ -708,12 +852,12 @@ export default function SportfunPortfolioDashboard({
           case "spent":
             return av(p.totals?.spentUsdcRaw);
           case "pnl":
-            return av(p.unrealizedPnlTrackedUsdcRaw);
+            return av(getPositionPnlRaw(p));
           case "shares":
             return av(p.holdingSharesRaw);
           case "value":
           default:
-            return av(p.currentValueHoldingUsdcRaw);
+            return av(getPositionValueRaw(p));
         }
       };
 
@@ -724,7 +868,15 @@ export default function SportfunPortfolioDashboard({
       const cmp = right > left ? 1 : -1;
       return sortDir === "desc" ? cmp : -cmp;
     });
-  }, [filteredPositions, sortDir, sortKey]);
+  }, [filteredPositions, sortDir, sortKey, getPositionPnlRaw, getPositionValueRaw]);
+
+  const filteredUnrealizedPnlRaw = useMemo(() => {
+    return filteredPositions.reduce((acc, position) => acc + BigInt(getPositionPnlRaw(position)), 0n).toString(10);
+  }, [filteredPositions, getPositionPnlRaw]);
+
+  const filteredCurrentValueRaw = useMemo(() => {
+    return filteredPositions.reduce((acc, position) => acc + BigInt(getPositionValueRaw(position)), 0n).toString(10);
+  }, [filteredPositions, getPositionValueRaw]);
 
   const nflExposure = useMemo(() => {
     if (mode !== "nfl") {
@@ -740,7 +892,7 @@ export default function SportfunPortfolioDashboard({
     let totalValueRaw = 0n;
 
     for (const position of sortedPositions) {
-      const valueRaw = BigInt(position.currentValueHoldingUsdcRaw ?? "0");
+      const valueRaw = BigInt(getPositionValueRaw(position));
       if (valueRaw <= 0n) continue;
 
       totalValueRaw += valueRaw;
@@ -766,7 +918,7 @@ export default function SportfunPortfolioDashboard({
       byPosition: toRows(byPosition),
       byTeam: toRows(byTeam),
     };
-  }, [mode, nflTokenMeta, sortedPositions]);
+  }, [mode, nflTokenMeta, sortedPositions, getPositionValueRaw]);
 
   const nflMarketCoverage = useMemo(() => {
     if (!nflMarketTelemetry) {
@@ -801,6 +953,8 @@ export default function SportfunPortfolioDashboard({
       for (const change of a.erc1155Changes ?? []) add(change.contractAddress, change.tokenIdDec);
       for (const trade of a.decoded?.trades ?? []) add(trade.playerToken, trade.tokenIdDec);
       for (const promo of a.decoded?.promotions ?? []) add(promo.playerToken, promo.tokenIdDec);
+      for (const renewal of a.decoded?.contractRenewals ?? []) add(renewal.playerToken, renewal.tokenIdDec);
+      for (const pack of a.decoded?.packOpens ?? []) add(pack.playerToken, pack.tokenIdDec);
     }
 
     return [{ value: "all", label: "All athletes" }, ...Array.from(map.values()).sort((a, b) => a.label.localeCompare(b.label))];
@@ -907,10 +1061,24 @@ export default function SportfunPortfolioDashboard({
       "avgCostUsdcPerShare",
       "currentPriceUsdcPerShare",
       "currentValueHoldingUsdc",
+      "currentValueTrackedExcludingFreeUsdc",
+      "currentValueTrackedExcludingPromotionsUsdc",
       "unrealizedPnlTrackedUsdc",
+      "unrealizedPnlTrackedExcludingFreeUsdc",
+      "unrealizedPnlTrackedExcludingPromotionsUsdc",
       "trackedShares",
+      "freeSharesHeld",
+      "promoSharesHeld",
+      "trackedSharesExcludingFree",
+      "trackedSharesExcludingPromotions",
       "freeSharesIn",
       "freeEvents",
+      "packOpenSharesIn",
+      "packOpenEvents",
+      "promotionSharesIn",
+      "promotionEvents",
+      "contractRenewalSpentUsdc",
+      "contractRenewalEvents",
     ];
 
     const rows = sortedPositions.map((p) => [
@@ -925,10 +1093,24 @@ export default function SportfunPortfolioDashboard({
       p.avgCostUsdcPerShareRaw ?? "",
       p.currentPriceUsdcPerShareRaw ?? "",
       p.currentValueHoldingUsdcRaw ?? "",
+      p.currentValueTrackedExcludingFreeUsdcRaw ?? "",
+      p.currentValueTrackedExcludingPromotionsUsdcRaw ?? "",
       p.unrealizedPnlTrackedUsdcRaw ?? "",
+      p.unrealizedPnlTrackedExcludingFreeUsdcRaw ?? "",
+      p.unrealizedPnlTrackedExcludingPromotionsUsdcRaw ?? "",
       p.trackedSharesRaw,
+      p.freeSharesHeldRaw ?? "0",
+      p.promoSharesHeldRaw ?? "0",
+      p.trackedSharesExcludingFreeRaw ?? p.trackedSharesRaw,
+      p.trackedSharesExcludingPromotionsRaw ?? p.trackedSharesRaw,
       p.totals?.freeSharesInRaw ?? "0",
       String(p.totals?.freeEvents ?? 0),
+      p.totals?.packOpenSharesInRaw ?? "0",
+      String(p.totals?.packOpenEvents ?? 0),
+      p.totals?.promotionSharesInRaw ?? "0",
+      String(p.totals?.promotionEvents ?? 0),
+      p.totals?.contractRenewalSpentUsdcRaw ?? "0",
+      String(p.totals?.contractRenewalEvents ?? 0),
     ]);
 
     const csv = [header, ...rows]
@@ -975,6 +1157,13 @@ export default function SportfunPortfolioDashboard({
   const tableBody = mode === "nfl" ? "divide-black/10 dark:divide-white/10" : "divide-white/10";
   const rowText = mode === "nfl" ? "text-zinc-700 dark:text-zinc-200" : "text-gray-200";
   const tableBorder = mode === "nfl" ? "border-black/10 dark:border-white/10" : "border-white/10";
+  const portfolioUnrealizedRaw =
+    freeTokenMode === "exclude"
+      ? data.analytics?.unrealizedPnlExcludingFreeUsdcRaw ??
+        data.analytics?.unrealizedPnlExcludingPromotionsUsdcRaw ??
+        data.analytics?.unrealizedPnlUsdcRaw ??
+        "0"
+      : data.analytics?.unrealizedPnlUsdcRaw ?? "0";
 
   return (
     <main className="mx-auto max-w-6xl p-6">
@@ -984,7 +1173,7 @@ export default function SportfunPortfolioDashboard({
           <p className={`text-sm ${cardTextMuted}`}>{address}</p>
           <p className={`mt-1 text-xs ${cardTextMutedStrong}`}>
             Auto-scan attempts: {attemptPages.length ? attemptPages.join(" → ") : "—"}
-            {data.summary.scanIncomplete || data.summary.activityTruncated ? " (still incomplete)" : ""}
+            {data.summary.scanIncomplete ? " (still incomplete)" : ""}
             {fullScanAttempts.length ? ` · full scan: ${fullScanAttempts.join(" → ")}` : ""}
             {fullScanStatusLabel ? ` · full scan ${fullScanStatusLabel}` : ""}
             {fullScanLoading && !fullScanStatusLabel ? " · starting full scan…" : ""}
@@ -1028,6 +1217,9 @@ export default function SportfunPortfolioDashboard({
           </button>
           {showGlobalLinks ? (
             <>
+              <Link className="text-sm text-blue-400 hover:underline" href={`/sportfun/prices`}>
+                Prices
+              </Link>
               <Link className="text-sm text-blue-400 hover:underline" href={`/base/${address}`}>
                 Base wallet
               </Link>
@@ -1060,11 +1252,16 @@ export default function SportfunPortfolioDashboard({
           </p>
         </div>
         <div className={`rounded-xl border p-4 ${cardBorder}`}>
-          <div className={`text-sm ${cardTextMuted}`}>Decoded trades</div>
+          <div className={`text-sm ${cardTextMuted}`}>Decoded events</div>
           <div className={`mt-2 text-xl ${cardTextMain}`}>{data.summary.decodedTradeCount ?? 0}</div>
           <p className={`mt-1 text-xs ${cardTextMutedStrong}`}>
             FDFPairV2 events
             {data.summary.decodedPromotionCount !== undefined ? ` · promotions ${data.summary.decodedPromotionCount}` : ""}
+            {data.summary.decodedContractRenewalCount !== undefined ? ` · renewals ${data.summary.decodedContractRenewalCount}` : ""}
+            {data.summary.decodedPackOpenCount !== undefined ? ` · packs ${data.summary.decodedPackOpenCount}` : ""}
+            {data.summary.funTransferCount !== undefined ? ` · fun ${data.summary.funTransferCount}` : ""}
+            {data.summary.decodedDepositCount !== undefined ? ` · deposits ${data.summary.decodedDepositCount}` : ""}
+            {data.summary.decodedScamCount !== undefined ? ` · scams ${data.summary.decodedScamCount}` : ""}
             {data.summary.shareDeltaMismatchTxCount ? ` · reconciled ${data.summary.shareDeltaMismatchTxCount} tx` : ""}.
           </p>
         </div>
@@ -1084,14 +1281,22 @@ export default function SportfunPortfolioDashboard({
           <div className={`rounded-xl border p-4 ${cardBorder}`}>
             <div className={`text-sm ${cardTextMuted}`}>Cost basis</div>
             <div className={`mt-2 text-xl ${cardTextMain}`}>{formatUsdc(data.analytics.totalCostBasisUsdcRaw, decimals)}</div>
-            <p className={`mt-1 text-xs ${cardTextMutedStrong}`}>USDC</p>
+            <p className={`mt-1 text-xs ${cardTextMutedStrong}`}>
+              USDC
+              {data.analytics.contractRenewalSpentUsdcRaw
+                ? ` · renewals ${formatUsdc(data.analytics.contractRenewalSpentUsdcRaw, decimals)}`
+                : ""}
+            </p>
           </div>
           <div className={`rounded-xl border p-4 ${cardBorder}`}>
             <div className={`text-sm ${cardTextMuted}`}>Unrealized PnL</div>
-            <div className={BigInt(data.analytics.unrealizedPnlUsdcRaw) >= 0n ? "mt-2 text-xl text-green-400" : "mt-2 text-xl text-red-400"}>
-              {formatUsdc(data.analytics.unrealizedPnlUsdcRaw, decimals)}
+            <div className={BigInt(portfolioUnrealizedRaw) >= 0n ? "mt-2 text-xl text-green-400" : "mt-2 text-xl text-red-400"}>
+              {formatUsdc(portfolioUnrealizedRaw, decimals)}
             </div>
-            <p className={`mt-1 text-xs ${cardTextMutedStrong}`}>USDC</p>
+            <p className={`mt-1 text-xs ${cardTextMutedStrong}`}>
+              USDC
+              {freeTokenMode === "exclude" ? " · excluding free shares" : ""}
+            </p>
           </div>
           <div className={`rounded-xl border p-4 ${cardBorder}`}>
             <div className={`text-sm ${cardTextMuted}`}>Realized PnL</div>
@@ -1236,6 +1441,13 @@ export default function SportfunPortfolioDashboard({
               <p className={`mt-1 text-sm ${cardTextMuted}`}>
                 Sort/filter and export CSV. If you see <span className={cardTextMutedStrong}>(partial)</span> under tracked shares, increase scan pages.
               </p>
+              <p className={`mt-1 text-xs ${cardTextMutedStrong}`}>
+                Filtered now: {sortedPositions.length} tokens · value {formatUsdc(filteredCurrentValueRaw, decimals)} · unrealized PnL{" "}
+                <span className={BigInt(filteredUnrealizedPnlRaw) >= 0n ? "text-green-400" : "text-red-400"}>
+                  {formatUsdc(filteredUnrealizedPnlRaw, decimals)}
+                </span>
+                {freeTokenMode === "exclude" ? " (excluding free shares)" : ""}
+              </p>
             </div>
 
             <div className="flex flex-wrap items-center gap-3">
@@ -1259,6 +1471,36 @@ export default function SportfunPortfolioDashboard({
                   </select>
                 </label>
               ) : null}
+
+              <label className={`text-xs ${cardTextMuted}`}>
+                Token
+                <input
+                  className={`ml-2 rounded-md border px-2 py-1 text-sm ${
+                    mode === "nfl"
+                      ? "border-black/10 bg-white text-zinc-700 placeholder:text-zinc-400 dark:border-white/10 dark:bg-white/10 dark:text-zinc-200"
+                      : "border-white/10 bg-black/30 text-gray-200 placeholder:text-gray-500"
+                  }`}
+                  value={tokenQuery}
+                  onChange={(e) => setTokenQuery(e.target.value)}
+                  placeholder="name or token id"
+                />
+              </label>
+
+              <label className={`text-xs ${cardTextMuted}`}>
+                Free tokens
+                <select
+                  className={`ml-2 rounded-md border px-2 py-1 text-sm ${
+                    mode === "nfl"
+                      ? "border-black/10 bg-white text-zinc-700 dark:border-white/10 dark:bg-white/10 dark:text-zinc-200"
+                      : "border-white/10 bg-black/30 text-gray-200"
+                  }`}
+                  value={freeTokenMode}
+                  onChange={(e) => setFreeTokenMode(e.target.value as FreeTokenMode)}
+                >
+                  <option value="include">Include</option>
+                  <option value="exclude">Exclude free</option>
+                </select>
+              </label>
 
               <label className={`text-xs ${cardTextMuted}`}>
                 Sort
@@ -1313,19 +1555,21 @@ export default function SportfunPortfolioDashboard({
                 <tr>
                   <th className="p-3">Sport</th>
                   <th className="p-3">Player</th>
-                <th className="p-3">Holding shares</th>
-                <th className="p-3">Spent</th>
-                <th className="p-3">Avg cost/share</th>
-                <th className="p-3">Current price/share</th>
-                <th className="p-3">Value</th>
-                <th className="p-3">Unrealized PnL</th>
-                <th className="p-3">Tracked shares</th>
-                <th className="p-3">History</th>
-              </tr>
-            </thead>
-            <tbody className={`divide-y ${tableBody}`}>
+                  <th className="p-3">Holding shares</th>
+                  <th className="p-3">Spent</th>
+                  <th className="p-3">Avg cost/share</th>
+                  <th className="p-3">Current price/share</th>
+                  <th className="p-3">{freeTokenMode === "exclude" ? "Value (ex free)" : "Value"}</th>
+                  <th className="p-3">{freeTokenMode === "exclude" ? "Unrealized PnL (ex free)" : "Unrealized PnL"}</th>
+                  <th className="p-3">Tracked shares</th>
+                  <th className="p-3">History</th>
+                </tr>
+              </thead>
+              <tbody className={`divide-y ${tableBody}`}>
               {sortedPositions.slice(0, 400).map((p) => {
-                const pnl = p.unrealizedPnlTrackedUsdcRaw;
+                const pnl = getPositionPnlRaw(p);
+                const value = getPositionValueRaw(p);
+                const freeSharesHeld = BigInt(p.freeSharesHeldRaw ?? p.promoSharesHeldRaw ?? "0");
                 const pnlClass = pnl ? (BigInt(pnl) >= 0n ? "text-green-400" : "text-red-400") : "text-gray-500";
                 const historyHref = tokenHistoryHref(p.playerToken, p.tokenIdDec);
 
@@ -1337,13 +1581,19 @@ export default function SportfunPortfolioDashboard({
                       <td className="p-3 whitespace-nowrap">{renderTokenLabel(p.playerToken, p.tokenIdDec)}</td>
                       <td className="p-3 whitespace-nowrap">{formatShares(p.holdingSharesRaw)}</td>
                       <td className="p-3 whitespace-nowrap">{p.totals ? formatUsdc(p.totals.spentUsdcRaw, decimals) : "—"}</td>
-                      <td className="p-3 whitespace-nowrap">{p.avgCostUsdcPerShareRaw ? formatUsdc(p.avgCostUsdcPerShareRaw, decimals) : "—"}</td>
-                      <td className="p-3 whitespace-nowrap">{p.currentPriceUsdcPerShareRaw ? formatUsdc(p.currentPriceUsdcPerShareRaw, decimals) : "—"}</td>
-                      <td className="p-3 whitespace-nowrap">{p.currentValueHoldingUsdcRaw ? formatUsdc(p.currentValueHoldingUsdcRaw, decimals) : "—"}</td>
+                      <td className="p-3 whitespace-nowrap">
+                        {hasValue(p.avgCostUsdcPerShareRaw) ? formatUsdc(p.avgCostUsdcPerShareRaw, decimals) : "—"}
+                      </td>
+                      <td className="p-3 whitespace-nowrap">
+                        {hasValue(p.currentPriceUsdcPerShareRaw) ? formatUsdc(p.currentPriceUsdcPerShareRaw, decimals) : "—"}
+                      </td>
+                      <td className="p-3 whitespace-nowrap">{value ? formatUsdc(value, decimals) : "—"}</td>
                       <td className={`p-3 whitespace-nowrap ${pnlClass}`}>{pnl ? formatUsdc(pnl, decimals) : "—"}</td>
                       <td className="p-3 whitespace-nowrap text-gray-400">
-                        {formatShares(p.trackedSharesRaw)}
-                        {BigInt(p.trackedSharesRaw) !== BigInt(p.holdingSharesRaw) ? " (partial)" : ""}
+                        <div>{formatShares(p.trackedSharesRaw)}{BigInt(p.trackedSharesRaw) !== BigInt(p.holdingSharesRaw) ? " (partial)" : ""}</div>
+                        {freeSharesHeld > 0n ? (
+                          <div className="text-xs text-amber-300">free {formatShares(freeSharesHeld.toString(10))}</div>
+                        ) : null}
                       </td>
                       <td className="p-3 whitespace-nowrap">
                         {historyHref ? (
@@ -1360,7 +1610,7 @@ export default function SportfunPortfolioDashboard({
                 {sortedPositions.length === 0 ? (
                   <tr>
                     <td className={`p-3 ${cardTextMutedStrong}`} colSpan={10}>
-                      No positions.
+                      No positions for selected filters.
                     </td>
                   </tr>
                 ) : null}
@@ -1430,9 +1680,11 @@ export default function SportfunPortfolioDashboard({
                   </td>
                   <td className="p-3 whitespace-nowrap text-gray-200">{formatShares(h.balanceRaw)}</td>
                   <td className="p-3 whitespace-nowrap text-gray-200">
-                    {h.priceUsdcPerShareRaw ? formatUsdc(h.priceUsdcPerShareRaw, decimals) : "—"}
+                    {hasValue(h.priceUsdcPerShareRaw) ? formatUsdc(h.priceUsdcPerShareRaw, decimals) : "—"}
                   </td>
-                  <td className="p-3 whitespace-nowrap text-gray-200">{h.valueUsdcRaw ? formatUsdc(h.valueUsdcRaw, decimals) : "—"}</td>
+                  <td className="p-3 whitespace-nowrap text-gray-200">
+                    {hasValue(h.valueUsdcRaw) ? formatUsdc(h.valueUsdcRaw, decimals) : "—"}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -1485,6 +1737,7 @@ export default function SportfunPortfolioDashboard({
                 <option value="all">All</option>
                 <option value="buy">Buy</option>
                 <option value="sell">Sell</option>
+                <option value="scam">Scam</option>
               </select>
             </label>
             {activityTokenFilter !== "all" ? (() => {
@@ -1512,12 +1765,25 @@ export default function SportfunPortfolioDashboard({
               </tr>
             </thead>
             <tbody className={`divide-y ${tableBody}`}>
-              {filteredActivity.map((a) => (
+              {filteredActivity.map((a) => {
+                const funDeltaRaw = a.funDeltaRaw ?? "0";
+                const hasFunDelta = BigInt(funDeltaRaw) !== 0n;
+                return (
                 <tr key={a.hash} className={rowText}>
                   <td className={`p-3 whitespace-nowrap ${cardTextMuted}`}>{a.timestamp ?? "—"}</td>
                   <td className="p-3 whitespace-nowrap">
                     {a.kind && a.kind !== "unknown" ? (
-                      <span className={a.kind === "buy" ? "text-green-400" : "text-red-400"}>{a.kind.toUpperCase()}</span>
+                      <span
+                        className={
+                          a.kind === "buy"
+                            ? "text-green-400"
+                            : a.kind === "sell"
+                              ? "text-red-400"
+                              : "text-orange-300"
+                        }
+                      >
+                        {a.kind.toUpperCase()}
+                      </span>
                     ) : (
                       <span className={cardTextMutedStrong}>—</span>
                     )}
@@ -1532,7 +1798,10 @@ export default function SportfunPortfolioDashboard({
                       {a.decoded?.trades?.slice(0, 3).map((t, idx) => (
                         <div key={idx} className={rowText}>
                           <span className={t.kind === "buy" ? "text-green-400" : "text-red-400"}>{t.kind.toUpperCase()}</span>{" "}
-                          {formatTokenLabel(t.playerToken, t.tokenIdDec)} · shares {formatShares(t.shareAmountRaw)} · net {formatUsdc(t.currencyRaw, decimals)} · fee {formatUsdc(t.feeRaw, decimals)}
+                          {formatTokenLabel(t.playerToken, t.tokenIdDec)} · shares {formatShares(t.shareAmountRaw)} · wallet Δ{" "}
+                          {formatUsdc(t.walletCurrencyDeltaRaw, decimals)} · trade {formatUsdc(t.currencyRaw, decimals)} · fee{" "}
+                          {formatUsdc(t.feeRaw, decimals)}
+                          {t.walletCurrencyDeltaSource === "receipt_reconciled" ? " · receipt-reconciled" : ""}
                         </div>
                       ))}
                       {a.decoded?.promotions?.slice(0, 2).map((p, idx) => (
@@ -1540,8 +1809,60 @@ export default function SportfunPortfolioDashboard({
                           PROMO {formatTokenLabel(p.playerToken, p.tokenIdDec)} · shares {formatShares(p.shareAmountRaw)}
                         </div>
                       ))}
+                      {a.decoded?.contractRenewals?.slice(0, 2).map((r, idx) => (
+                        <div key={`r-${idx}`} className="text-orange-300">
+                          RENEW {formatTokenLabel(r.playerToken, r.tokenIdDec)} · cost{" "}
+                          {formatUsdc(r.amountPaidRaw, decimals)} · matches {r.matchCountRaw}
+                        </div>
+                      ))}
+                      {a.decoded?.packOpens?.slice(0, 3).map((p, idx) => (
+                        <div key={`pk-${idx}`} className="text-cyan-300">
+                          PACK {formatTokenLabel(p.playerToken, p.tokenIdDec)} · shares{" "}
+                          {formatShares(p.shareAmountRaw)}
+                        </div>
+                      ))}
+                      {a.decoded?.deposits?.slice(0, 2).map((d, idx) => (
+                        <div key={`d-${idx}`} className="text-sky-300">
+                          {d.direction === "to_game_wallet" ? "DEPOSIT IN" : "DEPOSIT OUT"} ·{" "}
+                          {formatUsdc(d.amountRaw, decimals)} USDC · {shortenAddress(d.counterparty)}
+                        </div>
+                      ))}
+                      {hasFunDelta ? (
+                        <div className={BigInt(funDeltaRaw) >= 0n ? "text-emerald-300" : "text-rose-300"}>
+                          FUN {BigInt(funDeltaRaw) >= 0n ? "IN" : "OUT"} · {formatShares(funDeltaRaw)}
+                        </div>
+                      ) : null}
+                      {a.decoded?.scams?.slice(0, 3).map((s, idx) => (
+                        <div key={`s-${idx}`} className="text-orange-300">
+                          SCAM {s.category.toUpperCase()} ·{" "}
+                          {s.contractAddress ? shortenAddress(s.contractAddress) : "unknown-contract"}
+                          {s.tokenIdDec ? ` · #${s.tokenIdDec}` : ""}
+                          {s.amountRaw ? ` · amount ${s.amountRaw}` : ""}
+                          {` · counterparty ${shortenAddress(s.counterparty)}`}
+                        </div>
+                      ))}
                       {a.decoded?.trades && a.decoded.trades.length > 3 ? (
                         <div className={cardTextMutedStrong}>+{a.decoded.trades.length - 3} more trades…</div>
+                      ) : null}
+                      {a.decoded?.contractRenewals && a.decoded.contractRenewals.length > 2 ? (
+                        <div className={cardTextMutedStrong}>
+                          +{a.decoded.contractRenewals.length - 2} more renewals…
+                        </div>
+                      ) : null}
+                      {a.decoded?.packOpens && a.decoded.packOpens.length > 3 ? (
+                        <div className={cardTextMutedStrong}>
+                          +{a.decoded.packOpens.length - 3} more pack tokens…
+                        </div>
+                      ) : null}
+                      {a.decoded?.deposits && a.decoded.deposits.length > 2 ? (
+                        <div className={cardTextMutedStrong}>
+                          +{a.decoded.deposits.length - 2} more deposits…
+                        </div>
+                      ) : null}
+                      {a.decoded?.scams && a.decoded.scams.length > 3 ? (
+                        <div className={cardTextMutedStrong}>
+                          +{a.decoded.scams.length - 3} more scams…
+                        </div>
                       ) : null}
                     </div>
                   </td>
@@ -1556,7 +1877,8 @@ export default function SportfunPortfolioDashboard({
                     </div>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
               {filteredActivity.length === 0 ? (
                 <tr>
                   <td className={`p-3 ${cardTextMutedStrong}`} colSpan={5}>

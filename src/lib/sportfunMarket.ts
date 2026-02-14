@@ -16,17 +16,20 @@ import {
   BASE_USDC_DECIMALS,
   DEVPLAYERS_EVENTS_ABI,
   FDFPAIR_EVENTS_ABI,
-  FDFPAIR_READ_ABI,
   SPORTFUN_PLAYER_TOKENS,
   SPORTFUN_TOPICS,
   getSportfunAthleteMetadataDefaults,
 } from "@/lib/sportfun";
 import { resolveSportfunMetadataFromUri } from "@/lib/sportfunMetadata";
 import {
+  getStoredSportfunPrices,
+  tokenPriceMapKey,
+  triggerSportfunExternalPricesRefresh,
+  upsertStoredSportfunPrices,
+} from "@/lib/sportfunPrices";
+import {
   decodeAbiParameters,
   decodeEventLog,
-  decodeFunctionResult,
-  encodeFunctionData,
   type Hex,
 } from "viem";
 
@@ -124,9 +127,13 @@ const DEFAULT_TREND_DAYS = 30;
 const TOKEN_UNIVERSE_DAYS = 180;
 const TOKEN_UNIVERSE_START_MS = Date.UTC(2025, 7, 1);
 const LOG_CHUNK_BLOCKS = 2500n;
+const LOG_MIN_CHUNK_BLOCKS = 10n;
 const MAX_TRANSFER_PAGES = 20;
+const MAX_MARKET_TRANSFER_PAGES = 24;
 const CACHE_DIR = path.join(process.cwd(), ".cache", "sportfun", "market");
 const MARKET_SNAPSHOT_STALE_MS = 24 * 60 * 60 * 1000;
+const MARKET_LOG_TTL_MS = 5 * 60 * 1000;
+const TRADE_SOURCE_HINT_STALE_MS = 6 * 60 * 60 * 1000;
 
 const PRICE_DISTRIBUTION_BINS: Array<{ label: string; min?: number; max?: number }> = [
   { label: "< $1", max: 1 },
@@ -193,6 +200,16 @@ function parseNumericValue(value: unknown): number | null {
 function describeError(error: unknown): string {
   if (error instanceof Error && error.message) return error.message;
   return String(error);
+}
+
+const marketLogWindowByKey = new Map<string, number>();
+
+function warnOncePerWindow(key: string, message: string, ttlMs = MARKET_LOG_TTL_MS) {
+  const now = Date.now();
+  const until = marketLogWindowByKey.get(key) ?? 0;
+  if (now < until) return;
+  marketLogWindowByKey.set(key, now + ttlMs);
+  console.warn(message);
 }
 
 function normalizePosition(raw: string): string {
@@ -279,8 +296,15 @@ type RpcLog = {
 };
 
 type AssetTransfer = {
+  uniqueId?: string;
+  hash?: string;
+  blockNum?: string;
+  metadata?: { blockTimestamp?: string };
+  from?: string;
+  to?: string;
   tokenId?: string;
-  erc1155Metadata?: Array<{ tokenId?: string }>;
+  value?: string;
+  erc1155Metadata?: Array<{ tokenId?: string; value?: string }>;
 };
 
 function parseTokenId(value?: string): string | null {
@@ -304,6 +328,92 @@ function extractTokenIdsFromTransfer(transfer: AssetTransfer): string[] {
     if (parsed) ids.push(parsed);
   }
   return ids;
+}
+
+function parseTransferTimestampMs(transfer: AssetTransfer): number | null {
+  const ts = transfer.metadata?.blockTimestamp;
+  if (!ts) return null;
+  const ms = Date.parse(ts);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function parseTransferValueRaw(value?: string): bigint | null {
+  if (!value) return null;
+  try {
+    return parseBigIntish(value);
+  } catch {
+    return null;
+  }
+}
+
+function extractTradeItemsFromTransfer(
+  transfer: AssetTransfer
+): Array<{ tokenIdDec: string; shareAmountRaw: bigint }> {
+  const items: Array<{ tokenIdDec: string; shareAmountRaw: bigint }> = [];
+  const metas = Array.isArray(transfer.erc1155Metadata) ? transfer.erc1155Metadata : [];
+
+  for (const meta of metas) {
+    const tokenIdDec = parseTokenId(meta?.tokenId);
+    if (!tokenIdDec) continue;
+    const shareAmountRaw = parseTransferValueRaw(meta?.value) ?? 0n;
+    if (shareAmountRaw <= 0n) continue;
+    items.push({ tokenIdDec, shareAmountRaw });
+  }
+
+  if (!items.length) {
+    const tokenIdDec = parseTokenId(transfer.tokenId);
+    const shareAmountRaw = parseTransferValueRaw(transfer.value);
+    if (tokenIdDec && shareAmountRaw && shareAmountRaw > 0n) {
+      items.push({ tokenIdDec, shareAmountRaw });
+    }
+  }
+
+  return items;
+}
+
+function parseEthGetLogsRangeLimit(error: unknown): bigint | null {
+  const message = describeError(error);
+  const numericMatch = message.match(/up to a\s+(\d+)\s+block range/i);
+  if (numericMatch) {
+    try {
+      const parsed = BigInt(numericMatch[1]);
+      return parsed > 0n ? parsed : null;
+    } catch {
+      // continue
+    }
+  }
+
+  const suggestedRange = message.match(/this block range should work:\s*\[(0x[0-9a-f]+),\s*(0x[0-9a-f]+)\]/i);
+  if (suggestedRange) {
+    try {
+      const from = parseBigIntish(suggestedRange[1]);
+      const to = parseBigIntish(suggestedRange[2]);
+      if (to >= from) return to - from + 1n;
+    } catch {
+      // continue
+    }
+  }
+
+  return null;
+}
+
+function isEthGetLogsRangeLimitError(error: unknown): boolean {
+  const message = describeError(error).toLowerCase();
+  return (
+    message.includes("eth_getlogs") &&
+    (message.includes("block range") || message.includes("under the free tier plan"))
+  );
+}
+
+function shouldFallbackToAssetTransfers(error: unknown): boolean {
+  const message = describeError(error).toLowerCase();
+  return (
+    isEthGetLogsRangeLimitError(error) ||
+    (message.includes("eth_getlogs") &&
+      (message.includes("too many requests") ||
+        message.includes("compute units per second") ||
+        message.includes("throughput")))
+  );
 }
 
 async function fetchLogsChunk(params: {
@@ -338,8 +448,23 @@ async function fetchLogs(params: {
       logs.push(...batch);
       start = end + 1n;
     } catch (err) {
-      if (chunk <= 200n) throw err;
+      const providerLimit = parseEthGetLogsRangeLimit(err);
+      if (providerLimit && providerLimit > 0n && providerLimit <= LOG_MIN_CHUNK_BLOCKS) {
+        // Free-tier 10-block windows are not practical for long lookbacks.
+        // Let caller switch to a different data source.
+        throw err;
+      }
+      if (providerLimit && providerLimit > 0n && providerLimit < chunk) {
+        chunk = providerLimit;
+        continue;
+      }
+      if (chunk <= 1n) throw err;
+      if (chunk <= LOG_MIN_CHUNK_BLOCKS) {
+        chunk = 1n;
+        continue;
+      }
       chunk = chunk / 2n;
+      if (chunk < LOG_MIN_CHUNK_BLOCKS) chunk = LOG_MIN_CHUNK_BLOCKS;
     }
   }
   return logs;
@@ -427,96 +552,265 @@ function getSportContracts(sport: SportfunMarketSport) {
   return contracts;
 }
 
-async function getTradeEvents(params: {
+async function fetchPairTradeTransfers(params: {
+  pairAddress: string;
+  playerTokenAddresses: string[];
+  fromBlock: bigint;
+  toBlock: bigint;
+  direction: "incoming" | "outgoing";
+}): Promise<AssetTransfer[]> {
+  const all: AssetTransfer[] = [];
+  let pageKey: string | undefined;
+  let pages = 0;
+
+  while (pages < MAX_MARKET_TRANSFER_PAGES) {
+    const rpcParams: Record<string, unknown> = {
+      fromBlock: toHex(params.fromBlock),
+      toBlock: toHex(params.toBlock),
+      category: ["erc1155"],
+      contractAddresses: params.playerTokenAddresses,
+      withMetadata: true,
+      maxCount: "0x3e8",
+      order: "desc",
+      ...(params.direction === "outgoing"
+        ? { fromAddress: params.pairAddress }
+        : { toAddress: params.pairAddress }),
+    };
+    if (pageKey) rpcParams.pageKey = pageKey;
+
+    const result = (await alchemyRpc("alchemy_getAssetTransfers", [rpcParams])) as {
+      transfers?: AssetTransfer[];
+      pageKey?: string;
+    };
+    const transfers = Array.isArray(result?.transfers) ? result.transfers : [];
+    all.push(...transfers);
+
+    pages += 1;
+    pageKey = result?.pageKey;
+    if (!pageKey) break;
+  }
+
+  return all;
+}
+
+async function getTradeEventsFromAssetTransfers(params: {
   sport: SportfunMarketSport;
   fromBlock: bigint;
   toBlock: bigint;
 }): Promise<TradeEvent[]> {
   const contracts = getSportContracts(params.sport);
   const fdfPairs = contracts.map((c) => c.fdfPair.toLowerCase());
+  const playerTokenAddresses = contracts.map((c) => c.playerToken.toLowerCase());
 
-  const [buys, sells] = await Promise.all([
-    fetchLogs({
-      addresses: fdfPairs,
-      topic0: SPORTFUN_TOPICS.PlayerTokensPurchase,
-      fromBlock: params.fromBlock,
-      toBlock: params.toBlock,
-    }),
-    fetchLogs({
-      addresses: fdfPairs,
-      topic0: SPORTFUN_TOPICS.CurrencyPurchase,
-      fromBlock: params.fromBlock,
-      toBlock: params.toBlock,
-    }),
-  ]);
-
-  const logs = [...buys, ...sells];
-  if (!logs.length) return [];
-
-  const blockNumbers = new Set<bigint>();
-  for (const log of logs) {
-    try {
-      blockNumbers.add(parseBigIntish(log.blockNumber));
-    } catch {
-      // ignore
-    }
-  }
-
-  const blockTimestamps = new Map<string, number>();
-  const blocks = Array.from(blockNumbers);
-  await mapLimit(blocks, 6, async (blockNumber) => {
-    const ts = await getBlockTimestampMs(blockNumber);
-    blockTimestamps.set(blockNumber.toString(10), ts);
+  const transferGroups = await mapLimit(fdfPairs, 2, async (pairAddress) => {
+    const [outgoing, incoming] = await Promise.all([
+      fetchPairTradeTransfers({
+        pairAddress,
+        playerTokenAddresses,
+        fromBlock: params.fromBlock,
+        toBlock: params.toBlock,
+        direction: "outgoing",
+      }),
+      fetchPairTradeTransfers({
+        pairAddress,
+        playerTokenAddresses,
+        fromBlock: params.fromBlock,
+        toBlock: params.toBlock,
+        direction: "incoming",
+      }),
+    ]);
+    return [...outgoing, ...incoming];
   });
 
+  const transfers = transferGroups.flat();
+  if (!transfers.length) return [];
+
+  const blockTimestamps = new Map<string, number>();
+  const seen = new Set<string>();
   const events: TradeEvent[] = [];
 
-  for (const log of logs) {
-    const blockNumber = parseBigIntish(log.blockNumber);
-    const timestampMs = blockTimestamps.get(blockNumber.toString(10));
-    if (!timestampMs) continue;
-    const decoded = decodeTradeLog(log);
-    for (const item of decoded) {
+  for (const transfer of transfers) {
+    let timestampMs = parseTransferTimestampMs(transfer);
+    if (timestampMs === null && transfer.blockNum) {
+      try {
+        const blockNum = parseBigIntish(transfer.blockNum);
+        const cacheKey = blockNum.toString(10);
+        const cachedTs = blockTimestamps.get(cacheKey);
+        if (cachedTs !== undefined) {
+          timestampMs = cachedTs;
+        } else {
+          const resolvedTs = await getBlockTimestampMs(blockNum);
+          blockTimestamps.set(cacheKey, resolvedTs);
+          timestampMs = resolvedTs;
+        }
+      } catch {
+        timestampMs = null;
+      }
+    }
+
+    if (timestampMs === null) continue;
+
+    const transferId =
+      transfer.uniqueId ??
+      `${transfer.hash ?? "0x"}:${transfer.blockNum ?? "0x0"}:${transfer.from ?? "0x0"}:${transfer.to ?? "0x0"}`;
+    const items = extractTradeItemsFromTransfer(transfer);
+    for (let i = 0; i < items.length; i += 1) {
+      const item = items[i];
+      const dedupeKey = `${transferId}:${item.tokenIdDec}:${item.shareAmountRaw.toString(10)}:${i}`;
+      if (seen.has(dedupeKey)) continue;
+      seen.add(dedupeKey);
       events.push({
         tokenIdDec: item.tokenIdDec,
-        priceUsdcPerShareRaw: item.priceRaw,
         shareAmountRaw: item.shareAmountRaw,
         timestampMs,
       });
     }
   }
 
+  events.sort((a, b) => a.timestampMs - b.timestampMs);
   return events;
 }
 
-async function fetchCurrentPrices(params: {
-  fdfPair: string;
-  tokenIds: bigint[];
-}): Promise<Map<string, bigint>> {
-  const priceMap = new Map<string, bigint>();
-  const batchSize = 200;
-  for (let i = 0; i < params.tokenIds.length; i += batchSize) {
-    const slice = params.tokenIds.slice(i, i + batchSize);
-    if (!slice.length) continue;
-    const data = encodeFunctionData({
-      abi: FDFPAIR_READ_ABI,
-      functionName: "getPrices",
-      args: [slice],
-    });
-    const result = await alchemyRpc("eth_call", [{ to: params.fdfPair, data }, "latest"]);
-    const decoded = decodeFunctionResult({
-      abi: FDFPAIR_READ_ABI,
-      functionName: "getPrices",
-      data: result,
-    }) as readonly bigint[];
-    for (let j = 0; j < slice.length; j += 1) {
-      const tokenId = slice[j];
-      const price = decoded[j];
-      if (price !== undefined) {
-        priceMap.set(tokenId.toString(10), price);
+async function getTradeEvents(params: {
+  sport: SportfunMarketSport;
+  fromBlock: bigint;
+  toBlock: bigint;
+}): Promise<TradeEvent[]> {
+  if (shouldPreferAssetTransfersForTrades(params.sport)) {
+    return getTradeEventsFromAssetTransfers(params);
+  }
+
+  const contracts = getSportContracts(params.sport);
+  const fdfPairs = contracts.map((c) => c.fdfPair.toLowerCase());
+
+  try {
+    const [buys, sells] = await Promise.all([
+      fetchLogs({
+        addresses: fdfPairs,
+        topic0: SPORTFUN_TOPICS.PlayerTokensPurchase,
+        fromBlock: params.fromBlock,
+        toBlock: params.toBlock,
+      }),
+      fetchLogs({
+        addresses: fdfPairs,
+        topic0: SPORTFUN_TOPICS.CurrencyPurchase,
+        fromBlock: params.fromBlock,
+        toBlock: params.toBlock,
+      }),
+    ]);
+
+    const logs = [...buys, ...sells];
+    if (!logs.length) return [];
+
+    const blockNumbers = new Set<bigint>();
+    for (const log of logs) {
+      try {
+        blockNumbers.add(parseBigIntish(log.blockNumber));
+      } catch {
+        // ignore
       }
     }
+
+    const blockTimestamps = new Map<string, number>();
+    const blocks = Array.from(blockNumbers);
+    await mapLimit(blocks, 6, async (blockNumber) => {
+      const ts = await getBlockTimestampMs(blockNumber);
+      blockTimestamps.set(blockNumber.toString(10), ts);
+    });
+
+    const events: TradeEvent[] = [];
+
+    for (const log of logs) {
+      const blockNumber = parseBigIntish(log.blockNumber);
+      const timestampMs = blockTimestamps.get(blockNumber.toString(10));
+      if (!timestampMs) continue;
+      const decoded = decodeTradeLog(log);
+      for (const item of decoded) {
+        events.push({
+          tokenIdDec: item.tokenIdDec,
+          priceUsdcPerShareRaw: item.priceRaw,
+          shareAmountRaw: item.shareAmountRaw,
+          timestampMs,
+        });
+      }
+    }
+
+    writeTradeSourceHint(params.sport, "logs");
+    return events;
+  } catch (error: unknown) {
+    if (!shouldFallbackToAssetTransfers(error)) throw error;
+    writeTradeSourceHint(params.sport, "asset_transfers");
+    warnOncePerWindow(
+      `sportfun-market:eth-getlogs-fallback:${params.sport}`,
+      `[sportfun-market] eth_getLogs is limited on current Alchemy plan; using asset-transfer fallback sport=${params.sport}`
+    );
+    return getTradeEventsFromAssetTransfers(params);
   }
+}
+
+async function fetchCurrentPrices(params: {
+  playerToken: string;
+  tokenIds: bigint[];
+  lastTradeByToken: Map<string, { ts: number; price?: bigint }>;
+}): Promise<Map<string, bigint>> {
+  const priceMap = new Map<string, bigint>();
+  if (!params.tokenIds.length) return priceMap;
+
+  triggerSportfunExternalPricesRefresh({ reason: "market_snapshot" });
+
+  const items = params.tokenIds.map((tokenId) => ({
+    contractAddress: params.playerToken,
+    tokenIdDec: tokenId.toString(10),
+  }));
+  const stored = await getStoredSportfunPrices({
+    items,
+    allowContractFallback: false,
+  });
+
+  for (const tokenId of params.tokenIds) {
+    const tokenIdDec = tokenId.toString(10);
+    const key = tokenPriceMapKey(params.playerToken, tokenIdDec);
+    const storedEntry = stored.get(key);
+    if (storedEntry) {
+      priceMap.set(tokenIdDec, storedEntry.priceUsdcRaw);
+    }
+  }
+
+  const seedRows: Array<{
+    contractAddress: string;
+    tokenIdDec: string;
+    priceUsdcRaw: string;
+    source: string;
+    asOf?: string;
+    providerPayload: unknown;
+  }> = [];
+
+  for (const tokenId of params.tokenIds) {
+    const tokenIdDec = tokenId.toString(10);
+    if (priceMap.has(tokenIdDec)) continue;
+    const lastTrade = params.lastTradeByToken.get(tokenIdDec);
+    if (!lastTrade?.price || lastTrade.price <= 0n) continue;
+    const asOf =
+      Number.isFinite(lastTrade.ts) && lastTrade.ts > 0
+        ? new Date(lastTrade.ts).toISOString()
+        : undefined;
+    seedRows.push({
+      contractAddress: params.playerToken,
+      tokenIdDec,
+      priceUsdcRaw: lastTrade.price.toString(10),
+      source: "sportfun_market_last_trade",
+      asOf,
+      providerPayload: {
+        reason: "market_last_trade_fallback",
+      },
+    });
+    priceMap.set(tokenIdDec, lastTrade.price);
+  }
+
+  if (seedRows.length > 0) {
+    void upsertStoredSportfunPrices(seedRows);
+  }
+
   return priceMap;
 }
 
@@ -624,6 +918,49 @@ function marketSnapshotPath(sport: SportfunMarketSport) {
   return path.join(CACHE_DIR, `snapshot-${sport}.json`);
 }
 
+type TradeSourceHint = {
+  source: "logs" | "asset_transfers";
+  updatedAt: number;
+};
+
+function tradeSourceHintPath(sport: SportfunMarketSport) {
+  ensureCacheDir();
+  return path.join(CACHE_DIR, `trade-source-${sport}.json`);
+}
+
+function readTradeSourceHint(sport: SportfunMarketSport): TradeSourceHint | null {
+  try {
+    const raw = fs.readFileSync(tradeSourceHintPath(sport), "utf8");
+    const parsed = JSON.parse(raw) as TradeSourceHint;
+    if (
+      !parsed ||
+      (parsed.source !== "logs" && parsed.source !== "asset_transfers") ||
+      typeof parsed.updatedAt !== "number"
+    ) {
+      return null;
+    }
+    if (Date.now() - parsed.updatedAt > TRADE_SOURCE_HINT_STALE_MS) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writeTradeSourceHint(sport: SportfunMarketSport, source: TradeSourceHint["source"]) {
+  try {
+    fs.writeFileSync(tradeSourceHintPath(sport), JSON.stringify({ source, updatedAt: Date.now() }), "utf8");
+  } catch {
+    // ignore
+  }
+}
+
+function shouldPreferAssetTransfersForTrades(sport: SportfunMarketSport): boolean {
+  const forced = process.env.SPORTFUN_MARKET_TRADE_SOURCE?.trim().toLowerCase();
+  if (forced === "asset_transfers") return true;
+  const hint = readTradeSourceHint(sport);
+  return hint?.source === "asset_transfers";
+}
+
 function readMarketSnapshotFallback(sport: SportfunMarketSport): SportfunMarketSnapshot | null {
   try {
     const raw = fs.readFileSync(marketSnapshotPath(sport), "utf8");
@@ -718,12 +1055,11 @@ async function getTokenUniverse(sport: SportfunMarketSport, days: number): Promi
   const latest = await getLatestBlock();
   const fromTs = Math.min(Date.now() - days * 24 * 60 * 60 * 1000, TOKEN_UNIVERSE_START_MS);
   const fromBlock = await findBlockByTimestamp(fromTs);
-  let tradeTokenIds: string[] = [];
+  let transferTokenIds: string[] = [];
   try {
-    const events = await getTradeEvents({ sport, fromBlock, toBlock: latest });
-    tradeTokenIds = events.map((e) => e.tokenIdDec);
+    transferTokenIds = await getTokenUniverseFromTransfers(sport, fromBlock, latest);
   } catch {
-    tradeTokenIds = [];
+    transferTokenIds = [];
   }
 
   const contracts = getSportContracts(sport);
@@ -743,10 +1079,14 @@ async function getTokenUniverse(sport: SportfunMarketSport, days: number): Promi
     }
   }
 
-  const tokenSet = new Set<string>([...(cache?.tokenIds ?? []), ...tradeTokenIds, ...promoTokenIds]);
+  const tokenSet = new Set<string>([...(cache?.tokenIds ?? []), ...transferTokenIds, ...promoTokenIds]);
   if (!tokenSet.size) {
-    const transferTokenIds = await getTokenUniverseFromTransfers(sport, fromBlock, latest);
-    transferTokenIds.forEach((tokenId) => tokenSet.add(tokenId));
+    try {
+      const events = await getTradeEvents({ sport, fromBlock, toBlock: latest });
+      for (const event of events) tokenSet.add(event.tokenIdDec);
+    } catch {
+      // ignore
+    }
   }
   const tokenIds = Array.from(tokenSet).sort((a, b) => Number(a) - Number(b));
   if (!tokenIds.length && cache?.tokenIds?.length) return cache.tokenIds;
@@ -854,36 +1194,20 @@ export async function getSportfunMarketSnapshot(params: {
       const trendFromBlock =
         trendStart < windowStart ? await findBlockByTimestamp(trendStart) : windowFromBlock;
 
-      let windowEvents: TradeEvent[] = [];
+      let events: TradeEvent[] = [];
       let windowEventsError = false;
       try {
-        windowEvents = await getTradeEvents({
+        events = await getTradeEvents({
           sport: params.sport,
-          fromBlock: windowFromBlock,
+          fromBlock: trendFromBlock,
           toBlock: latest,
         });
       } catch (error: unknown) {
         windowEventsError = true;
-        windowEvents = [];
+        events = [];
         console.warn(
-          `[sportfun-market] window trade fetch failed sport=${params.sport} windowHours=${windowHours}: ${describeError(error)}`
+          `[sportfun-market] trade fetch failed sport=${params.sport} windowHours=${windowHours} trendDays=${trendDays}: ${describeError(error)}`
         );
-      }
-
-      let events = windowEvents;
-      if (trendFromBlock < windowFromBlock) {
-        try {
-          const historicalEvents = await getTradeEvents({
-            sport: params.sport,
-            fromBlock: trendFromBlock,
-            toBlock: windowFromBlock - 1n,
-          });
-          events = [...historicalEvents, ...windowEvents];
-        } catch (error: unknown) {
-          console.warn(
-            `[sportfun-market] historical trend fetch failed sport=${params.sport} trendDays=${trendDays}: ${describeError(error)}`
-          );
-        }
       }
 
       const tokenAgg = normalizeTokenAgg(events, windowStart);
@@ -924,11 +1248,15 @@ export async function getSportfunMarketSnapshot(params: {
       const tokenIdBigInts = tokenIds.map((id) => BigInt(id));
 
       const contracts = getSportContracts(params.sport);
-      const fdfPair = contracts[0].fdfPair;
+      const playerToken = contracts[0].playerToken;
       let priceMap = new Map<string, bigint>();
       if (tokenIdBigInts.length) {
         try {
-          priceMap = await fetchCurrentPrices({ fdfPair, tokenIds: tokenIdBigInts });
+          priceMap = await fetchCurrentPrices({
+            playerToken,
+            tokenIds: tokenIdBigInts,
+            lastTradeByToken,
+          });
         } catch {
           priceMap = new Map<string, bigint>();
         }

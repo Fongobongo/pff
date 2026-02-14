@@ -72,6 +72,8 @@ export const SPORTFUN_TOPICS = {
     "0x687289c2856f43779157318472d0a835253d93a290e03ee79b9e27b0e403493d",
   CurrencyPurchase:
     "0x2ac32fc1571b5f084cc08aa7b74d280dd7ccf29a3c58d1b42c369291f06a9a46",
+  ContractRenewed:
+    "0x1e941a38da83619de3d173471587bea1533374cbd42375fb932fd0edb08dfedb",
 } as const;
 
 export function toLower(s: string | undefined): string {

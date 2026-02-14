@@ -7,8 +7,8 @@ import HistoryExport from "./HistoryExport";
 
 const paramsSchema = z.object({
   address: z.string().min(1),
-  contractAddress: z.string().min(1),
-  tokenId: z.string().min(1),
+  contractaddress: z.string().min(1),
+  tokenid: z.string().min(1),
 });
 
 const searchSchema = z.object({
@@ -39,6 +39,7 @@ type SportfunPortfolioResponse = {
     positionsByToken?: Array<{
       playerToken: string;
       tokenIdDec: string;
+      playerName?: string;
       holdingSharesRaw: string;
       trackedSharesRaw: string;
       avgCostUsdcPerShareRaw?: string;
@@ -77,6 +78,14 @@ type SportfunPortfolioResponse = {
       tokenIdDec: string;
       deltaRaw: string;
     }>;
+    reconciledTransfers?: Array<{
+      kind: "transfer_in" | "transfer_out";
+      contractAddress: string;
+      tokenIdDec: string;
+      deltaRaw: string;
+      note: string;
+      reason: string;
+    }>;
     decoded?: {
       trades: Array<{
         kind: "buy" | "sell";
@@ -87,6 +96,8 @@ type SportfunPortfolioResponse = {
         feeRaw: string;
         walletShareDeltaRaw: string;
         walletCurrencyDeltaRaw: string;
+        walletCurrencyDeltaEventRaw?: string;
+        walletCurrencyDeltaSource?: "event" | "receipt_reconciled";
         priceUsdcPerShareRaw?: string;
         priceUsdcPerShareIncFeeRaw?: string;
       }>;
@@ -97,12 +108,45 @@ type SportfunPortfolioResponse = {
         shareAmountRaw: string;
         walletShareDeltaRaw: string;
       }>;
+      contractRenewals?: Array<{
+        kind: "contract_renewal";
+        renewalContract: string;
+        playerToken?: string;
+        tokenIdDec: string;
+        amountPaidRaw: string;
+        paymentToken: string;
+        matchCountRaw: string;
+      }>;
+      packOpens?: Array<{
+        kind: "pack_open";
+        packContract?: string;
+        opener?: string;
+        selector?: string;
+        playerToken: string;
+        tokenIdDec: string;
+        shareAmountRaw: string;
+        walletCurrencyDeltaRaw?: string;
+        walletCurrencyDeltaSource?: "receipt_reconciled";
+      }>;
     };
   }>;
 };
 
+type SportfunPortfolioApiResponse =
+  | SportfunPortfolioResponse
+  | {
+      status?: string;
+      jobId?: string;
+      snapshot?: Partial<SportfunPortfolioResponse>;
+      holdings?: SportfunPortfolioResponse["holdings"];
+      activity?: SportfunPortfolioResponse["activity"];
+      analytics?: SportfunPortfolioResponse["analytics"];
+      summary?: SportfunPortfolioResponse["summary"];
+      assumptions?: SportfunPortfolioResponse["assumptions"];
+    };
+
 type TokenEvent = {
-  kind: "buy" | "sell" | "promotion" | "transfer";
+  kind: "buy" | "sell" | "promotion" | "transfer" | "renewal";
   hash: string;
   timestamp?: string;
   sharesDeltaRaw: string;
@@ -157,6 +201,10 @@ function formatUsdc(raw: string, decimals: number): string {
   return formatFixed(raw, decimals);
 }
 
+function hasValue(raw: string | undefined | null): raw is string {
+  return raw !== undefined && raw !== null;
+}
+
 function makeTokenKey(contractAddress?: string, tokenIdDec?: string): string | null {
   if (!contractAddress || !tokenIdDec) return null;
   return `${contractAddress.toLowerCase()}:${tokenIdDec}`;
@@ -171,6 +219,15 @@ function parseNumber(value: string | undefined, fallback: number): number {
   if (!value) return fallback;
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
+}
+
+function toBigIntSafe(value: string | undefined): bigint | null {
+  if (typeof value !== "string") return null;
+  try {
+    return BigInt(value);
+  } catch {
+    return null;
+  }
 }
 
 type ChartBucket = "trade" | "day" | "week" | "month" | "year";
@@ -220,14 +277,17 @@ export default async function SportfunTokenHistoryPage({
   params,
   searchParams,
 }: {
-  params: Promise<{ address: string; contractAddress: string; tokenId: string }>;
-  searchParams?: Record<string, string | string[] | undefined>;
+  params: Promise<{ address: string; contractaddress: string; tokenid: string }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const { address, contractAddress, tokenId } = paramsSchema.parse(await params);
+  const { address, contractaddress, tokenid } = paramsSchema.parse(await params);
+  const contractAddress = contractaddress;
+  const tokenId = tokenid;
+  const resolvedSearchParams = searchParams ? await searchParams : undefined;
   const search = searchSchema.parse({
-    cursor: parseParam(searchParams?.cursor),
-    pageSize: parseParam(searchParams?.pageSize),
-    bucket: parseParam(searchParams?.bucket),
+    cursor: parseParam(resolvedSearchParams?.cursor),
+    pageSize: parseParam(resolvedSearchParams?.pageSize),
+    bucket: parseParam(resolvedSearchParams?.bucket),
   });
 
   const pageSizeDefault = 2000;
@@ -238,9 +298,39 @@ export default async function SportfunTokenHistoryPage({
   const chartBucket = getBucket(search.bucket);
 
   const base = await getBaseUrl();
-  const data = await getJson<SportfunPortfolioResponse>(
-    `${base}/api/sportfun/portfolio/${address}?scanMode=full&maxPages=200&maxCount=0x3e8&maxActivity=${pageSize}&activityCursor=${activityCursor}&includeTrades=1&includePrices=1&includeMetadata=0`
+  const response = await getJson<SportfunPortfolioApiResponse>(
+    `${base}/api/sportfun/portfolio/${address}?scanMode=full&mode=sync&maxPages=200&maxCount=0x3e8&maxActivity=${pageSize}&activityCursor=${activityCursor}&includeTrades=1&includePrices=1&includeMetadata=1&includeUri=1`
   );
+  const snapshot =
+    response && typeof response === "object" && "snapshot" in response && response.snapshot
+      ? response.snapshot
+      : undefined;
+
+  const data =
+    response && typeof response === "object" && Array.isArray((response as SportfunPortfolioResponse).holdings)
+      ? (response as SportfunPortfolioResponse)
+      : snapshot && Array.isArray(snapshot.holdings) && Array.isArray(snapshot.activity)
+        ? (snapshot as SportfunPortfolioResponse)
+        : ({
+            address,
+            assumptions: {
+              usdc: {
+                contractAddress: "",
+                decimals: 6,
+                note: "USDC context unavailable for this response.",
+              },
+            },
+            summary: {
+              activityCount: 0,
+              activityCountReturned: 0,
+              activityCountTotal: 0,
+              activityTruncated: false,
+              activityCursor,
+            },
+            analytics: undefined,
+            holdings: [],
+            activity: [],
+          } satisfies SportfunPortfolioResponse);
 
   const tokenKey = `${contractAddress.toLowerCase()}:${tokenId}`;
   const matchesToken = (addr?: string, id?: string) => makeTokenKey(addr, id) === tokenKey;
@@ -249,17 +339,32 @@ export default async function SportfunTokenHistoryPage({
   const position = data.analytics?.positionsByToken?.find((p) => matchesToken(p.playerToken, p.tokenIdDec));
 
   const nameOverride = getSportfunNameOverride(contractAddress, tokenId);
-  const displayName = holding?.metadata?.name ?? nameOverride ?? `#${tokenId}`;
+  const displayName = holding?.metadata?.name ?? position?.playerName ?? nameOverride ?? `#${tokenId}`;
   const sportLabel = getSportfunSportLabel(contractAddress).toUpperCase();
   const decimals = data.assumptions.usdc.decimals ?? 6;
+  const usdcAddressLc = data.assumptions.usdc.contractAddress.toLowerCase();
 
   const events: TokenEvent[] = [];
 
   for (const activity of data.activity) {
     const trades = (activity.decoded?.trades ?? []).filter((t) => matchesToken(t.playerToken, t.tokenIdDec));
     const promotions = (activity.decoded?.promotions ?? []).filter((p) => matchesToken(p.playerToken, p.tokenIdDec));
+    const renewals = (activity.decoded?.contractRenewals ?? []).filter((r) => {
+      if (matchesToken(r.playerToken, r.tokenIdDec)) return true;
+      return !r.playerToken && r.tokenIdDec === tokenId;
+    });
+    const packOpens = (activity.decoded?.packOpens ?? []).filter((p) => matchesToken(p.playerToken, p.tokenIdDec));
+    const reconciledTransfers = (activity.reconciledTransfers ?? []).filter((t) =>
+      matchesToken(t.contractAddress, t.tokenIdDec)
+    );
 
     for (const trade of trades) {
+      const note =
+        trade.walletCurrencyDeltaSource === "receipt_reconciled" &&
+        trade.walletCurrencyDeltaEventRaw &&
+        trade.walletCurrencyDeltaEventRaw !== trade.walletCurrencyDeltaRaw
+          ? "USDC Δ uses net receipt transfers (includes in-tx refund/adjustment)"
+          : undefined;
       events.push({
         kind: trade.kind,
         hash: activity.hash,
@@ -267,6 +372,7 @@ export default async function SportfunTokenHistoryPage({
         sharesDeltaRaw: trade.walletShareDeltaRaw,
         usdcDeltaRaw: trade.walletCurrencyDeltaRaw,
         priceUsdcPerShareRaw: trade.priceUsdcPerShareRaw,
+        note,
       });
     }
 
@@ -276,10 +382,81 @@ export default async function SportfunTokenHistoryPage({
         hash: activity.hash,
         timestamp: activity.timestamp,
         sharesDeltaRaw: promo.walletShareDeltaRaw,
+        usdcDeltaRaw: "0",
+        priceUsdcPerShareRaw: "0",
       });
     }
 
-    if (trades.length === 0 && promotions.length === 0) {
+    for (const renewal of renewals) {
+      const paymentTokenLc = renewal.paymentToken.toLowerCase();
+      const isUsdcPayment = !usdcAddressLc || paymentTokenLc === usdcAddressLc;
+      const matchesRaw = /^[0-9]+$/.test(renewal.matchCountRaw) ? renewal.matchCountRaw : "?";
+      const paymentLabel = isUsdcPayment ? "USDC" : shortenAddress(paymentTokenLc);
+      events.push({
+        kind: "renewal",
+        hash: activity.hash,
+        timestamp: activity.timestamp,
+        sharesDeltaRaw: "0",
+        usdcDeltaRaw: isUsdcPayment ? `-${renewal.amountPaidRaw}` : undefined,
+        note: `contract renewal · matches ${matchesRaw} · pay ${paymentLabel}`,
+      });
+    }
+
+    for (const packOpen of packOpens) {
+      let packShareRaw: bigint;
+      try {
+        packShareRaw = BigInt(packOpen.shareAmountRaw);
+      } catch {
+        continue;
+      }
+      const packUsdcDelta = toBigIntSafe(packOpen.walletCurrencyDeltaRaw) ?? 0n;
+      const packNote =
+        packOpen.walletCurrencyDeltaSource === "receipt_reconciled"
+          ? "pack open (receipt-reconciled)"
+          : "pack open";
+
+      if (packShareRaw > 0n && packUsdcDelta < 0n) {
+        const paid = -packUsdcDelta;
+        const priceUsdcPerShareRaw = (paid * 10n ** 18n) / packShareRaw;
+        events.push({
+          kind: "buy",
+          hash: activity.hash,
+          timestamp: activity.timestamp,
+          sharesDeltaRaw: packOpen.shareAmountRaw,
+          usdcDeltaRaw: packUsdcDelta.toString(10),
+          priceUsdcPerShareRaw: priceUsdcPerShareRaw.toString(10),
+          note: packNote,
+        });
+      } else {
+        events.push({
+          kind: "transfer",
+          hash: activity.hash,
+          timestamp: activity.timestamp,
+          sharesDeltaRaw: packOpen.shareAmountRaw,
+          usdcDeltaRaw: packUsdcDelta.toString(10),
+          note: packUsdcDelta === 0n ? `${packNote} (free)` : packNote,
+        });
+      }
+    }
+
+    for (const transfer of reconciledTransfers) {
+      events.push({
+        kind: "transfer",
+        hash: activity.hash,
+        timestamp: activity.timestamp,
+        sharesDeltaRaw: transfer.deltaRaw,
+        usdcDeltaRaw: "0",
+        note: `${transfer.kind} (${transfer.reason})`,
+      });
+    }
+
+    if (
+      trades.length === 0 &&
+      promotions.length === 0 &&
+      renewals.length === 0 &&
+      packOpens.length === 0 &&
+      reconciledTransfers.length === 0
+    ) {
       const changes = activity.erc1155Changes.filter((c) => matchesToken(c.contractAddress, c.tokenIdDec));
       for (const change of changes) {
         events.push({
@@ -287,6 +464,7 @@ export default async function SportfunTokenHistoryPage({
           hash: activity.hash,
           timestamp: activity.timestamp,
           sharesDeltaRaw: change.deltaRaw,
+          usdcDeltaRaw: "0",
           note: "erc1155 delta",
         });
       }
@@ -316,6 +494,10 @@ export default async function SportfunTokenHistoryPage({
   const nextCursor = data.summary.nextActivityCursor;
   const prevCursor = activityCursor > 0 ? Math.max(0, activityCursor - pageSize) : null;
   const basePath = `/sportfun/portfolio/${address}/token/${contractAddress}/${tokenId}`;
+  const currentPriceRaw = holding?.priceUsdcPerShareRaw ?? position?.currentPriceUsdcPerShareRaw;
+  const currentValueRaw = holding?.valueUsdcRaw ?? position?.currentValueHoldingUsdcRaw;
+  const avgCostRaw = position?.avgCostUsdcPerShareRaw;
+  const unrealizedRaw = position?.unrealizedPnlTrackedUsdcRaw;
 
   const tradeEvents = events.filter((e) => e.kind === "buy" || e.kind === "sell");
   const bucketAgg = new Map<number, { ts: number; volume: bigint; priceVolumeSum: bigint }>();
@@ -429,18 +611,14 @@ export default async function SportfunTokenHistoryPage({
         <div className="rounded-xl border border-white/10 bg-white/5 p-4">
           <div className="text-sm text-gray-400">Current price/share</div>
           <div className="mt-2 text-xl text-white">
-            {holding?.priceUsdcPerShareRaw || position?.currentPriceUsdcPerShareRaw
-              ? formatUsdc(holding?.priceUsdcPerShareRaw ?? position?.currentPriceUsdcPerShareRaw ?? "0", decimals)
-              : "—"}
+            {hasValue(currentPriceRaw) ? formatUsdc(currentPriceRaw, decimals) : "—"}
           </div>
           <p className="mt-1 text-xs text-gray-500">USDC</p>
         </div>
         <div className="rounded-xl border border-white/10 bg-white/5 p-4">
           <div className="text-sm text-gray-400">Current value</div>
           <div className="mt-2 text-xl text-white">
-            {holding?.valueUsdcRaw || position?.currentValueHoldingUsdcRaw
-              ? formatUsdc(holding?.valueUsdcRaw ?? position?.currentValueHoldingUsdcRaw ?? "0", decimals)
-              : "—"}
+            {hasValue(currentValueRaw) ? formatUsdc(currentValueRaw, decimals) : "—"}
           </div>
           <p className="mt-1 text-xs text-gray-500">USDC</p>
         </div>
@@ -470,7 +648,7 @@ export default async function SportfunTokenHistoryPage({
         <div className="rounded-xl border border-white/10 bg-white/5 p-4">
           <div className="text-sm text-gray-400">Avg cost/share</div>
           <div className="mt-2 text-xl text-white">
-            {position?.avgCostUsdcPerShareRaw ? formatUsdc(position.avgCostUsdcPerShareRaw, decimals) : "—"}
+            {hasValue(avgCostRaw) ? formatUsdc(avgCostRaw, decimals) : "—"}
           </div>
           <p className="mt-1 text-xs text-gray-500">USDC</p>
         </div>
@@ -478,14 +656,14 @@ export default async function SportfunTokenHistoryPage({
           <div className="text-sm text-gray-400">Unrealized PnL</div>
           <div
             className={
-              position?.unrealizedPnlTrackedUsdcRaw
-                ? BigInt(position.unrealizedPnlTrackedUsdcRaw) >= 0n
+              hasValue(unrealizedRaw)
+                ? BigInt(unrealizedRaw) >= 0n
                   ? "mt-2 text-xl text-green-400"
                   : "mt-2 text-xl text-red-400"
                 : "mt-2 text-xl text-white"
             }
           >
-            {position?.unrealizedPnlTrackedUsdcRaw ? formatUsdc(position.unrealizedPnlTrackedUsdcRaw, decimals) : "—"}
+            {hasValue(unrealizedRaw) ? formatUsdc(unrealizedRaw, decimals) : "—"}
           </div>
           <p className="mt-1 text-xs text-gray-500">USDC</p>
         </div>
@@ -686,6 +864,8 @@ export default async function SportfunTokenHistoryPage({
                     ? "text-green-400"
                     : e.kind === "sell"
                       ? "text-red-400"
+                      : e.kind === "renewal"
+                        ? "text-orange-300"
                       : e.kind === "promotion"
                         ? "text-amber-300"
                         : "text-gray-400";
@@ -693,13 +873,16 @@ export default async function SportfunTokenHistoryPage({
                 return (
                   <tr key={`${e.hash}-${idx}`} className="text-gray-200">
                     <td className="p-3 whitespace-nowrap text-gray-400">{e.timestamp ?? "—"}</td>
-                    <td className={`p-3 whitespace-nowrap ${kindClass}`}>{e.kind.toUpperCase()}</td>
+                    <td className="p-3 whitespace-nowrap">
+                      <div className={kindClass}>{e.kind.toUpperCase()}</div>
+                      {e.note ? <div className="text-xs text-gray-500">{e.note}</div> : null}
+                    </td>
                     <td className="p-3 whitespace-nowrap">{formatSigned(e.sharesDeltaRaw, 18)}</td>
                     <td className="p-3 whitespace-nowrap">
-                      {e.usdcDeltaRaw ? formatSigned(e.usdcDeltaRaw, decimals) : "—"}
+                      {hasValue(e.usdcDeltaRaw) ? formatSigned(e.usdcDeltaRaw, decimals) : "—"}
                     </td>
                     <td className="p-3 whitespace-nowrap">
-                      {e.priceUsdcPerShareRaw ? formatUsdc(e.priceUsdcPerShareRaw, decimals) : "—"}
+                      {hasValue(e.priceUsdcPerShareRaw) ? formatUsdc(e.priceUsdcPerShareRaw, decimals) : "—"}
                     </td>
                     <td className="p-3 whitespace-nowrap">
                       <div className="flex flex-col">

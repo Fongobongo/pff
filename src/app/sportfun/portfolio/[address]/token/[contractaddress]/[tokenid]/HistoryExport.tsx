@@ -1,7 +1,7 @@
 "use client";
 
 type TokenEvent = {
-  kind: "buy" | "sell" | "promotion" | "transfer";
+  kind: "buy" | "sell" | "promotion" | "transfer" | "renewal";
   hash: string;
   timestamp?: string;
   sharesDeltaRaw: string;

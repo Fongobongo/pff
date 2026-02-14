@@ -9,17 +9,18 @@ import { withCache } from "@/lib/stats/cache";
 import { kvEnabled, kvGetJson, kvSetJson, kvSetRaw } from "@/lib/kv";
 import {
   decodeAbiParameters,
-  decodeEventLog,
   decodeFunctionResult,
+  decodeEventLog,
   encodeFunctionData,
+  isAddress,
   type Hex,
 } from "viem";
 import {
   BASE_USDC,
   BASE_USDC_DECIMALS,
   DEVPLAYERS_EVENTS_ABI,
-  FDFPAIR_EVENTS_ABI,
   FDFPAIR_READ_ABI,
+  FDFPAIR_EVENTS_ABI,
   SPORTFUN_DEV_PLAYERS_CONTRACTS,
   SPORTFUN_ERC1155_CONTRACTS,
   SPORTFUN_FDF_PAIR_CONTRACTS,
@@ -42,6 +43,14 @@ import {
   setSportfunMetadataCacheEntry,
   type SportfunTokenMetadata,
 } from "@/lib/sportfunMetadataCache";
+import { getSportfunNameOverride, getSportfunSportLabel } from "@/lib/sportfunNames";
+import { getSportfunMarketSnapshot } from "@/lib/sportfunMarket";
+import {
+  getStoredSportfunPrices,
+  tokenPriceMapKey,
+  triggerSportfunExternalPricesRefresh,
+  upsertStoredSportfunPrices,
+} from "@/lib/sportfunPrices";
 
 export const runtime = "nodejs";
 
@@ -69,9 +78,11 @@ const querySchema = z.object({
 type AlchemyTransfer = {
   category?: string;
   uniqueId?: string;
+  blockNum?: string;
   hash?: string;
   from?: string;
   to?: string;
+  erc721TokenId?: string;
   metadata?: { blockTimestamp?: string };
   rawContract?: {
     address?: string;
@@ -86,12 +97,127 @@ type TxReceiptLog = {
   address: string;
   topics: Hex[];
   data: Hex;
+  blockNumber?: Hex;
+  transactionHash?: Hex;
+  logIndex?: Hex;
 };
 
 const ERC20_TRANSFER_TOPIC0 =
   "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
-const SCAN_START_DATE_ISO = "2025-08-01T00:00:00Z";
+const SCAN_START_DATE_ISO =
+  process.env.SPORTFUN_SCAN_START_DATE_ISO?.trim() || "2024-01-01T00:00:00Z";
 const SCAN_START_BLOCK_BUFFER = 500n;
+const SCAN_START_BLOCK_FALLBACK_HEX =
+  process.env.SPORTFUN_SCAN_START_BLOCK_FALLBACK_HEX?.trim() || "0x0";
+const scanStartLookupTimeoutMsEnv = Number(process.env.SPORTFUN_SCAN_START_BLOCK_LOOKUP_TIMEOUT_MS ?? "8000");
+const SCAN_START_BLOCK_LOOKUP_TIMEOUT_MS =
+  Number.isFinite(scanStartLookupTimeoutMsEnv) && scanStartLookupTimeoutMsEnv > 0
+    ? Math.trunc(scanStartLookupTimeoutMsEnv)
+    : 8000;
+const CONTRACT_RENEWAL_LOGS_CACHE_TTL_MS = 1000 * 60 * 10; // 10m
+const TX_CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 14; // 14 days
+const PORTFOLIO_CACHE_SCHEMA_VERSION = 12;
+const SPORTFUN_FUN_TOKEN_ADDRESS = "0x16ee7ecac70d1028e7712751e2ee6ba808a7dd92";
+const PACK_OPEN_SELECTORS = new Set<string>([
+  // Legacy pack open flow (observed on 2025-10/11 transactions).
+  "0x4cd9acce",
+  // openPlayerPackV2(address,uint256[],uint256[],uint256)
+  "0xad3a4b08",
+]);
+const DEFAULT_SPORTFUN_DEPOSIT_COUNTERPARTIES = [
+  // Sport.fun in-game wallet counterparty observed in deposit/withdraw flows.
+  "0x3aa295bb3f19b9999995e3fa04d6b7ef6ce3850c",
+] as const;
+
+function getSportfunDepositCounterparties(): Set<string> {
+  const set = new Set<string>([...DEFAULT_SPORTFUN_DEPOSIT_COUNTERPARTIES].map((x) => x.toLowerCase()));
+  const raw = process.env.SPORTFUN_DEPOSIT_COUNTERPARTIES;
+  if (!raw) return set;
+  for (const token of raw.split(/[,\s]+/).map((x) => x.trim()).filter(Boolean)) {
+    if (!isAddress(token)) continue;
+    set.add(token.toLowerCase());
+  }
+  return set;
+}
+
+const CONTRACT_RENEWAL_EVENTS_ABI = [
+  {
+    type: "event",
+    name: "ContractRenewed",
+    inputs: [
+      { name: "account", type: "address", indexed: true },
+      { name: "tokenId", type: "uint256", indexed: true },
+      { name: "paymentToken", type: "address", indexed: true },
+      { name: "amountPaid", type: "uint256", indexed: false },
+      { name: "matchCount", type: "uint256", indexed: false },
+    ],
+    anonymous: false,
+  },
+] as const;
+
+type DecodedContractRenewalItem = {
+  kind: "contract_renewal";
+  renewalContract: string;
+  account: string;
+  tokenIdDec: string;
+  paymentToken: string;
+  amountPaidRaw: string;
+  matchCountRaw: string;
+  playerToken?: string;
+  txHash?: string;
+  blockNumber?: string;
+};
+
+type DecodedPackOpenItem = {
+  kind: "pack_open";
+  packContract?: string;
+  opener?: string;
+  selector?: string;
+  playerToken: string;
+  tokenIdDec: string;
+  shareAmountRaw: string;
+  walletCurrencyDeltaRaw?: string;
+  walletCurrencyDeltaSource?: "receipt_reconciled";
+};
+
+type DecodedDepositItem = {
+  kind: "deposit";
+  direction: "to_game_wallet" | "from_game_wallet";
+  counterparty: string;
+  amountRaw: string;
+  paymentToken: string;
+};
+
+type DecodedScamItem = {
+  kind: "scam";
+  category: "erc20" | "erc721" | "erc1155";
+  counterparty: string;
+  contractAddress?: string;
+  tokenIdHex?: string;
+  tokenIdDec?: string;
+  amountRaw?: string;
+  reason: "unsupported_game_wallet_asset" | "unsupported_wallet_asset";
+};
+
+type ContractRenewalLogsCache = {
+  version: number;
+  address: string;
+  fromBlock: string;
+  updatedAt: number;
+  renewals: DecodedContractRenewalItem[];
+};
+
+const CONTRACT_RENEWAL_LOGS_CACHE_VERSION = 1;
+
+function invalidAddressResponse(address: string) {
+  return NextResponse.json(
+    {
+      error: "invalid_address",
+      message: `Invalid EVM address: ${address}`,
+    },
+    { status: 400 }
+  );
+}
 
 function topicToAddressLc(topic: Hex | undefined): string {
   const t = String(topic ?? "0x").toLowerCase().replace(/^0x/, "");
@@ -134,12 +260,21 @@ async function findBlockByTimestamp(targetMs: number): Promise<bigint> {
 
 async function getScanStartBlockHex(): Promise<string> {
   const targetMs = Date.parse(SCAN_START_DATE_ISO);
-  if (!Number.isFinite(targetMs)) return "0x0";
-  const blockStr = await withCache(
+  if (!Number.isFinite(targetMs)) return SCAN_START_BLOCK_FALLBACK_HEX;
+
+  const lookupPromise = withCache(
     `sportfun:scan-start-block:${SCAN_START_DATE_ISO}`,
     60 * 60 * 24 * 30,
     async () => (await findBlockByTimestamp(targetMs)).toString(10)
-  );
+  ).catch(() => null);
+
+  const timeoutPromise = new Promise<string | null>((resolve) => {
+    setTimeout(() => resolve(null), SCAN_START_BLOCK_LOOKUP_TIMEOUT_MS);
+  });
+
+  const blockStr = await Promise.race([lookupPromise, timeoutPromise]);
+  if (!blockStr) return SCAN_START_BLOCK_FALLBACK_HEX;
+
   let block = BigInt(blockStr);
   if (block > SCAN_START_BLOCK_BUFFER) block -= SCAN_START_BLOCK_BUFFER;
   return toHex(block);
@@ -181,6 +316,14 @@ type TxReceipt = {
   transactionHash: Hex;
   blockNumber?: Hex;
   logs?: TxReceiptLog[];
+};
+
+type TxByHash = {
+  hash: Hex;
+  from: Hex;
+  to?: Hex;
+  input: Hex;
+  blockNumber?: Hex;
 };
 
 function parseBigIntish(value: unknown): bigint {
@@ -260,25 +403,290 @@ type TransfersPageResult = {
   nextPageKey?: string;
   pagesFetched: number;
   truncatedByBudget: boolean;
+  sync?: {
+    fromBlockRequested: string;
+    fromBlockFetched: string;
+    lastSyncedBlock?: string;
+    historyBackfilled: boolean;
+    usedIncremental: boolean;
+    lastQueryAt: string;
+  };
 };
 
-const TRANSFERS_CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 14; // 14 days
+const TRANSFERS_CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 14; // 14 days (stable historical pages)
+const TRANSFERS_CACHE_HEAD_TTL_MS = 1000 * 30; // 30s (head page changes as new blocks arrive)
+const TRANSFERS_HISTORY_SCHEMA_VERSION = 1;
 
 function sha1Hex(s: string): string {
   return crypto.createHash("sha1").update(s).digest("hex");
 }
 
+function addressTopic(address: string): Hex {
+  const hex = address.toLowerCase().replace(/^0x/, "");
+  return `0x${hex.padStart(64, "0")}` as Hex;
+}
+
+function contractRenewalLogsCachePath(params: { address: string; fromBlock: string }): string {
+  const addr = params.address.toLowerCase();
+  const fromBlock = normalizeBlockHex(params.fromBlock);
+  const key = sha1Hex(`${addr}:${fromBlock}`);
+  return path.join(process.cwd(), ".cache", "sportfun", "renewals", `${key}.json`);
+}
+
+function readContractRenewalLogsCache(pathname: string): ContractRenewalLogsCache | null {
+  try {
+    const txt = fs.readFileSync(pathname, "utf8");
+    const parsed = JSON.parse(txt) as ContractRenewalLogsCache;
+    if (!parsed || typeof parsed !== "object") return null;
+    if (!Array.isArray(parsed.renewals)) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writeContractRenewalLogsCache(pathname: string, payload: ContractRenewalLogsCache): void {
+  try {
+    fs.mkdirSync(path.dirname(pathname), { recursive: true });
+    fs.writeFileSync(pathname, JSON.stringify(payload), "utf8");
+  } catch {
+    // ignore
+  }
+}
+
+function decodeContractRenewalLog(params: {
+  log: TxReceiptLog;
+  walletLc: string;
+}): DecodedContractRenewalItem | null {
+  const topic0 = toLower(String(params.log.topics?.[0] ?? ""));
+  if (topic0 !== SPORTFUN_TOPICS.ContractRenewed) return null;
+
+  try {
+    const decoded = decodeEventLog({
+      abi: CONTRACT_RENEWAL_EVENTS_ABI,
+      data: params.log.data,
+      topics: params.log.topics as [Hex, ...Hex[]],
+    });
+
+    if (!decoded.args) return null;
+    if (decoded.eventName !== "ContractRenewed") return null;
+
+    const account = toLower(String(decoded.args.account));
+    if (account !== params.walletLc) return null;
+
+    return {
+      kind: "contract_renewal",
+      renewalContract: toLower(params.log.address),
+      account,
+      tokenIdDec: BigInt(decoded.args.tokenId as bigint).toString(10),
+      paymentToken: toLower(String(decoded.args.paymentToken)),
+      amountPaidRaw: BigInt(decoded.args.amountPaid as bigint).toString(10),
+      matchCountRaw: BigInt(decoded.args.matchCount as bigint).toString(10),
+      txHash: params.log.transactionHash ? toLower(String(params.log.transactionHash)) : undefined,
+      blockNumber: params.log.blockNumber ? normalizeBlockHex(String(params.log.blockNumber)) : undefined,
+    };
+  } catch {
+    // Some renewal contracts emit the same topic with a slightly different ABI shape.
+    // Fallback to manual decoding by raw topics/data:
+    // topic1=account, topic2=tokenId, topic3=paymentToken, data[0]=amountPaid, data[1]=matchCount.
+    try {
+      const topics = params.log.topics ?? [];
+      if (topics.length < 4) return null;
+
+      const account = topicToAddressLc(topics[1]);
+      if (account !== params.walletLc) return null;
+
+      const tokenIdDec = parseBigIntish(String(topics[2])).toString(10);
+      const paymentToken = topicToAddressLc(topics[3]);
+
+      const dataHex = String(params.log.data ?? "0x").replace(/^0x/, "");
+      if (dataHex.length < 128) return null;
+      const amountPaidRaw = parseBigIntish(`0x${dataHex.slice(0, 64)}`).toString(10);
+      const matchCountRaw = parseBigIntish(`0x${dataHex.slice(64, 128)}`).toString(10);
+
+      return {
+        kind: "contract_renewal",
+        renewalContract: toLower(params.log.address),
+        account,
+        tokenIdDec,
+        paymentToken,
+        amountPaidRaw,
+        matchCountRaw,
+        txHash: params.log.transactionHash ? toLower(String(params.log.transactionHash)) : undefined,
+        blockNumber: params.log.blockNumber ? normalizeBlockHex(String(params.log.blockNumber)) : undefined,
+      };
+    } catch {
+      return null;
+    }
+  }
+}
+
+function dedupeContractRenewals(items: DecodedContractRenewalItem[]): DecodedContractRenewalItem[] {
+  const byId = new Map<string, DecodedContractRenewalItem>();
+  for (const item of items) {
+    const id = [
+      item.txHash ?? "",
+      item.renewalContract,
+      item.account,
+      item.tokenIdDec,
+      item.paymentToken,
+      item.amountPaidRaw,
+      item.matchCountRaw,
+    ].join(":");
+    if (!byId.has(id)) byId.set(id, item);
+  }
+  return [...byId.values()];
+}
+
+async function fetchContractRenewalLogs(params: {
+  wallet: string;
+  fromBlock: string;
+  toBlock?: string;
+}): Promise<TxReceiptLog[]> {
+  const result = (await alchemyRpc("eth_getLogs", [
+    {
+      fromBlock: normalizeBlockHex(params.fromBlock),
+      toBlock: params.toBlock ?? "latest",
+      topics: [SPORTFUN_TOPICS.ContractRenewed, addressTopic(params.wallet)],
+    },
+  ])) as Array<{
+    address: string;
+    topics: string[];
+    data: string;
+    blockNumber?: string;
+    transactionHash?: string;
+    logIndex?: string;
+  }>;
+
+  return (result ?? []).map((log) => ({
+    address: log.address,
+    topics: (log.topics ?? []) as Hex[],
+    data: (log.data ?? "0x") as Hex,
+    blockNumber: log.blockNumber as Hex | undefined,
+    transactionHash: log.transactionHash as Hex | undefined,
+    logIndex: log.logIndex as Hex | undefined,
+  }));
+}
+
+async function fetchContractRenewalsForWallet(params: {
+  wallet: string;
+  walletLc: string;
+  fromBlock: string;
+  deadlineMs?: number;
+}): Promise<DecodedContractRenewalItem[]> {
+  const fromBlock = normalizeBlockHex(params.fromBlock);
+  const cachePath = contractRenewalLogsCachePath({ address: params.wallet, fromBlock });
+  const cached = readContractRenewalLogsCache(cachePath);
+  const now = Date.now();
+
+  if (
+    cached &&
+    cached.version === CONTRACT_RENEWAL_LOGS_CACHE_VERSION &&
+    cached.address.toLowerCase() === params.walletLc &&
+    normalizeBlockHex(cached.fromBlock) === fromBlock &&
+    now - cached.updatedAt < CONTRACT_RENEWAL_LOGS_CACHE_TTL_MS
+  ) {
+    return dedupeContractRenewals(cached.renewals ?? []);
+  }
+
+  let logs: TxReceiptLog[] = [];
+  try {
+    logs = await withRetry(
+      () => fetchContractRenewalLogs({ wallet: params.wallet, fromBlock }),
+      { retries: 2, baseDelayMs: 200 }
+    );
+  } catch {
+    // Fallback for providers that reject wide `eth_getLogs` ranges.
+    try {
+      const latestBlock = BigInt(await alchemyRpc("eth_blockNumber", []));
+      const startBlock = BigInt(fromBlock);
+      const step = 500_000n;
+      const out: TxReceiptLog[] = [];
+      for (let from = startBlock; from <= latestBlock; from += step + 1n) {
+        if (params.deadlineMs !== undefined && Date.now() > params.deadlineMs - 500) break;
+        const to = from + step > latestBlock ? latestBlock : from + step;
+        const chunkLogs = await fetchContractRenewalLogs({
+          wallet: params.wallet,
+          fromBlock: toHex(from),
+          toBlock: toHex(to),
+        });
+        out.push(...chunkLogs);
+      }
+      logs = out;
+    } catch {
+      logs = [];
+    }
+  }
+
+  const renewals = dedupeContractRenewals(
+    logs
+      .map((log) => decodeContractRenewalLog({ log, walletLc: params.walletLc }))
+      .filter((item): item is DecodedContractRenewalItem => Boolean(item))
+  );
+
+  writeContractRenewalLogsCache(cachePath, {
+    version: CONTRACT_RENEWAL_LOGS_CACHE_VERSION,
+    address: params.walletLc,
+    fromBlock,
+    updatedAt: now,
+    renewals,
+  });
+
+  return renewals;
+}
+
+function contractAddressesCacheKey(contractAddresses?: string[]): string {
+  if (!contractAddresses?.length) return "all";
+  return sha1Hex([...contractAddresses].map((x) => x.toLowerCase()).sort().join(","));
+}
+
+function normalizeBlockHex(block: string | undefined): string {
+  if (!block) return "0x0";
+  try {
+    return toHex(parseBigIntish(block));
+  } catch {
+    return "0x0";
+  }
+}
+
+function getTransferBlockNum(transfer: AlchemyTransfer): bigint | null {
+  const blockNum = transfer.blockNum;
+  if (!blockNum) return null;
+  try {
+    return parseBigIntish(blockNum);
+  } catch {
+    return null;
+  }
+}
+
+function getMaxTransferBlockNum(transfers: AlchemyTransfer[]): bigint | null {
+  let max: bigint | null = null;
+  for (const transfer of transfers) {
+    const blockNum = getTransferBlockNum(transfer);
+    if (blockNum === null) continue;
+    if (max === null || blockNum > max) max = blockNum;
+  }
+  return max;
+}
+
 function transfersCachePath(params: {
   address: string;
   direction: "incoming" | "outgoing";
-  category: "erc1155" | "erc20";
+  category: "erc1155" | "erc20" | "erc721";
   contractAddresses?: string[];
+  counterpartyAddress?: string;
+  fromBlock: string;
+  order: "asc" | "desc";
+  maxCount: string;
   pageKey?: string;
 }): string {
   const addr = params.address.toLowerCase();
-  const contractKey = params.contractAddresses?.length
-    ? sha1Hex([...params.contractAddresses].map((x) => x.toLowerCase()).sort().join(","))
-    : "all";
+  const contractKey = contractAddressesCacheKey(params.contractAddresses);
+  const counterpartyKey = params.counterpartyAddress
+    ? params.counterpartyAddress.toLowerCase()
+    : "any-counterparty";
+  const fromBlockKey = normalizeBlockHex(params.fromBlock);
+  const requestShapeKey = sha1Hex(`${fromBlockKey}:${params.order}:${params.maxCount}`);
   const pageKeyHash = sha1Hex(params.pageKey ?? "first");
 
   return path.join(
@@ -289,28 +697,93 @@ function transfersCachePath(params: {
     addr,
     params.category,
     params.direction,
+    counterpartyKey,
     contractKey,
+    requestShapeKey,
     `${pageKeyHash}.json`
   );
 }
 
-async function fetchTransfersForWallet(params: {
+type TransfersHistoryCache = {
+  version: number;
   address: string;
   direction: "incoming" | "outgoing";
-  category: "erc1155" | "erc20";
+  category: "erc1155" | "erc20" | "erc721";
+  contractKey: string;
+  counterpartyKey: string;
+  fromBlock: string;
+  updatedAt: number;
+  lastQueryAt: string;
+  isFullyBackfilled: boolean;
+  lastSyncedBlock?: string;
+  transfers: AlchemyTransfer[];
+};
+
+function transfersHistoryPath(params: {
+  address: string;
+  direction: "incoming" | "outgoing";
+  category: "erc1155" | "erc20" | "erc721";
   contractAddresses?: string[];
+  counterpartyAddress?: string;
+}): string {
+  const addr = params.address.toLowerCase();
+  const contractKey = contractAddressesCacheKey(params.contractAddresses);
+  const counterpartyKey = params.counterpartyAddress
+    ? params.counterpartyAddress.toLowerCase()
+    : "any-counterparty";
+  return path.join(
+    process.cwd(),
+    ".cache",
+    "sportfun",
+    "history",
+    addr,
+    params.category,
+    params.direction,
+    counterpartyKey,
+    `${contractKey}.json`
+  );
+}
+
+function readTransfersHistory(pathname: string): TransfersHistoryCache | null {
+  try {
+    const txt = fs.readFileSync(pathname, "utf8");
+    const parsed = JSON.parse(txt) as TransfersHistoryCache;
+    if (!parsed || typeof parsed !== "object") return null;
+    if (!Array.isArray(parsed.transfers)) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writeTransfersHistory(pathname: string, cache: TransfersHistoryCache): void {
+  try {
+    fs.mkdirSync(path.dirname(pathname), { recursive: true });
+    fs.writeFileSync(pathname, JSON.stringify(cache), "utf8");
+  } catch {
+    // ignore
+  }
+}
+
+async function fetchTransfersPagesFromAlchemy(params: {
+  address: string;
+  direction: "incoming" | "outgoing";
+  category: "erc1155" | "erc20" | "erc721";
+  contractAddresses?: string[];
+  counterpartyAddress?: string;
   maxCount: string;
   maxPages: number;
   deadlineMs?: number;
   fromBlock?: string;
+  order?: "asc" | "desc";
 }): Promise<TransfersPageResult> {
   const baseParams: {
     fromBlock: string;
     toBlock: "latest";
-    category: ["erc1155"] | ["erc20"];
+    category: ["erc1155"] | ["erc20"] | ["erc721"];
     withMetadata: true;
     maxCount: string;
-    order: "desc";
+    order: "asc" | "desc";
     contractAddresses?: string[];
   } = {
     fromBlock: params.fromBlock ?? "0x0",
@@ -318,7 +791,7 @@ async function fetchTransfersForWallet(params: {
     category: [params.category],
     withMetadata: true,
     maxCount: params.maxCount,
-    order: "desc",
+    order: params.order ?? "desc",
     ...(params.contractAddresses ? { contractAddresses: params.contractAddresses } : {}),
   };
 
@@ -339,6 +812,10 @@ async function fetchTransfersForWallet(params: {
       direction: params.direction,
       category: params.category,
       contractAddresses: params.contractAddresses,
+      counterpartyAddress: params.counterpartyAddress,
+      fromBlock: baseParams.fromBlock,
+      order: baseParams.order,
+      maxCount: baseParams.maxCount,
       pageKey,
     });
 
@@ -347,7 +824,8 @@ async function fetchTransfersForWallet(params: {
     try {
       const st = fs.statSync(cacheP);
       const ageMs = Date.now() - st.mtimeMs;
-      if (ageMs < TRANSFERS_CACHE_TTL_MS) {
+      const cacheTtlMs = pageKey ? TRANSFERS_CACHE_TTL_MS : TRANSFERS_CACHE_HEAD_TTL_MS;
+      if (ageMs < cacheTtlMs) {
         const txt = fs.readFileSync(cacheP, "utf8");
         result = JSON.parse(txt) as { transfers?: AlchemyTransfer[]; pageKey?: string };
       }
@@ -362,8 +840,16 @@ async function fetchTransfersForWallet(params: {
             {
               ...baseParams,
               ...(params.direction === "incoming"
-                ? { toAddress: params.address }
-                : { fromAddress: params.address }),
+                ? {
+                    toAddress: params.address,
+                    ...(params.counterpartyAddress
+                      ? { fromAddress: params.counterpartyAddress }
+                      : {}),
+                  }
+                : {
+                    fromAddress: params.address,
+                    ...(params.counterpartyAddress ? { toAddress: params.counterpartyAddress } : {}),
+                  }),
               ...(pageKey ? { pageKey } : {}),
             },
           ]),
@@ -394,10 +880,119 @@ async function fetchTransfersForWallet(params: {
   };
 }
 
+async function fetchTransfersForWallet(params: {
+  address: string;
+  direction: "incoming" | "outgoing";
+  category: "erc1155" | "erc20" | "erc721";
+  contractAddresses?: string[];
+  counterpartyAddress?: string;
+  maxCount: string;
+  maxPages: number;
+  deadlineMs?: number;
+  fromBlock?: string;
+}): Promise<TransfersPageResult> {
+  const requestedFromBlock = normalizeBlockHex(params.fromBlock ?? "0x0");
+  const historyPath = transfersHistoryPath({
+    address: params.address,
+    direction: params.direction,
+    category: params.category,
+    contractAddresses: params.contractAddresses,
+    counterpartyAddress: params.counterpartyAddress,
+  });
+  const contractKey = contractAddressesCacheKey(params.contractAddresses);
+  const counterpartyKey = params.counterpartyAddress
+    ? params.counterpartyAddress.toLowerCase()
+    : "any-counterparty";
+  const nowIso = new Date().toISOString();
+
+  const history = readTransfersHistory(historyPath);
+  const historyMatchesRequest =
+    history?.version === TRANSFERS_HISTORY_SCHEMA_VERSION &&
+    history?.address?.toLowerCase() === params.address.toLowerCase() &&
+    history?.direction === params.direction &&
+    history?.category === params.category &&
+    history?.contractKey === contractKey &&
+    history?.counterpartyKey === counterpartyKey &&
+    normalizeBlockHex(history?.fromBlock) === requestedFromBlock;
+
+  const seededTransfers = historyMatchesRequest ? history?.transfers ?? [] : [];
+  const historyBackfilled = Boolean(historyMatchesRequest && history?.isFullyBackfilled);
+
+  let usedIncremental = false;
+  let fromBlockFetched = requestedFromBlock;
+  if (historyBackfilled && history?.lastSyncedBlock) {
+    try {
+      fromBlockFetched = toHex(BigInt(history.lastSyncedBlock) + 1n);
+      usedIncremental = true;
+    } catch {
+      fromBlockFetched = requestedFromBlock;
+      usedIncremental = false;
+    }
+  }
+
+  const fetched = await fetchTransfersPagesFromAlchemy({
+    ...params,
+    fromBlock: fromBlockFetched,
+    // Incremental mode must be ascending so we can safely advance the watermark
+    // even when the query is paginated or time-bounded.
+    order: usedIncremental ? "asc" : "desc",
+  });
+
+  const transfers = dedupeTransfers([...seededTransfers, ...fetched.transfers]);
+
+  let nextHistoryBackfilled = historyBackfilled;
+  if (!historyBackfilled && !fetched.nextPageKey && !fetched.truncatedByBudget) {
+    nextHistoryBackfilled = true;
+  }
+
+  const fetchedMaxBlock = getMaxTransferBlockNum(fetched.transfers);
+  const mergedMaxBlock = getMaxTransferBlockNum(transfers);
+  let lastSyncedBlock = historyMatchesRequest ? history?.lastSyncedBlock : undefined;
+
+  if (nextHistoryBackfilled) {
+    if (usedIncremental) {
+      if (fetchedMaxBlock !== null) lastSyncedBlock = toHex(fetchedMaxBlock);
+    } else if (mergedMaxBlock !== null) {
+      lastSyncedBlock = toHex(mergedMaxBlock);
+    }
+  }
+
+  const historyPayload: TransfersHistoryCache = {
+    version: TRANSFERS_HISTORY_SCHEMA_VERSION,
+    address: params.address.toLowerCase(),
+    direction: params.direction,
+    category: params.category,
+    contractKey,
+    counterpartyKey,
+    fromBlock: requestedFromBlock,
+    updatedAt: Date.now(),
+    lastQueryAt: nowIso,
+    isFullyBackfilled: nextHistoryBackfilled,
+    lastSyncedBlock,
+    transfers,
+  };
+  writeTransfersHistory(historyPath, historyPayload);
+
+  return {
+    ...fetched,
+    transfers,
+    sync: {
+      fromBlockRequested: requestedFromBlock,
+      fromBlockFetched,
+      lastSyncedBlock,
+      historyBackfilled: nextHistoryBackfilled,
+      usedIncremental,
+      lastQueryAt: nowIso,
+    },
+  };
+}
+
 function dedupeTransfers(transfers: AlchemyTransfer[]): AlchemyTransfer[] {
   const byId = new Map<string, AlchemyTransfer>();
   for (const t of transfers) {
-    const id = t.uniqueId ?? `${t.hash ?? ""}:${t.from ?? ""}:${t.to ?? ""}:${t.category ?? ""}`;
+    const id =
+      t.uniqueId ??
+      `${t.hash ?? ""}:${t.blockNum ?? ""}:${t.from ?? ""}:${t.to ?? ""}:${t.category ?? ""}:${t.rawContract?.address ?? ""}:${t.rawContract?.value ?? ""}`;
     if (!byId.has(id)) byId.set(id, t);
   }
   return [...byId.values()];
@@ -432,6 +1027,7 @@ type MetadataCacheValue = {
 };
 
 const METADATA_CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 14; // 14 days
+const DECODED_CACHE_SCHEMA_VERSION = 3;
 
 function getMetadataCacheMap(): Map<string, { value: MetadataCacheValue; expiresAt: number }> {
   const g = globalThis as unknown as {
@@ -517,9 +1113,14 @@ function receiptCachePath(txHash: string): string {
 }
 
 type ReceiptDecodedCache = {
+  version: number;
   decoded: {
     trades: DecodedTradeItem[];
     promotions: DecodedPromotionItem[];
+    contractRenewals: DecodedContractRenewalItem[];
+    packOpens: DecodedPackOpenItem[];
+    deposits: DecodedDepositItem[];
+    scams: DecodedScamItem[];
     unknownSportfunTopics: Array<{ address: string; topic0: string }>;
   };
   usdcDeltaReceipt: string | null;
@@ -538,13 +1139,34 @@ function decodedCachePath(txHash: string): string {
   return path.join(process.cwd(), ".cache", "sportfun", "decoded", `${safe}.json`);
 }
 
+function normalizeDecodedCacheValue(value: ReceiptDecodedCache | null): ReceiptDecodedCache | null {
+  if (!value || typeof value !== "object") return null;
+  if (value.version !== DECODED_CACHE_SCHEMA_VERSION) return null;
+  if (!value?.decoded || typeof value.decoded !== "object") return null;
+  if (!Array.isArray(value.decoded.trades)) value.decoded.trades = [];
+  if (!Array.isArray(value.decoded.promotions)) value.decoded.promotions = [];
+  if (!Array.isArray(value.decoded.contractRenewals)) value.decoded.contractRenewals = [];
+  if (!Array.isArray(value.decoded.packOpens)) value.decoded.packOpens = [];
+  if (!Array.isArray(value.decoded.deposits)) value.decoded.deposits = [];
+  if (!Array.isArray(value.decoded.scams)) value.decoded.scams = [];
+  if (!Array.isArray(value.decoded.unknownSportfunTopics)) value.decoded.unknownSportfunTopics = [];
+  if (value.usdcDeltaReceipt !== null && typeof value.usdcDeltaReceipt !== "string") {
+    value.usdcDeltaReceipt = null;
+  }
+  return value;
+}
+
 function readDecodedCache(txHash: string): ReceiptDecodedCache | null {
   const key = txHash.toLowerCase();
   const mem = getDecodedCacheMap();
   const now = Date.now();
 
   const cached = mem.get(key);
-  if (cached && cached.expiresAt > now) return cached.value;
+  if (cached && cached.expiresAt > now) {
+    const normalized = normalizeDecodedCacheValue(cached.value);
+    if (normalized) return normalized;
+    mem.delete(key);
+  }
 
   try {
     const p = decodedCachePath(key);
@@ -553,8 +1175,10 @@ function readDecodedCache(txHash: string): ReceiptDecodedCache | null {
     if (ageMs < RECEIPT_CACHE_TTL_MS) {
       const txt = fs.readFileSync(p, "utf8");
       const parsed = JSON.parse(txt) as ReceiptDecodedCache;
-      mem.set(key, { value: parsed, expiresAt: now + RECEIPT_CACHE_TTL_MS });
-      return parsed;
+      const normalized = normalizeDecodedCacheValue(parsed);
+      if (!normalized) return null;
+      mem.set(key, { value: normalized, expiresAt: now + RECEIPT_CACHE_TTL_MS });
+      return normalized;
     }
   } catch {
     // ignore
@@ -565,14 +1189,16 @@ function readDecodedCache(txHash: string): ReceiptDecodedCache | null {
 
 function writeDecodedCache(txHash: string, value: ReceiptDecodedCache): void {
   const key = txHash.toLowerCase();
+  const normalized = normalizeDecodedCacheValue(value);
+  if (!normalized) return;
   const mem = getDecodedCacheMap();
   const now = Date.now();
-  mem.set(key, { value, expiresAt: now + RECEIPT_CACHE_TTL_MS });
+  mem.set(key, { value: normalized, expiresAt: now + RECEIPT_CACHE_TTL_MS });
 
   try {
     const p = decodedCachePath(key);
     fs.mkdirSync(path.dirname(p), { recursive: true });
-    fs.writeFileSync(p, JSON.stringify(value), "utf8");
+    fs.writeFileSync(p, JSON.stringify(normalized), "utf8");
   } catch {
     // ignore
   }
@@ -624,6 +1250,70 @@ async function fetchReceipt(txHash: string): Promise<TxReceipt | null> {
   }
 }
 
+function getTxCacheMap(): Map<string, { value: TxByHash | null; expiresAt: number }> {
+  const g = globalThis as unknown as {
+    __pff_sportfun_txCache?: Map<string, { value: TxByHash | null; expiresAt: number }>;
+  };
+  if (!g.__pff_sportfun_txCache) g.__pff_sportfun_txCache = new Map();
+  return g.__pff_sportfun_txCache;
+}
+
+function txCachePath(txHash: string): string {
+  const safe = txHash.toLowerCase().replace(/^0x/, "");
+  return path.join(process.cwd(), ".cache", "sportfun", "tx", `${safe}.json`);
+}
+
+function normalizeTxByHash(tx: TxByHash | null): TxByHash | null {
+  if (!tx) return null;
+  if (typeof tx.input !== "string" || !tx.input.startsWith("0x")) return null;
+  return tx;
+}
+
+async function fetchTransaction(txHash: string): Promise<TxByHash | null> {
+  const key = txHash.toLowerCase();
+  const mem = getTxCacheMap();
+  const now = Date.now();
+
+  const cached = mem.get(key);
+  if (cached && cached.expiresAt > now) return normalizeTxByHash(cached.value);
+
+  try {
+    const p = txCachePath(key);
+    const st = fs.statSync(p);
+    const ageMs = now - st.mtimeMs;
+    if (ageMs < TX_CACHE_TTL_MS) {
+      const txt = fs.readFileSync(p, "utf8");
+      const parsed = normalizeTxByHash(JSON.parse(txt) as TxByHash | null);
+      mem.set(key, { value: parsed, expiresAt: now + TX_CACHE_TTL_MS });
+      return parsed;
+    }
+  } catch {
+    // ignore
+  }
+
+  try {
+    const tx = normalizeTxByHash(
+      (await withRetry(() => alchemyRpc("eth_getTransactionByHash", [txHash]), {
+        retries: 2,
+        baseDelayMs: 200,
+      })) as TxByHash | null
+    );
+
+    mem.set(key, { value: tx, expiresAt: now + TX_CACHE_TTL_MS });
+    try {
+      const p = txCachePath(key);
+      fs.mkdirSync(path.dirname(p), { recursive: true });
+      fs.writeFileSync(p, JSON.stringify(tx), "utf8");
+    } catch {
+      // ignore
+    }
+    return tx;
+  } catch {
+    mem.set(key, { value: null, expiresAt: now + 1000 * 60 * 10 });
+    return null;
+  }
+}
+
 type DecodedTradeItem = {
   kind: "buy" | "sell";
   fdfPair: string;
@@ -647,6 +1337,9 @@ type DecodedTradeItem = {
   // Per-wallet flow (for cost basis / PnL).
   walletShareDeltaRaw: string;
   walletCurrencyDeltaRaw: string;
+  // Optional reconciliation metadata when tx-level receipt deltas are used.
+  walletCurrencyDeltaEventRaw?: string;
+  walletCurrencyDeltaSource?: "event" | "receipt_reconciled";
 };
 
 type DecodedPromotionItem = {
@@ -687,15 +1380,20 @@ type ActivityItem = {
   hash: string;
   timestamp?: string;
   usdcDeltaRaw: string;
+  funDeltaRaw: string;
   erc1155Changes: Erc1155Change[];
   inferred?: InferredTrade;
 };
 
 type ActivityEnrichedItem = ActivityItem & {
-  kind: "buy" | "sell" | "unknown";
+  kind: "buy" | "sell" | "scam" | "unknown";
   decoded?: {
     trades: DecodedTradeItem[];
     promotions: DecodedPromotionItem[];
+    contractRenewals: DecodedContractRenewalItem[];
+    packOpens: DecodedPackOpenItem[];
+    deposits: DecodedDepositItem[];
+    scams: DecodedScamItem[];
     unknownSportfunTopics: Array<{ address: string; topic0: string }>;
   };
   // If decoded trades/promotions don't fully explain the ERC-1155 delta for the wallet,
@@ -709,16 +1407,254 @@ function safeDiv(a: bigint, b: bigint): bigint | undefined {
   return a / b;
 }
 
+function proportionalRemoval(bucket: bigint, total: bigint, remove: bigint): bigint {
+  if (bucket <= 0n || total <= 0n || remove <= 0n) return 0n;
+  const raw = (bucket * remove + total / 2n) / total;
+  if (raw <= 0n) return 0n;
+  return raw > bucket ? bucket : raw;
+}
+
+function getDepositUsdcDeltaRaw(item: DecodedDepositItem): bigint {
+  // "from_game_wallet" means wallet -> counterparty in our transfer classifier.
+  // "to_game_wallet" means counterparty -> wallet.
+  return item.direction === "to_game_wallet" ? BigInt(item.amountRaw) : -BigInt(item.amountRaw);
+}
+
+function sumRenewalUsdcDeltaRaw(renewals: DecodedContractRenewalItem[]): bigint {
+  let delta = 0n;
+  for (const renewal of renewals ?? []) {
+    if (renewal.paymentToken.toLowerCase() !== BASE_USDC) continue;
+    try {
+      delta -= BigInt(renewal.amountPaidRaw);
+    } catch {
+      // ignore malformed rows
+    }
+  }
+  return delta;
+}
+
+function sumDepositUsdcDeltaRaw(deposits: DecodedDepositItem[]): bigint {
+  let delta = 0n;
+  for (const deposit of deposits ?? []) {
+    if (deposit.paymentToken.toLowerCase() !== BASE_USDC) continue;
+    try {
+      delta += getDepositUsdcDeltaRaw(deposit);
+    } catch {
+      // ignore malformed rows
+    }
+  }
+  return delta;
+}
+
+function sumTradeUsdcDeltaRaw(trades: DecodedTradeItem[]): bigint {
+  let delta = 0n;
+  for (const trade of trades ?? []) {
+    try {
+      delta += BigInt(trade.walletCurrencyDeltaRaw);
+    } catch {
+      // ignore malformed rows
+    }
+  }
+  return delta;
+}
+
+function reconcileTradeUsdcWithReceipt(params: {
+  trades: DecodedTradeItem[];
+  renewals: DecodedContractRenewalItem[];
+  deposits: DecodedDepositItem[];
+  effectiveUsdcDelta: bigint;
+}): DecodedTradeItem[] {
+  const trades = params.trades ?? [];
+  if (!trades.length) return trades;
+
+  const nonTradeUsdcDeltaRaw =
+    sumRenewalUsdcDeltaRaw(params.renewals ?? []) +
+    sumDepositUsdcDeltaRaw(params.deposits ?? []);
+
+  const targetTradeUsdcDeltaRaw = params.effectiveUsdcDelta - nonTradeUsdcDeltaRaw;
+
+  const eventDeltas: bigint[] = [];
+  for (const trade of trades) {
+    try {
+      eventDeltas.push(BigInt(trade.walletCurrencyDeltaRaw));
+    } catch {
+      // If any delta is malformed, keep event values as-is.
+      return trades;
+    }
+  }
+  const eventTradeUsdcDeltaRaw = eventDeltas.reduce((sum, value) => sum + value, 0n);
+  if (eventTradeUsdcDeltaRaw === targetTradeUsdcDeltaRaw) {
+    return trades.map((trade) => ({ ...trade, walletCurrencyDeltaSource: "event" }));
+  }
+
+  const hasSingleTrade = trades.length === 1;
+  if (eventTradeUsdcDeltaRaw === 0n && !hasSingleTrade) {
+    // Can't proportionally reconcile multiple rows when the event sum is zero.
+    return trades.map((trade) => ({ ...trade, walletCurrencyDeltaSource: "event" }));
+  }
+
+  const adjusted: DecodedTradeItem[] = [];
+  let assigned = 0n;
+
+  for (let i = 0; i < trades.length; i += 1) {
+    const trade = trades[i];
+    const eventDelta = eventDeltas[i];
+    const isLast = i === trades.length - 1;
+    const nextDelta = hasSingleTrade
+      ? targetTradeUsdcDeltaRaw
+      : isLast
+        ? targetTradeUsdcDeltaRaw - assigned
+        : (targetTradeUsdcDeltaRaw * eventDelta) / eventTradeUsdcDeltaRaw;
+
+    if (!hasSingleTrade && !isLast) assigned += nextDelta;
+
+    adjusted.push({
+      ...trade,
+      walletCurrencyDeltaRaw: nextDelta.toString(10),
+      walletCurrencyDeltaEventRaw: eventDelta.toString(10),
+      walletCurrencyDeltaSource: nextDelta === eventDelta ? "event" : "receipt_reconciled",
+    });
+  }
+
+  return adjusted;
+}
+
+function reconcilePackOpenUsdcWithReceipt(params: {
+  packOpens: DecodedPackOpenItem[];
+  trades: DecodedTradeItem[];
+  renewals: DecodedContractRenewalItem[];
+  deposits: DecodedDepositItem[];
+  effectiveUsdcDelta: bigint;
+}): DecodedPackOpenItem[] {
+  const packOpens = params.packOpens ?? [];
+  if (!packOpens.length) return packOpens;
+
+  const knownUsdcDeltaRaw =
+    sumTradeUsdcDeltaRaw(params.trades ?? []) +
+    sumRenewalUsdcDeltaRaw(params.renewals ?? []) +
+    sumDepositUsdcDeltaRaw(params.deposits ?? []);
+  const targetPackUsdcDeltaRaw = params.effectiveUsdcDelta - knownUsdcDeltaRaw;
+
+  const withDefaults = packOpens.map((item) => ({
+    ...item,
+    walletCurrencyDeltaRaw: item.walletCurrencyDeltaRaw ?? "0",
+  }));
+  if (targetPackUsdcDeltaRaw === 0n) return withDefaults;
+  if (withDefaults.length === 1) {
+    return [
+      {
+        ...withDefaults[0],
+        walletCurrencyDeltaRaw: targetPackUsdcDeltaRaw.toString(10),
+        walletCurrencyDeltaSource: "receipt_reconciled",
+      },
+    ];
+  }
+
+  const weights = withDefaults.map((item) => {
+    try {
+      const share = BigInt(item.shareAmountRaw);
+      return share < 0n ? -share : share;
+    } catch {
+      return 0n;
+    }
+  });
+  const weightSum = weights.reduce((sum, value) => sum + value, 0n);
+  if (weightSum === 0n) {
+    const divisor = BigInt(withDefaults.length);
+    const perItem = targetPackUsdcDeltaRaw / divisor;
+    let distributed = 0n;
+    return withDefaults.map((item, idx) => {
+      const isLast = idx === withDefaults.length - 1;
+      if (!isLast) {
+        distributed += perItem;
+        return {
+          ...item,
+          walletCurrencyDeltaRaw: perItem.toString(10),
+          walletCurrencyDeltaSource: "receipt_reconciled",
+        };
+      }
+      return {
+        ...item,
+        walletCurrencyDeltaRaw: (targetPackUsdcDeltaRaw - distributed).toString(10),
+        walletCurrencyDeltaSource: "receipt_reconciled",
+      };
+    });
+  }
+
+  const adjusted: DecodedPackOpenItem[] = [];
+  let assigned = 0n;
+  for (let i = 0; i < withDefaults.length; i += 1) {
+    const item = withDefaults[i];
+    const isLast = i === withDefaults.length - 1;
+    const nextDelta = isLast
+      ? targetPackUsdcDeltaRaw - assigned
+      : (targetPackUsdcDeltaRaw * weights[i]) / weightSum;
+    if (!isLast) assigned += nextDelta;
+    adjusted.push({
+      ...item,
+      walletCurrencyDeltaRaw: nextDelta.toString(10),
+      walletCurrencyDeltaSource: "receipt_reconciled",
+    });
+  }
+  return adjusted;
+}
+
+function dedupeDeposits(items: DecodedDepositItem[]): DecodedDepositItem[] {
+  const byKey = new Map<string, bigint>();
+  for (const item of items) {
+    const amount = BigInt(item.amountRaw);
+    if (amount <= 0n) continue;
+    const key = `${item.direction}:${item.counterparty}:${item.paymentToken}`;
+    byKey.set(key, (byKey.get(key) ?? 0n) + amount);
+  }
+  return [...byKey.entries()].map(([key, amount]) => {
+    const [direction, counterparty, paymentToken] = key.split(":");
+    return {
+      kind: "deposit",
+      direction: direction as DecodedDepositItem["direction"],
+      counterparty,
+      amountRaw: amount.toString(10),
+      paymentToken,
+    };
+  });
+}
+
+function dedupeScamItems(items: DecodedScamItem[]): DecodedScamItem[] {
+  const byKey = new Map<string, DecodedScamItem>();
+  for (const item of items) {
+    const key = [
+      item.category,
+      item.counterparty,
+      item.contractAddress ?? "",
+      item.tokenIdDec ?? "",
+      item.tokenIdHex ?? "",
+      item.amountRaw ?? "",
+      item.reason,
+    ].join(":");
+    if (!byKey.has(key)) byKey.set(key, item);
+  }
+  return [...byKey.values()];
+}
+
 function decodeReceiptForSportfun(params: {
   receipt: TxReceipt;
   walletLc: string;
+  depositCounterparties: Set<string>;
 }): {
   trades: DecodedTradeItem[];
   promotions: DecodedPromotionItem[];
+  contractRenewals: DecodedContractRenewalItem[];
+  packOpens: DecodedPackOpenItem[];
+  deposits: DecodedDepositItem[];
+  scams: DecodedScamItem[];
   unknownSportfunTopics: Array<{ address: string; topic0: string }>;
 } {
   const trades: DecodedTradeItem[] = [];
   const promotions: DecodedPromotionItem[] = [];
+  const contractRenewals: DecodedContractRenewalItem[] = [];
+  const packOpens: DecodedPackOpenItem[] = [];
+  const deposits: DecodedDepositItem[] = [];
+  const scams: DecodedScamItem[] = [];
   const unknownSportfunTopics: Array<{ address: string; topic0: string }> = [];
 
   const logs = params.receipt.logs ?? [];
@@ -876,23 +1812,61 @@ function decodeReceiptForSportfun(params: {
 
       continue;
     }
+
+    // Athlete contract renewals (USDC expense, no share transfer).
+    if (topic0 === SPORTFUN_TOPICS.ContractRenewed) {
+      const renewal = decodeContractRenewalLog({ log, walletLc: params.walletLc });
+      if (renewal) contractRenewals.push(renewal);
+      continue;
+    }
+
+    // Wallet <-> game-wallet USDC movements (deposit / withdrawal).
+    if (addrLc === BASE_USDC && topic0 === ERC20_TRANSFER_TOPIC0 && (log.topics?.length ?? 0) >= 3) {
+      const fromLc = topicToAddressLc(log.topics[1]);
+      const toLc = topicToAddressLc(log.topics[2]);
+      const amount = parseBigIntish(log.data);
+      if (amount > 0n) {
+        if (fromLc === params.walletLc && params.depositCounterparties.has(toLc)) {
+          deposits.push({
+            kind: "deposit",
+            direction: "from_game_wallet",
+            counterparty: toLc,
+            amountRaw: amount.toString(10),
+            paymentToken: BASE_USDC,
+          });
+        }
+        if (toLc === params.walletLc && params.depositCounterparties.has(fromLc)) {
+          deposits.push({
+            kind: "deposit",
+            direction: "to_game_wallet",
+            counterparty: fromLc,
+            amountRaw: amount.toString(10),
+            paymentToken: BASE_USDC,
+          });
+        }
+      }
+      continue;
+    }
   }
 
-  return { trades, promotions, unknownSportfunTopics };
+  return {
+    trades,
+    promotions,
+    contractRenewals,
+    packOpens,
+    deposits: dedupeDeposits(deposits),
+    scams: dedupeScamItems(scams),
+    unknownSportfunTopics,
+  };
 }
 
 function tokenKey(playerToken: string, tokenIdDec: string): string {
   return `${playerToken.toLowerCase()}:${tokenIdDec}`;
 }
 
-function chunk<T>(arr: T[], size: number): T[][] {
-  const out: T[][] = [];
-  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
-  return out;
-}
-
 export async function GET(request: Request, context: { params: Promise<{ address: string }> }) {
   const { address } = paramsSchema.parse(await context.params);
+  if (!isAddress(address)) return invalidAddressResponse(address);
   const url = new URL(request.url);
   const q = querySchema.parse(Object.fromEntries(url.searchParams.entries()));
 
@@ -902,14 +1876,15 @@ export async function GET(request: Request, context: { params: Promise<{ address
   const scanMode = q.scanMode ?? "default";
   const scanStartBlock = await getScanStartBlockHex();
   const isVercel = Boolean(process.env.VERCEL);
+  // Keep the request budget for the expensive transfer/receipt work, not for initial setup.
   const deadlineMs = scanMode === "full" ? undefined : Date.now() + (isVercel ? 7_000 : 10_000);
   const hasTime = (minMs: number) => (deadlineMs ? Date.now() < deadlineMs - minMs : true);
 
   const includeTrades = parseBool(q.includeTrades, true);
   const includePrices = parseBool(q.includePrices, true);
   const includeReceipts = parseBool(q.includeReceipts, false);
-  const includeMetadata = parseBool(q.includeMetadata, false);
-  const includeUri = parseBool(q.includeUri, false) || includeMetadata;
+  const includeMetadata = parseBool(q.includeMetadata, true);
+  const includeUri = parseBool(q.includeUri, includeMetadata) || includeMetadata;
   const metadataLimit = q.metadataLimit;
 
   const maxCount = q.maxCount ?? "0x3e8"; // 1000 per page
@@ -924,6 +1899,7 @@ export async function GET(request: Request, context: { params: Promise<{ address
 
   const cacheKeyRaw = [
     "sportfun:portfolio",
+    `v${PORTFOLIO_CACHE_SCHEMA_VERSION}`,
     walletLc,
     scanMode,
     maxPages,
@@ -940,6 +1916,7 @@ export async function GET(request: Request, context: { params: Promise<{ address
   const cacheTtl = scanMode === "full" ? 900 : 300;
 
   async function buildPayload() {
+  const depositCounterparties = getSportfunDepositCounterparties();
   const [erc1155IncomingRes, erc1155OutgoingRes] = await Promise.all([
     fetchTransfersForWallet({
       address: wallet,
@@ -1039,8 +2016,8 @@ export async function GET(request: Request, context: { params: Promise<{ address
       return bb > ab ? 1 : -1;
     });
 
-  // Fetch USDC transfers and compute per-tx delta by hash.
-  const [usdcIncomingRes, usdcOutgoingRes] = await Promise.all([
+  // Fetch USDC/FUN transfers and compute per-tx deltas by hash.
+  const [usdcIncomingRes, usdcOutgoingRes, funIncomingRes, funOutgoingRes] = await Promise.all([
     fetchTransfersForWallet({
       address: wallet,
       direction: "incoming",
@@ -1061,9 +2038,65 @@ export async function GET(request: Request, context: { params: Promise<{ address
       deadlineMs,
       fromBlock: scanStartBlock,
     }),
+    fetchTransfersForWallet({
+      address: wallet,
+      direction: "incoming",
+      category: "erc20",
+      contractAddresses: [SPORTFUN_FUN_TOKEN_ADDRESS],
+      maxCount,
+      maxPages,
+      deadlineMs,
+      fromBlock: scanStartBlock,
+    }),
+    fetchTransfersForWallet({
+      address: wallet,
+      direction: "outgoing",
+      category: "erc20",
+      contractAddresses: [SPORTFUN_FUN_TOKEN_ADDRESS],
+      maxCount,
+      maxPages,
+      deadlineMs,
+      fromBlock: scanStartBlock,
+    }),
   ]);
 
   const usdcTransfers = dedupeTransfers([...usdcIncomingRes.transfers, ...usdcOutgoingRes.transfers]);
+  const funTransfers = dedupeTransfers([...funIncomingRes.transfers, ...funOutgoingRes.transfers]);
+
+  // Detect unsupported assets:
+  // 1) wallet -> game-wallet (explicit scam/deposit noise for game accounting),
+  // 2) unknown incoming assets to the wallet (airdrop/spoof spam surface).
+  const scamFetchTargets: Array<{
+    category: "erc20" | "erc721" | "erc1155";
+    direction: "incoming" | "outgoing";
+    counterpartyAddress?: string;
+  }> = [
+    ...[...depositCounterparties].flatMap((counterparty) => [
+      { category: "erc20" as const, direction: "outgoing" as const, counterpartyAddress: counterparty },
+      { category: "erc721" as const, direction: "outgoing" as const, counterpartyAddress: counterparty },
+      { category: "erc1155" as const, direction: "outgoing" as const, counterpartyAddress: counterparty },
+    ]),
+    { category: "erc20" as const, direction: "incoming" as const },
+    { category: "erc721" as const, direction: "incoming" as const },
+    { category: "erc1155" as const, direction: "incoming" as const },
+  ];
+  const scamTransferResponses = await Promise.all(
+    scamFetchTargets.map((target) =>
+      fetchTransfersForWallet({
+        address: wallet,
+        direction: target.direction,
+        category: target.category,
+        counterpartyAddress: target.counterpartyAddress,
+        maxCount,
+        maxPages,
+        deadlineMs,
+        fromBlock: scanStartBlock,
+      })
+    )
+  );
+  const scamTransfers = dedupeTransfers(
+    scamTransferResponses.flatMap((res) => res.transfers)
+  );
 
   const scan = {
     mode: scanMode,
@@ -1073,11 +2106,13 @@ export async function GET(request: Request, context: { params: Promise<{ address
         pagesFetched: erc1155IncomingRes.pagesFetched,
         hasMore: Boolean(erc1155IncomingRes.nextPageKey),
         truncatedByBudget: erc1155IncomingRes.truncatedByBudget,
+        sync: erc1155IncomingRes.sync,
       },
       outgoing: {
         pagesFetched: erc1155OutgoingRes.pagesFetched,
         hasMore: Boolean(erc1155OutgoingRes.nextPageKey),
         truncatedByBudget: erc1155OutgoingRes.truncatedByBudget,
+        sync: erc1155OutgoingRes.sync,
       },
     },
     usdc: {
@@ -1085,22 +2120,87 @@ export async function GET(request: Request, context: { params: Promise<{ address
         pagesFetched: usdcIncomingRes.pagesFetched,
         hasMore: Boolean(usdcIncomingRes.nextPageKey),
         truncatedByBudget: usdcIncomingRes.truncatedByBudget,
+        sync: usdcIncomingRes.sync,
       },
       outgoing: {
         pagesFetched: usdcOutgoingRes.pagesFetched,
         hasMore: Boolean(usdcOutgoingRes.nextPageKey),
         truncatedByBudget: usdcOutgoingRes.truncatedByBudget,
+        sync: usdcOutgoingRes.sync,
       },
+    },
+    fun: {
+      incoming: {
+        pagesFetched: funIncomingRes.pagesFetched,
+        hasMore: Boolean(funIncomingRes.nextPageKey),
+        truncatedByBudget: funIncomingRes.truncatedByBudget,
+        sync: funIncomingRes.sync,
+      },
+      outgoing: {
+        pagesFetched: funOutgoingRes.pagesFetched,
+        hasMore: Boolean(funOutgoingRes.nextPageKey),
+        truncatedByBudget: funOutgoingRes.truncatedByBudget,
+        sync: funOutgoingRes.sync,
+      },
+    },
+    scamCandidates: {
+      pagesFetched: scamTransferResponses.reduce((sum, item) => sum + item.pagesFetched, 0),
+      hasMore: scamTransferResponses.some((item) => Boolean(item.nextPageKey)),
+      truncatedByBudget: scamTransferResponses.some((item) => item.truncatedByBudget),
+      transferCount: scamTransfers.length,
     },
   };
 
+  const scanTruncatedByBudget =
+    scan.erc1155.incoming.truncatedByBudget ||
+    scan.erc1155.outgoing.truncatedByBudget ||
+    scan.usdc.incoming.truncatedByBudget ||
+    scan.usdc.outgoing.truncatedByBudget ||
+    scan.fun.incoming.truncatedByBudget ||
+    scan.fun.outgoing.truncatedByBudget ||
+    scan.scamCandidates.truncatedByBudget;
+
   const scanIncomplete =
+    scanTruncatedByBudget ||
     scan.erc1155.incoming.hasMore ||
     scan.erc1155.outgoing.hasMore ||
     scan.usdc.incoming.hasMore ||
-    scan.usdc.outgoing.hasMore;
+    scan.usdc.outgoing.hasMore ||
+    scan.fun.incoming.hasMore ||
+    scan.fun.outgoing.hasMore ||
+    scan.scamCandidates.hasMore;
 
   const usdcDeltaByHash = new Map<string, bigint>();
+  const funDeltaByHash = new Map<string, bigint>();
+  const depositsByHash = new Map<string, DecodedDepositItem[]>();
+  const scamsByHash = new Map<string, DecodedScamItem[]>();
+  const tokenContractsByTokenId = new Map<string, Set<string>>();
+
+  const addTokenContractCandidate = (tokenIdDec: string | undefined, contractAddress: string | undefined) => {
+    if (!tokenIdDec || !contractAddress) return;
+    const key = tokenIdDec.trim();
+    if (!key) return;
+    const contractLc = contractAddress.toLowerCase();
+    const set = tokenContractsByTokenId.get(key) ?? new Set<string>();
+    set.add(contractLc);
+    tokenContractsByTokenId.set(key, set);
+  };
+
+  for (const h of holdings) addTokenContractCandidate(h.tokenIdDec, h.contractAddress);
+  for (const deltas of erc1155DeltaByHash.values()) {
+    for (const tokenKeyLocal of deltas.keys()) {
+      const [contractAddress, tokenIdHexNoPrefix] = tokenKeyLocal.split(":");
+      if (!contractAddress || !tokenIdHexNoPrefix) continue;
+      const tokenIdDec = BigInt(`0x${tokenIdHexNoPrefix}`).toString(10);
+      addTokenContractCandidate(tokenIdDec, contractAddress);
+    }
+  }
+
+  const resolvePlayerTokenByTokenId = (tokenIdDec: string): string | undefined => {
+    const set = tokenContractsByTokenId.get(tokenIdDec);
+    if (!set || set.size !== 1) return undefined;
+    return [...set][0];
+  };
 
   for (const t of usdcTransfers) {
     const txHash = t.hash;
@@ -1124,10 +2224,280 @@ export async function GET(request: Request, context: { params: Promise<{ address
     if (fromLc === walletLc) delta -= value;
 
     usdcDeltaByHash.set(txHash, (usdcDeltaByHash.get(txHash) ?? 0n) + delta);
+
+    if (value > 0n) {
+      let depositItem: DecodedDepositItem | null = null;
+      if (fromLc === walletLc && depositCounterparties.has(toLc)) {
+        depositItem = {
+          kind: "deposit",
+          direction: "from_game_wallet",
+          counterparty: toLc,
+          amountRaw: value.toString(10),
+          paymentToken: BASE_USDC,
+        };
+      } else if (toLc === walletLc && depositCounterparties.has(fromLc)) {
+        depositItem = {
+          kind: "deposit",
+          direction: "to_game_wallet",
+          counterparty: fromLc,
+          amountRaw: value.toString(10),
+          paymentToken: BASE_USDC,
+        };
+      }
+
+      if (depositItem) {
+        const existing = depositsByHash.get(txHash) ?? [];
+        existing.push(depositItem);
+        depositsByHash.set(txHash, existing);
+      }
+    }
   }
 
-  const activityAll = [...erc1155DeltaByHash.entries()]
-    .map(([hash, deltas]) => {
+  for (const [hash, items] of depositsByHash.entries()) {
+    depositsByHash.set(hash, dedupeDeposits(items));
+  }
+
+  for (const t of funTransfers) {
+    const txHash = t.hash;
+    if (!txHash) continue;
+
+    const contract = toLower(t.rawContract?.address);
+    if (contract !== SPORTFUN_FUN_TOKEN_ADDRESS) continue;
+
+    if (t.metadata?.blockTimestamp) {
+      if (!timestampByHash.has(txHash)) timestampByHash.set(txHash, t.metadata.blockTimestamp);
+    }
+
+    const rawValue = t.rawContract?.value ?? "0x0";
+    const value = parseBigIntish(rawValue);
+    if (value <= 0n) continue;
+
+    const fromLc = toLower(t.from);
+    const toLc = toLower(t.to);
+
+    let delta = 0n;
+    if (toLc === walletLc) delta += value;
+    if (fromLc === walletLc) delta -= value;
+    if (delta === 0n) continue;
+
+    funDeltaByHash.set(txHash, (funDeltaByHash.get(txHash) ?? 0n) + delta);
+  }
+
+  const allowedGameWalletErc20 = new Set([
+    BASE_USDC,
+    SPORTFUN_FUN_TOKEN_ADDRESS,
+  ].map((x) => x.toLowerCase()));
+  const allowedGameWalletErc1155 = new Set(
+    [...SPORTFUN_ERC1155_CONTRACTS].map((x) => x.toLowerCase())
+  );
+
+  for (const t of scamTransfers) {
+    const txHash = t.hash;
+    if (!txHash) continue;
+
+    const fromLc = toLower(t.from);
+    const toLc = toLower(t.to);
+    const isToGameWallet = fromLc === walletLc && depositCounterparties.has(toLc);
+    const isIncomingToWallet = toLc === walletLc;
+    if (!isToGameWallet && !isIncomingToWallet) continue;
+
+    const reason: DecodedScamItem["reason"] = isToGameWallet
+      ? "unsupported_game_wallet_asset"
+      : "unsupported_wallet_asset";
+    const counterparty = isToGameWallet ? toLc : fromLc;
+    if (!counterparty) continue;
+
+    if (t.metadata?.blockTimestamp) {
+      if (!timestampByHash.has(txHash)) timestampByHash.set(txHash, t.metadata.blockTimestamp);
+    }
+
+    const category = toLower(t.category);
+    const contractAddress = toLower(t.rawContract?.address) || undefined;
+    const rows: DecodedScamItem[] = [];
+
+    if (category === "erc20") {
+      if (!contractAddress || allowedGameWalletErc20.has(contractAddress)) continue;
+      const rawValue = t.rawContract?.value ?? "0x0";
+      let amount = 0n;
+      try {
+        amount = parseBigIntish(rawValue);
+      } catch {
+        amount = 0n;
+      }
+      if (amount <= 0n) continue;
+      rows.push({
+        kind: "scam",
+        category: "erc20",
+        counterparty,
+        contractAddress,
+        amountRaw: amount.toString(10),
+        reason,
+      });
+    } else if (category === "erc721") {
+      const tokenIdRaw = t.erc721TokenId;
+      let tokenIdDec: string | undefined;
+      let tokenIdHex: string | undefined;
+      if (tokenIdRaw) {
+        try {
+          const tokenId = parseBigIntish(tokenIdRaw);
+          tokenIdDec = tokenId.toString(10);
+          tokenIdHex = `0x${tokenId.toString(16)}`;
+        } catch {
+          // keep undefined
+        }
+      }
+      rows.push({
+        kind: "scam",
+        category: "erc721",
+        counterparty,
+        contractAddress,
+        tokenIdDec,
+        tokenIdHex,
+        amountRaw: "1",
+        reason,
+      });
+    } else if (category === "erc1155") {
+      if (contractAddress && allowedGameWalletErc1155.has(contractAddress)) continue;
+      const metas = t.erc1155Metadata ?? [];
+      if (!metas.length) {
+        rows.push({
+          kind: "scam",
+          category: "erc1155",
+          counterparty,
+          contractAddress,
+          reason,
+        });
+      } else {
+        for (const meta of metas) {
+          let tokenIdDec: string | undefined;
+          let tokenIdHex: string | undefined;
+          let amountRaw: string | undefined;
+          try {
+            const tokenId = parseBigIntish(meta.tokenId);
+            tokenIdDec = tokenId.toString(10);
+            tokenIdHex = `0x${tokenId.toString(16)}`;
+          } catch {
+            // keep undefined
+          }
+          try {
+            const value = parseBigIntish(meta.value);
+            amountRaw = value.toString(10);
+          } catch {
+            // keep undefined
+          }
+          rows.push({
+            kind: "scam",
+            category: "erc1155",
+            counterparty,
+            contractAddress,
+            tokenIdDec,
+            tokenIdHex,
+            amountRaw,
+            reason,
+          });
+        }
+      }
+    } else {
+      continue;
+    }
+
+    if (!rows.length) continue;
+    const existing = scamsByHash.get(txHash) ?? [];
+    existing.push(...rows);
+    scamsByHash.set(txHash, existing);
+  }
+
+  for (const [hash, items] of scamsByHash.entries()) {
+    scamsByHash.set(hash, dedupeScamItems(items));
+  }
+
+  const contractRenewalsByHash = new Map<string, DecodedContractRenewalItem[]>();
+  const shouldFetchContractRenewals = hasTime(1500);
+  const contractRenewals = shouldFetchContractRenewals
+    ? await fetchContractRenewalsForWallet({
+        wallet,
+        walletLc,
+        fromBlock: scanStartBlock,
+        deadlineMs,
+      })
+    : [];
+
+  for (const renewal of contractRenewals) {
+    const resolvedPlayerToken = renewal.playerToken ?? resolvePlayerTokenByTokenId(renewal.tokenIdDec);
+    const normalized: DecodedContractRenewalItem = resolvedPlayerToken
+      ? { ...renewal, playerToken: resolvedPlayerToken }
+      : renewal;
+    const txHash = normalized.txHash;
+    if (!txHash) continue;
+    const list = contractRenewalsByHash.get(txHash) ?? [];
+    list.push(normalized);
+    contractRenewalsByHash.set(txHash, list);
+  }
+
+  // Alchemy free-tier can reject broad eth_getLogs ranges (10-block cap), which may miss
+  // ContractRenewed logs in `fetchContractRenewalsForWallet`. Backfill renewals from
+  // outgoing USDC tx receipts so renewals still appear in activity/analytics.
+  const shouldBackfillRenewalsFromReceipts = includeTrades && hasTime(1500);
+  if (shouldBackfillRenewalsFromReceipts) {
+    const usdcOutgoingHashes = Array.from(
+      new Set(
+        usdcTransfers
+          .filter((t) => toLower(t.from) === walletLc && t.hash)
+          .map((t) => toLower(t.hash))
+      )
+    );
+    const renewalCandidateHashes = usdcOutgoingHashes.filter((hash) => !contractRenewalsByHash.has(hash));
+
+    const renewalCandidateLimit = scanMode === "full" ? 1200 : 300;
+    const renewalCandidates = renewalCandidateHashes.slice(0, renewalCandidateLimit);
+
+    const renewalRows = await mapLimit(renewalCandidates, 4, async (hash) => {
+      const cached = readDecodedCache(hash);
+      if (cached?.decoded?.contractRenewals?.length) return { hash, renewals: cached.decoded.contractRenewals };
+
+      const receipt = await fetchReceipt(hash);
+      if (!receipt) return { hash, renewals: [] as DecodedContractRenewalItem[] };
+
+      const decoded = decodeReceiptForSportfun({
+        receipt,
+        walletLc,
+        depositCounterparties,
+      });
+
+      const usdcDeltaReceipt = decodeErc20DeltaFromReceipt({
+        receipt,
+        tokenAddressLc: BASE_USDC,
+        walletLc,
+      });
+
+      writeDecodedCache(hash, {
+        version: DECODED_CACHE_SCHEMA_VERSION,
+        decoded,
+        usdcDeltaReceipt: usdcDeltaReceipt !== null ? usdcDeltaReceipt.toString(10) : null,
+      });
+
+      return { hash, renewals: decoded.contractRenewals ?? [] };
+    });
+
+    for (const row of renewalRows) {
+      if (!row.renewals.length) continue;
+      const existing = contractRenewalsByHash.get(row.hash) ?? [];
+      const merged = dedupeContractRenewals([...existing, ...row.renewals]);
+      contractRenewalsByHash.set(row.hash, merged);
+    }
+  }
+
+  const activityHashes = new Set<string>([
+    ...erc1155DeltaByHash.keys(),
+    ...contractRenewalsByHash.keys(),
+    ...funDeltaByHash.keys(),
+    ...depositsByHash.keys(),
+    ...scamsByHash.keys(),
+  ]);
+
+  const activityAll = [...activityHashes]
+    .map((hash) => {
+      const deltas = erc1155DeltaByHash.get(hash) ?? new Map<string, bigint>();
       const erc1155Changes = [...deltas.entries()]
         .map(([tokenKeyLocal, deltaRaw]) => {
           const [contractAddress, tokenIdHexNoPrefix] = tokenKeyLocal.split(":");
@@ -1142,6 +2512,7 @@ export async function GET(request: Request, context: { params: Promise<{ address
         .filter((c) => c.deltaRaw !== "0");
 
       const usdcDelta = usdcDeltaByHash.get(hash) ?? 0n;
+      const funDelta = funDeltaByHash.get(hash) ?? 0n;
 
       // Legacy best-effort inference (kept for fallback / sanity checks).
       let inferred:
@@ -1187,6 +2558,7 @@ export async function GET(request: Request, context: { params: Promise<{ address
         hash,
         timestamp: timestampByHash.get(hash),
         usdcDeltaRaw: usdcDelta.toString(10),
+        funDeltaRaw: funDelta.toString(10),
         erc1155Changes,
         inferred,
       };
@@ -1198,6 +2570,41 @@ export async function GET(request: Request, context: { params: Promise<{ address
   const activityTruncated = activityAll.length > activityOffset + activity.length;
   const nextActivityCursor = activityTruncated ? activityOffset + activity.length : undefined;
 
+  const packOpensByHash = new Map<string, DecodedPackOpenItem[]>();
+  const shouldDecodePackOpens = includeTrades && hasTime(1500);
+  if (shouldDecodePackOpens) {
+    const candidate = activity.filter((a) =>
+      a.erc1155Changes.some((c) => BigInt(c.deltaRaw) > 0n)
+    );
+    const txRows = await mapLimit(candidate, 4, async (a) => {
+      const tx = await fetchTransaction(a.hash);
+      return { a, tx };
+    });
+
+    for (const { a, tx } of txRows) {
+      if (!tx?.input || tx.input.length < 10) continue;
+      const selector = tx.input.slice(0, 10).toLowerCase();
+      if (!PACK_OPEN_SELECTORS.has(selector)) continue;
+
+      const rows: DecodedPackOpenItem[] = [];
+      for (const c of a.erc1155Changes) {
+        const delta = BigInt(c.deltaRaw);
+        if (delta <= 0n) continue;
+        rows.push({
+          kind: "pack_open",
+          packContract: tx.to ? toLower(tx.to) : undefined,
+          opener: toLower(tx.from),
+          selector,
+          playerToken: c.contractAddress,
+          tokenIdDec: c.tokenIdDec,
+          shareAmountRaw: delta.toString(10),
+        });
+      }
+
+      if (rows.length) packOpensByHash.set(a.hash, rows);
+    }
+  }
+
   // Fetch and decode receipts (authoritative trade semantics).
   const receiptByHash = new Map<string, TxReceipt>();
   const decodedByHash = new Map<
@@ -1205,6 +2612,10 @@ export async function GET(request: Request, context: { params: Promise<{ address
     {
       trades: DecodedTradeItem[];
       promotions: DecodedPromotionItem[];
+      contractRenewals: DecodedContractRenewalItem[];
+      packOpens: DecodedPackOpenItem[];
+      deposits: DecodedDepositItem[];
+      scams: DecodedScamItem[];
       unknownSportfunTopics: Array<{ address: string; topic0: string }>;
     }
   >();
@@ -1234,7 +2645,11 @@ export async function GET(request: Request, context: { params: Promise<{ address
       if (!r) continue;
       receiptByHash.set(h, r);
 
-      const decoded = decodeReceiptForSportfun({ receipt: r, walletLc });
+      const decoded = decodeReceiptForSportfun({
+        receipt: r,
+        walletLc,
+        depositCounterparties,
+      });
       decodedByHash.set(h, decoded);
 
       const usdcDeltaReceipt = decodeErc20DeltaFromReceipt({
@@ -1245,71 +2660,273 @@ export async function GET(request: Request, context: { params: Promise<{ address
       if (usdcDeltaReceipt !== null) usdcDeltaReceiptByHash.set(h, usdcDeltaReceipt);
 
       writeDecodedCache(h, {
+        version: DECODED_CACHE_SCHEMA_VERSION,
         decoded,
         usdcDeltaReceipt: usdcDeltaReceipt !== null ? usdcDeltaReceipt.toString(10) : null,
       });
     }
   }
 
-  // Prices / valuation via FDFPair.getPrices(tokenIds).
+  // Prices / valuation from Supabase-backed store.
+  // If Supabase is missing rows, we fill gaps from wallet hints/market snapshot and a
+  // bounded on-chain `getPrices` fallback for unresolved holdings.
   const priceByHoldingKey = new Map<string, { priceUsdcPerShareRaw: bigint; valueUsdcRaw: bigint }>();
 
   const shouldIncludePrices = includePrices && hasTime(2000);
   if (shouldIncludePrices && holdings.length > 0) {
-    const holdingsByContract = new Map<string, Array<{ tokenIdDec: string; balanceRaw: bigint }>>();
+    // Non-blocking external refresh (GeckoTerminal + DexScreener) with 10m throttle.
+    triggerSportfunExternalPricesRefresh({ reason: "portfolio_request" });
 
-    for (const h of holdings) {
-      const list = holdingsByContract.get(h.contractAddress) ?? [];
-      list.push({ tokenIdDec: h.tokenIdDec, balanceRaw: BigInt(h.balanceRaw) });
-      holdingsByContract.set(h.contractAddress, list);
+    const priceItems = holdings.map((h) => ({
+      contractAddress: h.contractAddress,
+      tokenIdDec: h.tokenIdDec,
+    }));
+    const storedPrices = await getStoredSportfunPrices({
+      items: priceItems,
+      allowContractFallback: false,
+    });
+
+    // If Supabase doesn't have a fresh row yet, seed it from the newest known trade hint
+    // observed in wallet activity/caches (still avoiding getPrices eth_call fanout).
+    const latestTradePriceByKey = new Map<string, { priceUsdcRaw: string; asOf?: string }>();
+    for (const a of activityAll) {
+      const decoded = decodedByHash.get(a.hash) ?? readDecodedCache(a.hash)?.decoded;
+      const tsRaw = a.timestamp;
+      const tsMs = Date.parse(tsRaw ?? "");
+
+      const hintRows: Array<{ playerToken?: string; tokenIdDec?: string; priceUsdcPerShareRaw?: string }> = [];
+      for (const trade of decoded?.trades ?? []) {
+        hintRows.push({
+          playerToken: trade.playerToken,
+          tokenIdDec: trade.tokenIdDec,
+          priceUsdcPerShareRaw: trade.priceUsdcPerShareRaw,
+        });
+      }
+
+      // Fallback for tx rows that were inferred from ERC-1155 + USDC deltas.
+      if (hintRows.length === 0 && a.inferred && a.inferred.kind !== "unknown") {
+        hintRows.push({
+          playerToken: a.inferred.contractAddress,
+          tokenIdDec: a.inferred.tokenIdDec,
+          priceUsdcPerShareRaw: a.inferred.priceUsdcPerShareRaw,
+        });
+      }
+
+      for (const hint of hintRows) {
+        if (!hint.playerToken || !hint.tokenIdDec || !hint.priceUsdcPerShareRaw) continue;
+        if (!/^[0-9]+$/.test(hint.priceUsdcPerShareRaw)) continue;
+        const key = tokenPriceMapKey(hint.playerToken, hint.tokenIdDec);
+        const prev = latestTradePriceByKey.get(key);
+        const prevMs = Date.parse(prev?.asOf ?? "");
+        const shouldReplace =
+          !prev ||
+          (Number.isFinite(tsMs) && (!Number.isFinite(prevMs) || tsMs >= prevMs));
+        if (shouldReplace) {
+          latestTradePriceByKey.set(key, {
+            priceUsdcRaw: hint.priceUsdcPerShareRaw,
+            asOf: tsRaw,
+          });
+        }
+      }
     }
 
-    for (const [playerToken, list] of holdingsByContract.entries()) {
-      const fdfPair = getFdfPairForPlayerToken(playerToken);
-      if (!fdfPair) continue;
+    const seedRows: Array<{
+      contractAddress: string;
+      tokenIdDec: string;
+      priceUsdcRaw: string;
+      source: string;
+      asOf?: string;
+      providerPayload: unknown;
+    }> = [];
 
-      const tokenIds = list.map((x) => BigInt(x.tokenIdDec));
-      const batches = chunk(tokenIds, 100);
+    const missingHoldings = holdings.filter((h) => {
+      const key = tokenPriceMapKey(h.contractAddress, h.tokenIdDec);
+      return !storedPrices.has(key);
+    });
 
-      let offset = 0;
-      for (const batch of batches) {
-        const data = encodeFunctionData({
-          abi: FDFPAIR_READ_ABI,
-          functionName: "getPrices",
-          args: [batch],
-        });
+    const marketPriceBySport = new Map<
+      "nfl" | "soccer",
+      { asOf?: string; byTokenId: Map<string, string> }
+    >();
 
-        try {
-          const result = (await withRetry(
-            () => alchemyRpc("eth_call", [{ to: fdfPair, data }, "latest"]),
-            { retries: 3, baseDelayMs: 250 }
-          )) as Hex;
+    if (missingHoldings.length > 0 && hasTime(3500)) {
+      const sportsNeeded = new Set<"nfl" | "soccer">();
+      for (const h of missingHoldings) {
+        const sport = getSportfunSportLabel(h.contractAddress);
+        if (sport === "nfl" || sport === "soccer") sportsNeeded.add(sport);
+      }
 
-          const decoded = decodeFunctionResult({
-            abi: FDFPAIR_READ_ABI,
-            functionName: "getPrices",
-            data: result,
-          });
-
-          const amountsToReceive = decoded as readonly bigint[];
-
-          for (let i = 0; i < batch.length; i++) {
-            const tokenIdDec = batch[i].toString(10);
-            const price = amountsToReceive[i] ?? 0n;
-            const holding = list[offset + i];
-            const balance = holding?.balanceRaw ?? 0n;
-            const value = (price * balance) / 10n ** 18n;
-            priceByHoldingKey.set(tokenKey(playerToken, tokenIdDec), {
-              priceUsdcPerShareRaw: price,
-              valueUsdcRaw: value,
+      await Promise.all(
+        [...sportsNeeded].map(async (sport) => {
+          try {
+            const snapshot = await getSportfunMarketSnapshot({
+              sport,
+              windowHours: 24,
+              trendDays: 30,
+              maxTokens: 1000,
             });
+            const byTokenId = new Map<string, string>();
+            for (const token of snapshot.tokens ?? []) {
+              if (!token.currentPriceUsdcRaw) continue;
+              if (!/^[0-9]+$/.test(token.currentPriceUsdcRaw)) continue;
+              byTokenId.set(token.tokenIdDec, token.currentPriceUsdcRaw);
+            }
+            marketPriceBySport.set(sport, {
+              asOf: snapshot.asOf,
+              byTokenId,
+            });
+          } catch {
+            // Market fallback is best-effort only.
           }
-        } catch {
-          // Ignore pricing failures for now.
+        })
+      );
+    }
+
+    for (const h of holdings) {
+      const key = tokenPriceMapKey(h.contractAddress, h.tokenIdDec);
+      if (storedPrices.has(key)) continue;
+      const hinted = latestTradePriceByKey.get(key);
+      const sport = getSportfunSportLabel(h.contractAddress);
+      const marketHint =
+        sport === "nfl" || sport === "soccer"
+          ? marketPriceBySport.get(sport)?.byTokenId.get(h.tokenIdDec)
+          : undefined;
+      const marketAsOf =
+        sport === "nfl" || sport === "soccer"
+          ? marketPriceBySport.get(sport)?.asOf
+          : undefined;
+      if (!hinted && !marketHint) continue;
+      seedRows.push({
+        contractAddress: h.contractAddress,
+        tokenIdDec: h.tokenIdDec,
+        priceUsdcRaw: hinted?.priceUsdcRaw ?? marketHint!,
+        source: hinted ? "sportfun_trade_hint" : "sportfun_market_snapshot",
+        asOf: hinted?.asOf ?? marketAsOf,
+        providerPayload: {
+          reason: hinted
+            ? "portfolio_trade_fallback"
+            : "portfolio_market_snapshot_fallback",
+          ...(sport === "nfl" || sport === "soccer" ? { sport } : {}),
+        },
+      });
+    }
+
+    const seededKeys = new Set(seedRows.map((row) => tokenPriceMapKey(row.contractAddress, row.tokenIdDec)));
+    const unresolvedByPair = new Map<string, { contractAddress: string; tokenIds: Set<string> }>();
+    for (const h of holdings) {
+      const key = tokenPriceMapKey(h.contractAddress, h.tokenIdDec);
+      if (storedPrices.has(key) || seededKeys.has(key)) continue;
+      const fdfPair = getFdfPairForPlayerToken(h.contractAddress);
+      if (!fdfPair) continue;
+      const entry = unresolvedByPair.get(fdfPair) ?? {
+        contractAddress: h.contractAddress,
+        tokenIds: new Set<string>(),
+      };
+      entry.tokenIds.add(h.tokenIdDec);
+      unresolvedByPair.set(fdfPair, entry);
+    }
+
+    if (unresolvedByPair.size > 0 && hasTime(1800)) {
+      const asOf = new Date().toISOString();
+      const ONCHAIN_PRICE_BATCH_SIZE = 40;
+      const ONCHAIN_PAIR_CONCURRENCY = 2;
+      const ONCHAIN_MIN_TIME_MS = 1200;
+      const ONCHAIN_MAX_CALLS_PER_PAIR = 120;
+
+      await mapLimit([...unresolvedByPair.entries()], ONCHAIN_PAIR_CONCURRENCY, async ([fdfPair, group]) => {
+        const tokenIds = [...group.tokenIds];
+        let callsUsed = 0;
+
+        async function fetchBatch(batchTokenIds: string[]): Promise<void> {
+          if (!batchTokenIds.length) return;
+          if (!hasTime(ONCHAIN_MIN_TIME_MS)) return;
+          if (callsUsed >= ONCHAIN_MAX_CALLS_PER_PAIR) return;
+
+          callsUsed += 1;
+          const batchBigInt = batchTokenIds.map((id) => BigInt(id));
+          try {
+            const data = encodeFunctionData({
+              abi: FDFPAIR_READ_ABI,
+              functionName: "getPrices",
+              args: [batchBigInt],
+            });
+            const result = (await withRetry(
+              () => alchemyRpc("eth_call", [{ to: fdfPair, data }, "latest"]),
+              { retries: 2, baseDelayMs: 200 }
+            )) as Hex;
+            const decoded = decodeFunctionResult({
+              abi: FDFPAIR_READ_ABI,
+              functionName: "getPrices",
+              data: result,
+            }) as bigint[];
+            const prices = Array.isArray(decoded) ? decoded : [];
+            if (prices.length !== batchTokenIds.length) {
+              throw new Error("getPrices_length_mismatch");
+            }
+
+            for (let j = 0; j < batchTokenIds.length; j += 1) {
+              const tokenIdDec = batchTokenIds[j];
+              const price = prices[j];
+              if (typeof price !== "bigint" || price <= 0n) continue;
+              const key = tokenPriceMapKey(group.contractAddress, tokenIdDec);
+              if (storedPrices.has(key) || seededKeys.has(key)) continue;
+              seedRows.push({
+                contractAddress: group.contractAddress,
+                tokenIdDec,
+                priceUsdcRaw: price.toString(10),
+                source: "sportfun_onchain_getprices",
+                asOf,
+                providerPayload: {
+                  reason: "portfolio_onchain_getprices_fallback",
+                  fdfPair,
+                },
+              });
+              seededKeys.add(key);
+            }
+          } catch {
+            // Some ids can make the whole batch fail; split and retry smaller chunks.
+            if (batchTokenIds.length <= 1) return;
+            const mid = Math.floor(batchTokenIds.length / 2);
+            if (mid <= 0 || mid >= batchTokenIds.length) return;
+            await fetchBatch(batchTokenIds.slice(0, mid));
+            await fetchBatch(batchTokenIds.slice(mid));
+          }
         }
 
-        offset += batch.length;
+        for (let i = 0; i < tokenIds.length; i += ONCHAIN_PRICE_BATCH_SIZE) {
+          if (!hasTime(ONCHAIN_MIN_TIME_MS)) break;
+          const batchTokenIds = tokenIds.slice(i, i + ONCHAIN_PRICE_BATCH_SIZE);
+          await fetchBatch(batchTokenIds);
+        }
+      });
+    }
+
+    if (seedRows.length > 0) {
+      const written = await upsertStoredSportfunPrices(seedRows);
+      if (written > 0) {
+        for (const row of seedRows) {
+          const key = tokenPriceMapKey(row.contractAddress, row.tokenIdDec);
+          storedPrices.set(key, {
+            contractAddress: row.contractAddress.toLowerCase(),
+            tokenIdDec: row.tokenIdDec,
+            priceUsdcRaw: BigInt(row.priceUsdcRaw),
+            source: row.source,
+            asOf: row.asOf,
+          });
+        }
       }
+    }
+
+    for (const h of holdings) {
+      const key = tokenPriceMapKey(h.contractAddress, h.tokenIdDec);
+      const stored = storedPrices.get(key);
+      if (!stored) continue;
+      const balance = BigInt(h.balanceRaw);
+      const value = (stored.priceUsdcRaw * balance) / 10n ** 18n;
+      priceByHoldingKey.set(key, {
+        priceUsdcPerShareRaw: stored.priceUsdcRaw,
+        valueUsdcRaw: value,
+      });
     }
   }
 
@@ -1437,35 +3054,102 @@ export async function GET(request: Request, context: { params: Promise<{ address
   }
 
   const holdingsEnriched = holdings.map((h) => {
-    const meta = uriByKey.get(`${h.contractAddress}:${h.tokenIdHex}`);
-    const metadata = metadataByKey.get(`${h.contractAddress}:${h.tokenIdHex}`);
+    const metadataKey = `${h.contractAddress}:${h.tokenIdHex}`;
+    const meta = uriByKey.get(metadataKey);
+    const metadata = metadataByKey.get(metadataKey);
+    const overrideName = getSportfunNameOverride(h.contractAddress, h.tokenIdDec);
+    const resolvedMetadata = metadata?.metadata
+      ? {
+          ...metadata.metadata,
+          name: metadata.metadata.name ?? overrideName,
+        }
+      : overrideName
+        ? { name: overrideName }
+        : undefined;
     const priceMeta = priceByHoldingKey.get(tokenKey(h.contractAddress, h.tokenIdDec));
     return {
       ...h,
       uri: meta?.uri,
       uriError: meta?.error,
-      metadata: metadata?.metadata,
+      metadata: resolvedMetadata,
       metadataError: metadata?.error,
       priceUsdcPerShareRaw: priceMeta?.priceUsdcPerShareRaw?.toString(10),
       valueUsdcRaw: priceMeta?.valueUsdcRaw?.toString(10),
     };
   });
 
-  // Attach decoded trades/promotions to activity (optional).
-  let activityEnriched: ActivityEnrichedItem[] = activity.map((a) => {
-    const decoded = decodedByHash.get(a.hash);
+  function enrichActivityRow(
+    a: ActivityItem,
+    cachedDecoded?: ReceiptDecodedCache | null
+  ): ActivityEnrichedItem {
+    const decodedFromReceipt = decodedByHash.get(a.hash) ?? cachedDecoded?.decoded;
+    const renewalsFromLogs = contractRenewalsByHash.get(a.hash) ?? [];
+    const packFromSelector = packOpensByHash.get(a.hash) ?? [];
+    const depositsFromTransfers = depositsByHash.get(a.hash) ?? [];
+    const scamsFromTransfers = scamsByHash.get(a.hash) ?? [];
+    const mergedRenewals = dedupeContractRenewals([
+      ...renewalsFromLogs,
+      ...(decodedFromReceipt?.contractRenewals ?? []),
+    ]);
+    const mergedPackOpens = [...packFromSelector, ...(decodedFromReceipt?.packOpens ?? [])];
+    const mergedDeposits = dedupeDeposits(
+      depositsFromTransfers.length ? depositsFromTransfers : (decodedFromReceipt?.deposits ?? [])
+    );
+    const mergedScams = dedupeScamItems([
+      ...scamsFromTransfers,
+      ...(decodedFromReceipt?.scams ?? []),
+    ]);
 
-    const usdcDeltaReceipt = usdcDeltaReceiptByHash.get(a.hash);
-    const effectiveUsdcDelta = usdcDeltaReceipt ?? BigInt(a.usdcDeltaRaw);
+    const usdcDeltaFromMemory = usdcDeltaReceiptByHash.get(a.hash);
+    const usdcDeltaFromCache =
+      usdcDeltaFromMemory === undefined
+        ? cachedDecoded?.usdcDeltaReceipt
+          ? BigInt(cachedDecoded.usdcDeltaReceipt)
+          : null
+        : usdcDeltaFromMemory;
+    const effectiveUsdcDelta = usdcDeltaFromMemory ?? usdcDeltaFromCache ?? BigInt(a.usdcDeltaRaw);
 
-    // If we have decoded trades, we treat them as the primary classification.
-    const primaryKind = decoded?.trades?.length
-      ? decoded.trades.every((t) => t.kind === "buy")
-        ? "buy"
-        : decoded.trades.every((t) => t.kind === "sell")
-          ? "sell"
-          : "unknown"
-      : a.inferred?.kind ?? "unknown";
+    const reconciledTrades = reconcileTradeUsdcWithReceipt({
+      trades: decodedFromReceipt?.trades ?? [],
+      renewals: mergedRenewals,
+      deposits: mergedDeposits,
+      effectiveUsdcDelta,
+    });
+    const reconciledPackOpens = reconcilePackOpenUsdcWithReceipt({
+      packOpens: mergedPackOpens,
+      trades: reconciledTrades,
+      renewals: mergedRenewals,
+      deposits: mergedDeposits,
+      effectiveUsdcDelta,
+    });
+
+    const decoded =
+      decodedFromReceipt ||
+      mergedRenewals.length ||
+      mergedPackOpens.length ||
+      mergedDeposits.length ||
+      mergedScams.length
+        ? {
+            trades: reconciledTrades,
+            promotions: decodedFromReceipt?.promotions ?? [],
+            contractRenewals: mergedRenewals,
+            packOpens: reconciledPackOpens,
+            deposits: mergedDeposits,
+            scams: mergedScams,
+            unknownSportfunTopics: decodedFromReceipt?.unknownSportfunTopics ?? [],
+          }
+        : undefined;
+
+    // If we have decoded trades, treat them as primary classification.
+    const primaryKind = decoded?.scams?.length
+      ? "scam"
+      : decoded?.trades?.length
+        ? decoded.trades.every((t) => t.kind === "buy")
+          ? "buy"
+          : decoded.trades.every((t) => t.kind === "sell")
+            ? "sell"
+            : "unknown"
+        : a.inferred?.kind ?? "unknown";
 
     return {
       ...a,
@@ -1475,14 +3159,27 @@ export async function GET(request: Request, context: { params: Promise<{ address
         ? {
             trades: decoded.trades,
             promotions: decoded.promotions,
+            contractRenewals: decoded.contractRenewals,
+            packOpens: decoded.packOpens,
+            deposits: decoded.deposits,
+            scams: decoded.scams,
             unknownSportfunTopics: decoded.unknownSportfunTopics,
           }
         : undefined,
       receipt: includeReceipts ? receiptByHash.get(a.hash) : undefined,
     };
-  });
+  }
 
-  // Reconcile: if decoded trades/promotions don't fully explain the ERC-1155 delta,
+  // Attach decoded payload to current page activity; ledger uses full activityAll.
+  const pageHashes = new Set(activity.map((a) => a.hash));
+  let activityEnriched: ActivityEnrichedItem[] = activity.map((a) => enrichActivityRow(a));
+  const pageBaseByHash = new Map(activityEnriched.map((a) => [a.hash, a]));
+  const ledgerOnlyActivity: ActivityEnrichedItem[] = activityAll
+    .filter((a) => !pageHashes.has(a.hash))
+    .map((a) => enrichActivityRow(a, readDecodedCache(a.hash)));
+  const activityForLedgerBase = [...activityEnriched, ...ledgerOnlyActivity];
+
+  // Reconcile: if decoded events don't fully explain the ERC-1155 delta,
   // add synthetic transfer_in/transfer_out ops (zero cost / unknown provenance).
   let shareDeltaMismatchCount = 0;
   let shareDeltaMismatchTxCount = 0;
@@ -1496,7 +3193,7 @@ export async function GET(request: Request, context: { params: Promise<{ address
     reason: "erc1155_unexplained_delta";
   }> = [];
 
-  activityEnriched = activityEnriched.map((a) => {
+  const activityEnrichedForLedger: ActivityEnrichedItem[] = activityForLedgerBase.map((a) => {
     const decoded = a.decoded;
 
     const expectedByKey = new Map<string, bigint>();
@@ -1514,6 +3211,24 @@ export async function GET(request: Request, context: { params: Promise<{ address
       if (!p.playerToken) continue;
       const key = tokenKey(p.playerToken, p.tokenIdDec);
       decodedByKey.set(key, (decodedByKey.get(key) ?? 0n) + BigInt(p.walletShareDeltaRaw));
+    }
+    for (const p of decoded?.packOpens ?? []) {
+      const key = tokenKey(p.playerToken, p.tokenIdDec);
+      decodedByKey.set(key, (decodedByKey.get(key) ?? 0n) + BigInt(p.shareAmountRaw));
+    }
+
+    // `inferred` is derived from raw deltas and should count as explained delta to
+    // prevent double counting with reconciledTransfers.
+    if ((!decoded?.trades?.length || decoded.trades.length === 0) && a.inferred && a.inferred.kind !== "unknown") {
+      try {
+        if (a.inferred.contractAddress && a.inferred.tokenIdDec && a.inferred.shareDeltaRaw) {
+          const key = tokenKey(a.inferred.contractAddress, a.inferred.tokenIdDec);
+          const delta = BigInt(a.inferred.shareDeltaRaw);
+          decodedByKey.set(key, (decodedByKey.get(key) ?? 0n) + delta);
+        }
+      } catch {
+        // ignore malformed inferred rows
+      }
     }
 
     const reconciledTransfers: ReconciledTransfer[] = [];
@@ -1558,12 +3273,21 @@ export async function GET(request: Request, context: { params: Promise<{ address
     };
   });
 
+  const reconciledByHash = new Map(activityEnrichedForLedger.map((a) => [a.hash, a]));
+  activityEnriched = activity.map((a) => {
+    const enriched = reconciledByHash.get(a.hash) ?? pageBaseByHash.get(a.hash);
+    if (!enriched) return enrichActivityRow(a, readDecodedCache(a.hash));
+    return enriched;
+  });
+
   // Portfolio analytics (moving average cost basis, per tokenId).
   // NOTE: This is wallet-centric and uses decoded trade flows when available.
   // If decoding is incomplete, we reconcile to on-chain ERC-1155 deltas via synthetic transfers.
   type LedgerItem =
     | ({ itemKind: "trade" } & DecodedTradeItem & { txHash: string; timestamp?: string })
     | ({ itemKind: "promotion" } & DecodedPromotionItem & { txHash: string; timestamp?: string })
+    | ({ itemKind: "contract_renewal" } & DecodedContractRenewalItem & { txHash: string; timestamp?: string })
+    | ({ itemKind: "pack_open" } & DecodedPackOpenItem & { txHash: string; timestamp?: string })
     | {
         itemKind: "inferred_trade";
         kind: "buy" | "sell";
@@ -1590,12 +3314,28 @@ export async function GET(request: Request, context: { params: Promise<{ address
   const ledger: LedgerItem[] = [];
   let decodedTradeCount = 0;
   let decodedPromotionCount = 0;
+  let decodedContractRenewalCount = 0;
+  let decodedPackOpenCount = 0;
+  let decodedDepositCount = 0;
+  let decodedScamCount = 0;
+  let depositToGameWalletUsdcRaw = 0n;
+  let depositFromGameWalletUsdcRaw = 0n;
+  let funIncomingRaw = 0n;
+  let funOutgoingRaw = 0n;
 
-  for (const a of activityEnriched) {
+  for (const a of activityEnrichedForLedger) {
+    const funDelta = BigInt(a.funDeltaRaw ?? "0");
+    if (funDelta > 0n) funIncomingRaw += funDelta;
+    if (funDelta < 0n) funOutgoingRaw += -funDelta;
+
     const decoded = a.decoded;
 
     decodedTradeCount += decoded?.trades?.length ?? 0;
     decodedPromotionCount += decoded?.promotions?.length ?? 0;
+    decodedContractRenewalCount += decoded?.contractRenewals?.length ?? 0;
+    decodedPackOpenCount += decoded?.packOpens?.length ?? 0;
+    decodedDepositCount += decoded?.deposits?.length ?? 0;
+    decodedScamCount += decoded?.scams?.length ?? 0;
 
     for (const t of decoded?.trades ?? []) {
       ledger.push({ itemKind: "trade", ...t, txHash: a.hash, timestamp: a.timestamp });
@@ -1603,6 +3343,29 @@ export async function GET(request: Request, context: { params: Promise<{ address
 
     for (const p of decoded?.promotions ?? []) {
       ledger.push({ itemKind: "promotion", ...p, txHash: a.hash, timestamp: a.timestamp });
+    }
+
+    for (const r of decoded?.contractRenewals ?? []) {
+      const resolvedPlayerToken = r.playerToken ?? resolvePlayerTokenByTokenId(r.tokenIdDec);
+      if (resolvedPlayerToken) addTokenContractCandidate(r.tokenIdDec, resolvedPlayerToken);
+      ledger.push({
+        itemKind: "contract_renewal",
+        ...r,
+        playerToken: resolvedPlayerToken ?? r.playerToken,
+        txHash: a.hash,
+        timestamp: a.timestamp,
+      });
+    }
+
+    for (const p of decoded?.packOpens ?? []) {
+      ledger.push({ itemKind: "pack_open", ...p, txHash: a.hash, timestamp: a.timestamp });
+    }
+
+    for (const d of decoded?.deposits ?? []) {
+      const amount = BigInt(d.amountRaw);
+      if (amount <= 0n) continue;
+      if (d.direction === "to_game_wallet") depositToGameWalletUsdcRaw += amount;
+      if (d.direction === "from_game_wallet") depositFromGameWalletUsdcRaw += amount;
     }
 
     if (!decoded?.trades?.length && a.inferred?.kind && a.inferred.kind !== "unknown") {
@@ -1638,7 +3401,24 @@ export async function GET(request: Request, context: { params: Promise<{ address
 
   ledger.sort((a, b) => String(a.timestamp ?? "").localeCompare(String(b.timestamp ?? "")));
 
-  const positionByKey = new Map<string, { shares: bigint; costUsdc: bigint }>();
+  const positionByKey = new Map<
+    string,
+    { shares: bigint; costUsdc: bigint; promoShares: bigint; freeShares: bigint }
+  >();
+  const makeFlow = () => ({
+    boughtShares: 0n,
+    soldShares: 0n,
+    spentUsdc: 0n,
+    receivedUsdc: 0n,
+    freeSharesIn: 0n,
+    freeEvents: 0,
+    promotionSharesIn: 0n,
+    promotionEvents: 0,
+    packOpenSharesIn: 0n,
+    packOpenEvents: 0,
+    contractRenewalSpentUsdc: 0n,
+    contractRenewalEvents: 0,
+  });
 
   // Per-athlete aggregates from decoded on-chain flows.
   // NOTE: These are computed from the same (possibly truncated) ledger as cost basis.
@@ -1651,6 +3431,12 @@ export async function GET(request: Request, context: { params: Promise<{ address
       receivedUsdc: bigint;
       freeSharesIn: bigint;
       freeEvents: number;
+      promotionSharesIn: bigint;
+      promotionEvents: number;
+      packOpenSharesIn: bigint;
+      packOpenEvents: number;
+      contractRenewalSpentUsdc: bigint;
+      contractRenewalEvents: number;
     }
   >();
 
@@ -1661,40 +3447,113 @@ export async function GET(request: Request, context: { params: Promise<{ address
   let sellNoProceedsCount = 0;
   let reconciledTransferInCount = 0;
   let reconciledTransferOutCount = 0;
+  let contractRenewalSpentUsdcRaw = 0n;
+  let contractRenewalAppliedCount = 0;
+  let contractRenewalUnresolvedCount = 0;
+  let contractRenewalNoSharesCount = 0;
+  let contractRenewalUnsupportedPaymentCount = 0;
+  let packOpenFreeSharesRaw = 0n;
 
   for (const item of ledger) {
+    if (item.itemKind === "contract_renewal") {
+      const amountPaid = BigInt(item.amountPaidRaw);
+      if (amountPaid <= 0n) continue;
+      if (item.paymentToken !== BASE_USDC) {
+        contractRenewalUnsupportedPaymentCount++;
+        continue;
+      }
+      if (!item.playerToken) {
+        contractRenewalUnresolvedCount++;
+        continue;
+      }
+
+      const key = tokenKey(item.playerToken, item.tokenIdDec);
+      const pos = positionByKey.get(key) ?? { shares: 0n, costUsdc: 0n, promoShares: 0n, freeShares: 0n };
+      const flow = flowByKey.get(key) ?? makeFlow();
+
+      flow.spentUsdc += amountPaid;
+      flow.contractRenewalSpentUsdc += amountPaid;
+      flow.contractRenewalEvents++;
+      contractRenewalSpentUsdcRaw += amountPaid;
+      contractRenewalAppliedCount++;
+
+      // If the wallet currently has tracked shares, renewal fee increases that athlete's basis.
+      // Otherwise treat it as immediate realized expense to avoid silently dropping the cost.
+      if (pos.shares > 0n) {
+        pos.costUsdc += amountPaid;
+      } else {
+        realizedPnlUsdcRaw -= amountPaid;
+        realizedPnlEconomicUsdcRaw -= amountPaid;
+        contractRenewalNoSharesCount++;
+      }
+
+      positionByKey.set(key, pos);
+      flowByKey.set(key, flow);
+      continue;
+    }
+
     const playerToken = item.playerToken;
     if (!playerToken) continue;
 
-    const shareDelta = BigInt(item.walletShareDeltaRaw);
+    const shareDelta =
+      item.itemKind === "pack_open" ? BigInt(item.shareAmountRaw) : BigInt(item.walletShareDeltaRaw);
     if (shareDelta === 0n) continue;
 
     const key = tokenKey(playerToken, item.tokenIdDec);
-    const pos = positionByKey.get(key) ?? { shares: 0n, costUsdc: 0n };
+    const pos = positionByKey.get(key) ?? { shares: 0n, costUsdc: 0n, promoShares: 0n, freeShares: 0n };
 
-    const flow = flowByKey.get(key) ?? {
-      boughtShares: 0n,
-      soldShares: 0n,
-      spentUsdc: 0n,
-      receivedUsdc: 0n,
-      freeSharesIn: 0n,
-      freeEvents: 0,
-    };
+    const flow = flowByKey.get(key) ?? makeFlow();
+
+    if (item.itemKind === "pack_open") {
+      if (shareDelta > 0n) {
+        pos.shares += shareDelta;
+        const packCurrencyDelta = BigInt(item.walletCurrencyDeltaRaw ?? "0");
+        if (packCurrencyDelta < 0n) {
+          const paid = -packCurrencyDelta;
+          pos.costUsdc += paid;
+          flow.spentUsdc += paid;
+          flow.boughtShares += shareDelta;
+        } else {
+          pos.freeShares += shareDelta;
+          flow.freeSharesIn += shareDelta;
+          flow.freeEvents++;
+          packOpenFreeSharesRaw += shareDelta;
+          if (packCurrencyDelta > 0n) {
+            flow.receivedUsdc += packCurrencyDelta;
+          }
+        }
+        flow.packOpenSharesIn += shareDelta;
+        flow.packOpenEvents++;
+      }
+
+      flowByKey.set(key, flow);
+      positionByKey.set(key, pos);
+      continue;
+    }
 
     if (item.itemKind === "promotion") {
       // Promotions are treated as free shares (cost = 0). This adjusts average cost per
       // share and improves unrealized PnL accuracy when promotions occurred.
       if (shareDelta > 0n) {
         pos.shares += shareDelta;
+        pos.promoShares += shareDelta;
+        pos.freeShares += shareDelta;
         flow.freeSharesIn += shareDelta;
         flow.freeEvents++;
+        flow.promotionSharesIn += shareDelta;
+        flow.promotionEvents++;
       } else {
         // Defensive: handle negative deltas (should be rare/unexpected for promotions).
         const removed = -shareDelta;
         if (pos.shares > 0n) {
+          const removedClamped = removed > pos.shares ? pos.shares : removed;
+          const promoRemoved = proportionalRemoval(pos.promoShares, pos.shares, removedClamped);
+          const freeRemoved = proportionalRemoval(pos.freeShares, pos.shares, removedClamped);
+          pos.promoShares -= promoRemoved;
+          pos.freeShares -= freeRemoved;
           const avgCostPerShare = (pos.costUsdc * 10n ** 18n) / pos.shares;
-          const costBasisRemoved = (avgCostPerShare * removed) / 10n ** 18n;
-          pos.shares -= removed;
+          const costBasisRemoved = (avgCostPerShare * removedClamped) / 10n ** 18n;
+          pos.shares -= removedClamped;
           pos.costUsdc -= costBasisRemoved;
         }
       }
@@ -1709,15 +3568,21 @@ export async function GET(request: Request, context: { params: Promise<{ address
       // Treated as unknown provenance and zero cost.
       if (shareDelta > 0n) {
         pos.shares += shareDelta;
+        pos.freeShares += shareDelta;
         flow.freeSharesIn += shareDelta;
         flow.freeEvents++;
         reconciledTransferInCount++;
       } else {
         const removed = -shareDelta;
         if (pos.shares > 0n) {
+          const removedClamped = removed > pos.shares ? pos.shares : removed;
+          const promoRemoved = proportionalRemoval(pos.promoShares, pos.shares, removedClamped);
+          const freeRemoved = proportionalRemoval(pos.freeShares, pos.shares, removedClamped);
+          pos.promoShares -= promoRemoved;
+          pos.freeShares -= freeRemoved;
           const avgCostPerShare = (pos.costUsdc * 10n ** 18n) / pos.shares;
-          const costBasisRemoved = (avgCostPerShare * removed) / 10n ** 18n;
-          pos.shares -= removed;
+          const costBasisRemoved = (avgCostPerShare * removedClamped) / 10n ** 18n;
+          pos.shares -= removedClamped;
           pos.costUsdc -= costBasisRemoved;
         }
         reconciledTransferOutCount++;
@@ -1749,6 +3614,10 @@ export async function GET(request: Request, context: { params: Promise<{ address
 
           if (isGift) {
             giftBuyCount++;
+            // Gifted trade shares are zero-cost for this wallet and must be treated as free.
+            pos.freeShares += shareDelta;
+            flow.freeSharesIn += shareDelta;
+            flow.freeEvents++;
           } else {
             costBasisUnknownTradeCount++;
           }
@@ -1762,10 +3631,15 @@ export async function GET(request: Request, context: { params: Promise<{ address
       flow.soldShares += sold;
 
       if (pos.shares > 0n) {
+        const soldClamped = sold > pos.shares ? pos.shares : sold;
+        const promoSold = proportionalRemoval(pos.promoShares, pos.shares, soldClamped);
+        const freeSold = proportionalRemoval(pos.freeShares, pos.shares, soldClamped);
+        pos.promoShares -= promoSold;
+        pos.freeShares -= freeSold;
         const avgCostPerShare = (pos.costUsdc * 10n ** 18n) / pos.shares;
-        const costBasisSold = (avgCostPerShare * sold) / 10n ** 18n;
+        const costBasisSold = (avgCostPerShare * soldClamped) / 10n ** 18n;
 
-        pos.shares -= sold;
+        pos.shares -= soldClamped;
         pos.costUsdc -= costBasisSold;
 
         if (currencyDelta > 0n) {
@@ -1803,6 +3677,10 @@ export async function GET(request: Request, context: { params: Promise<{ address
   // (decoded trades/promotions + synthetic transfers used to reconcile ERC-1155 deltas).
   let currentValueUsdcRaw = 0n;
   let unrealizedPnlUsdcRaw = 0n;
+  let currentValueExcludingPromotionsUsdcRaw = 0n;
+  let unrealizedPnlExcludingPromotionsUsdcRaw = 0n;
+  let currentValueExcludingFreeUsdcRaw = 0n;
+  let unrealizedPnlExcludingFreeUsdcRaw = 0n;
   let totalCostBasisUsdcRaw = 0n;
 
   for (const [key, pos] of positionByKey.entries()) {
@@ -1814,16 +3692,36 @@ export async function GET(request: Request, context: { params: Promise<{ address
     const value = priceMeta.valueUsdcRaw;
     currentValueUsdcRaw += value;
     unrealizedPnlUsdcRaw += value - pos.costUsdc;
+
+    const promoSharesHeld = pos.promoShares > pos.shares ? pos.shares : pos.promoShares;
+    const trackedSharesExcludingPromotions =
+      pos.shares > promoSharesHeld ? pos.shares - promoSharesHeld : 0n;
+    const valueExcludingPromotions =
+      (priceMeta.priceUsdcPerShareRaw * trackedSharesExcludingPromotions) / 10n ** 18n;
+    currentValueExcludingPromotionsUsdcRaw += valueExcludingPromotions;
+    unrealizedPnlExcludingPromotionsUsdcRaw += valueExcludingPromotions - pos.costUsdc;
+
+    const freeSharesHeld = pos.freeShares > pos.shares ? pos.shares : pos.freeShares;
+    const trackedSharesExcludingFree = pos.shares > freeSharesHeld ? pos.shares - freeSharesHeld : 0n;
+    const valueExcludingFree = (priceMeta.priceUsdcPerShareRaw * trackedSharesExcludingFree) / 10n ** 18n;
+    currentValueExcludingFreeUsdcRaw += valueExcludingFree;
+    unrealizedPnlExcludingFreeUsdcRaw += valueExcludingFree - pos.costUsdc;
   }
 
   const positionsByToken = holdingsEnriched
     .map((h) => {
       const key = tokenKey(h.contractAddress, h.tokenIdDec);
+      const playerName = h.metadata?.name ?? getSportfunNameOverride(h.contractAddress, h.tokenIdDec);
 
       const holdingShares = BigInt(h.balanceRaw);
       const tracked = positionByKey.get(key);
       const trackedShares = tracked?.shares ?? 0n;
       const trackedCostUsdc = tracked?.costUsdc ?? 0n;
+      const promoSharesHeld = tracked?.promoShares ?? 0n;
+      const freeSharesHeld = tracked?.freeShares ?? 0n;
+      const trackedSharesExcludingPromotions =
+        trackedShares > promoSharesHeld ? trackedShares - promoSharesHeld : 0n;
+      const trackedSharesExcludingFree = trackedShares > freeSharesHeld ? trackedShares - freeSharesHeld : 0n;
 
       const priceMeta = priceByHoldingKey.get(key);
       const currentPriceUsdcPerShare = priceMeta?.priceUsdcPerShareRaw;
@@ -1831,21 +3729,40 @@ export async function GET(request: Request, context: { params: Promise<{ address
       const currentValueTrackedUsdc = currentPriceUsdcPerShare
         ? (currentPriceUsdcPerShare * trackedShares) / 10n ** 18n
         : null;
+      const currentValueTrackedExcludingPromotionsUsdc = currentPriceUsdcPerShare
+        ? (currentPriceUsdcPerShare * trackedSharesExcludingPromotions) / 10n ** 18n
+        : null;
+      const currentValueTrackedExcludingFreeUsdc = currentPriceUsdcPerShare
+        ? (currentPriceUsdcPerShare * trackedSharesExcludingFree) / 10n ** 18n
+        : null;
 
       const avgCostUsdcPerShareRaw =
         trackedShares > 0n ? (trackedCostUsdc * 10n ** 18n) / trackedShares : null;
 
       const unrealizedPnlTrackedUsdcRaw =
         currentValueTrackedUsdc !== null ? currentValueTrackedUsdc - trackedCostUsdc : null;
+      const unrealizedPnlTrackedExcludingPromotionsUsdcRaw =
+        currentValueTrackedExcludingPromotionsUsdc !== null
+          ? currentValueTrackedExcludingPromotionsUsdc - trackedCostUsdc
+          : null;
+      const unrealizedPnlTrackedExcludingFreeUsdcRaw =
+        currentValueTrackedExcludingFreeUsdc !== null
+          ? currentValueTrackedExcludingFreeUsdc - trackedCostUsdc
+          : null;
 
       const flow = flowByKey.get(key);
 
       return {
         playerToken: h.contractAddress,
         tokenIdDec: h.tokenIdDec,
+        playerName,
 
         holdingSharesRaw: holdingShares.toString(10),
         trackedSharesRaw: trackedShares.toString(10),
+        promoSharesHeldRaw: promoSharesHeld.toString(10),
+        freeSharesHeldRaw: freeSharesHeld.toString(10),
+        trackedSharesExcludingPromotionsRaw: trackedSharesExcludingPromotions.toString(10),
+        trackedSharesExcludingFreeRaw: trackedSharesExcludingFree.toString(10),
 
         costBasisUsdcRaw: trackedCostUsdc.toString(10),
         avgCostUsdcPerShareRaw: avgCostUsdcPerShareRaw?.toString(10),
@@ -1853,8 +3770,15 @@ export async function GET(request: Request, context: { params: Promise<{ address
         currentPriceUsdcPerShareRaw: currentPriceUsdcPerShare?.toString(10),
         currentValueHoldingUsdcRaw: currentValueHoldingUsdc?.toString(10),
         currentValueTrackedUsdcRaw: currentValueTrackedUsdc?.toString(10),
+        currentValueTrackedExcludingPromotionsUsdcRaw:
+          currentValueTrackedExcludingPromotionsUsdc?.toString(10),
+        currentValueTrackedExcludingFreeUsdcRaw: currentValueTrackedExcludingFreeUsdc?.toString(10),
 
         unrealizedPnlTrackedUsdcRaw: unrealizedPnlTrackedUsdcRaw?.toString(10),
+        unrealizedPnlTrackedExcludingPromotionsUsdcRaw:
+          unrealizedPnlTrackedExcludingPromotionsUsdcRaw?.toString(10),
+        unrealizedPnlTrackedExcludingFreeUsdcRaw:
+          unrealizedPnlTrackedExcludingFreeUsdcRaw?.toString(10),
 
         totals: flow
           ? {
@@ -1864,6 +3788,12 @@ export async function GET(request: Request, context: { params: Promise<{ address
               receivedUsdcRaw: flow.receivedUsdc.toString(10),
               freeSharesInRaw: flow.freeSharesIn.toString(10),
               freeEvents: flow.freeEvents,
+              promotionSharesInRaw: flow.promotionSharesIn.toString(10),
+              promotionEvents: flow.promotionEvents,
+              packOpenSharesInRaw: flow.packOpenSharesIn.toString(10),
+              packOpenEvents: flow.packOpenEvents,
+              contractRenewalSpentUsdcRaw: flow.contractRenewalSpentUsdc.toString(10),
+              contractRenewalEvents: flow.contractRenewalEvents,
             }
           : undefined,
       };
@@ -1895,10 +3825,15 @@ export async function GET(request: Request, context: { params: Promise<{ address
       shareUnits: "Player share amounts are treated as 18-dec fixed-point (1e18 = 1 share).",
       knownContracts: SPORTFUN_ERC1155_CONTRACTS,
       fdfPairs: SPORTFUN_FDF_PAIR_CONTRACTS,
+      allowedGameWalletTokens: {
+        usdc: BASE_USDC,
+        fun: SPORTFUN_FUN_TOKEN_ADDRESS,
+      },
+      depositCounterparties: [...depositCounterparties],
       usdc: {
         contractAddress: BASE_USDC,
         decimals: BASE_USDC_DECIMALS,
-        note: "USDC delta is computed from receipt Transfer logs when available; authoritative trades come from FDFPairV2 events.",
+        note: "USDC delta is computed from receipt Transfer logs when available; trade rows come from FDFPairV2 events and are receipt-reconciled when needed.",
       },
     },
     summary: {
@@ -1919,12 +3854,18 @@ export async function GET(request: Request, context: { params: Promise<{ address
       activityCursor: activityOffset,
       decodedTradeCount,
       decodedPromotionCount,
+      decodedContractRenewalCount,
+      decodedPackOpenCount,
+      funTransferCount: funTransfers.length,
+      decodedDepositCount,
+      decodedScamCount,
       // Count of (contract, tokenId) deltas where decoded trades/promotions didn't match ERC-1155 deltas.
       // These are reconciled via synthetic transfer_in/transfer_out ledger ops.
       shareDeltaMismatchCount,
       shareDeltaMismatchTxCount,
       reconciledTransferInCount,
       reconciledTransferOutCount,
+      scanTruncatedByBudget,
       scanIncomplete,
       scan,
       scanStart: {
@@ -1938,9 +3879,13 @@ export async function GET(request: Request, context: { params: Promise<{ address
       realizedPnlUsdcRaw: realizedPnlUsdcRaw.toString(10),
       realizedPnlEconomicUsdcRaw: realizedPnlEconomicUsdcRaw.toString(10),
       unrealizedPnlUsdcRaw: unrealizedPnlUsdcRaw.toString(10),
+      unrealizedPnlExcludingPromotionsUsdcRaw: unrealizedPnlExcludingPromotionsUsdcRaw.toString(10),
+      unrealizedPnlExcludingFreeUsdcRaw: unrealizedPnlExcludingFreeUsdcRaw.toString(10),
       totalCostBasisUsdcRaw: totalCostBasisUsdcRaw.toString(10),
       // Value of positions that have a computed cost basis (decoded trades/promotions).
       currentValueUsdcRaw: currentValueUsdcRaw.toString(10),
+      currentValueExcludingPromotionsUsdcRaw: currentValueExcludingPromotionsUsdcRaw.toString(10),
+      currentValueExcludingFreeUsdcRaw: currentValueExcludingFreeUsdcRaw.toString(10),
       // Value of all priced holdings (independent of cost basis tracking).
       currentValueAllHoldingsUsdcRaw: currentValueAllHoldingsUsdcRaw.toString(10),
       holdingsPricedCount,
@@ -1949,8 +3894,18 @@ export async function GET(request: Request, context: { params: Promise<{ address
       sellNoProceedsCount,
       reconciledTransferInCount,
       reconciledTransferOutCount,
+      contractRenewalSpentUsdcRaw: contractRenewalSpentUsdcRaw.toString(10),
+      contractRenewalAppliedCount,
+      contractRenewalUnresolvedCount,
+      contractRenewalNoSharesCount,
+      contractRenewalUnsupportedPaymentCount,
+      packOpenFreeSharesRaw: packOpenFreeSharesRaw.toString(10),
+      depositToGameWalletUsdcRaw: depositToGameWalletUsdcRaw.toString(10),
+      depositFromGameWalletUsdcRaw: depositFromGameWalletUsdcRaw.toString(10),
+      funIncomingRaw: funIncomingRaw.toString(10),
+      funOutgoingRaw: funOutgoingRaw.toString(10),
       positionsByToken: positionsByToken,
-      note: "PnL is a WIP: cost basis is tracked only from decoded FDFPair trades (moving average). Promotions and reconciled transfers add free shares (zero cost). positionsByToken is computed from the same (possibly truncated) ledger. currentValueAllHoldingsUsdcRaw sums priced holdings; missing historical trades may still skew cost basis. realizedPnlEconomicUsdcRaw uses trade proceeds even if redirected to another recipient (cashflow remains in realizedPnlUsdcRaw).",
+      note: "PnL is a WIP: cost basis is tracked from decoded FDFPair trades (moving average). Promotions and reconciled transfers add free shares (zero cost). Pack open USDC cost is inferred from tx-level receipt deltas after accounting for trades/renewals/deposits; when no residual USDC remains, pack rows are treated as free. ContractRenewed events (USDC) are included as athlete-specific costs when token mapping is unambiguous; unresolved/non-USDC renewals are counted separately. Deposits to/from game wallet are tracked separately and excluded from athlete trade PnL. FUN token transfers are tracked in activity and summary metrics but excluded from athlete cost basis/PnL. positionsByToken is computed from the full scanned activity set (bounded by scan limits such as maxPages/deadline). currentValueAllHoldingsUsdcRaw sums priced holdings; missing historical trades may still skew cost basis. unrealizedPnlExcludingFreeUsdcRaw excludes free shares currently held (pro-rata reduction on sells). realizedPnlEconomicUsdcRaw uses trade proceeds even if redirected to another recipient (cashflow remains in realizedPnlUsdcRaw).",
     },
     debug: {
       contracts: [...contractSet].map((c) => ({ address: c, label: shortenAddress(c) })),
@@ -1968,10 +3923,11 @@ export async function GET(request: Request, context: { params: Promise<{ address
 
   const mode = q.mode ?? (scanMode === "full" ? "async" : "sync");
   const jobIdParam = q.jobId;
-  const snapshotKey = `sportfun:portfolio:snapshot:${walletLc}`;
-  const jobIndexKey = `sportfun:portfolio:job-index:${walletLc}:${cacheKey}`;
+  const snapshotKey = `sportfun:portfolio:snapshot:v${PORTFOLIO_CACHE_SCHEMA_VERSION}:${walletLc}`;
+  const jobIndexKey = `sportfun:portfolio:job-index:v${PORTFOLIO_CACHE_SCHEMA_VERSION}:${walletLc}:${cacheKey}`;
   const jobTtl = 60 * 30;
   const snapshotTtl = 60 * 60;
+  const kvPayloadMaxBytes = 900_000;
 
   type PortfolioJobStatus = "pending" | "running" | "completed" | "failed";
   type PortfolioJob = {
@@ -1983,6 +3939,7 @@ export async function GET(request: Request, context: { params: Promise<{ address
     error?: string;
     cacheKey: string;
     snapshotKey: string;
+    cacheStored?: boolean;
   };
 
   const latestSnapshot = kvEnabled() ? await kvGetJson<unknown>(snapshotKey) : null;
@@ -1995,6 +3952,41 @@ export async function GET(request: Request, context: { params: Promise<{ address
   const writeJob = async (job: PortfolioJob) => {
     if (!kvEnabled()) return false;
     return kvSetJson(jobKey(job.id), job, jobTtl);
+  };
+
+  const persistPayloadToKv = async (
+    payload: unknown,
+    keys: { cacheKey: string; snapshotKey: string }
+  ): Promise<boolean> => {
+    if (!kvEnabled()) return false;
+    try {
+      const raw = JSON.stringify(payload);
+      if (raw.length >= kvPayloadMaxBytes) return false;
+      await kvSetRaw(keys.cacheKey, raw, cacheTtl);
+      await kvSetRaw(keys.snapshotKey, raw, snapshotTtl);
+      return true;
+    } catch {
+      // ignore cache failures
+      return false;
+    }
+  };
+
+  const resolveCompletedJobPayload = async (
+    job: PortfolioJob
+  ): Promise<Record<string, unknown> | null> => {
+    const cached = await kvGetJson<Record<string, unknown>>(job.cacheKey);
+    if (cached) return cached;
+
+    try {
+      const payload = (await buildPayload()) as Record<string, unknown>;
+      await persistPayloadToKv(payload, {
+        cacheKey: job.cacheKey,
+        snapshotKey: job.snapshotKey,
+      });
+      return payload;
+    } catch {
+      return null;
+    }
   };
 
   const respondWithStatus = (job: PortfolioJob | null, jobId?: string) => {
@@ -2018,10 +4010,18 @@ export async function GET(request: Request, context: { params: Promise<{ address
         return respondWithStatus(null, jobIdParam);
       }
       if (job.status === "completed") {
-        const cached = await kvGetJson<Record<string, unknown>>(job.cacheKey);
-        if (cached) {
-          return NextResponse.json({ ...cached, status: "completed", jobId: job.id });
+        const payload = await resolveCompletedJobPayload(job);
+        if (payload) {
+          return NextResponse.json({ ...payload, status: "completed", jobId: job.id });
         }
+        return respondWithStatus(
+          {
+            ...job,
+            status: "failed",
+            error: "Completed job result is unavailable. Please rerun full scan.",
+          },
+          job.id
+        );
       }
       return respondWithStatus(job, job.id);
     }
@@ -2035,6 +4035,20 @@ export async function GET(request: Request, context: { params: Promise<{ address
     if (existingJobMeta?.jobId) {
       const existingJob = await readJob(existingJobMeta.jobId);
       if (existingJob) {
+        if (existingJob.status === "completed") {
+          const payload = await resolveCompletedJobPayload(existingJob);
+          if (payload) {
+            return NextResponse.json({ ...payload, status: "completed", jobId: existingJob.id });
+          }
+          return respondWithStatus(
+            {
+              ...existingJob,
+              status: "failed",
+              error: "Completed job result is unavailable. Please rerun full scan.",
+            },
+            existingJob.id
+          );
+        }
         return respondWithStatus(existingJob, existingJob.id);
       }
     }
@@ -2054,16 +4068,13 @@ export async function GET(request: Request, context: { params: Promise<{ address
       await writeJob({ ...job, status: "running", startedAt: new Date().toISOString() });
       try {
         const payload = await buildPayload();
-        try {
-          const raw = JSON.stringify(payload);
-          if (raw.length < 900_000) {
-            await kvSetRaw(cacheKey, raw, cacheTtl);
-            await kvSetRaw(snapshotKey, raw, snapshotTtl);
-          }
-        } catch {
-          // ignore cache failures
-        }
-        await writeJob({ ...job, status: "completed", finishedAt: new Date().toISOString() });
+        const cacheStored = await persistPayloadToKv(payload, { cacheKey, snapshotKey });
+        await writeJob({
+          ...job,
+          status: "completed",
+          finishedAt: new Date().toISOString(),
+          cacheStored,
+        });
       } catch (err: unknown) {
         await writeJob({
           ...job,
@@ -2087,17 +4098,7 @@ export async function GET(request: Request, context: { params: Promise<{ address
 
   const payload = await buildPayload();
 
-  if (kvEnabled()) {
-    try {
-      const raw = JSON.stringify(payload);
-      if (raw.length < 900_000) {
-        await kvSetRaw(cacheKey, raw, cacheTtl);
-        await kvSetRaw(snapshotKey, raw, snapshotTtl);
-      }
-    } catch {
-      // ignore cache failures
-    }
-  }
+  await persistPayloadToKv(payload, { cacheKey, snapshotKey });
 
   return NextResponse.json(payload);
 }
