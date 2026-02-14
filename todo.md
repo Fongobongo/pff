@@ -3,7 +3,7 @@
 Дата проверки: 2026-02-14
 
 ## 1) Soccer player details missing
-- [ ] Add dynamic route `/soccer/players/[playerId]`
+- [x] Add dynamic route `/soccer/players/[playerId]`
   - Example existing on prod: `/soccer/players/00661683-b4e1-4767-8a4f-5bd31a44ec0e`
   - Expected file: `src/app/soccer/players/[playerId]/page.tsx`
 
@@ -14,7 +14,8 @@
 - [ ] Landing page parity with prod hero/cards (root route `/`)
 
 ## 3) Optional consistency checks after implementation
-- [ ] Verify status `200` for `/soccer/players/[playerId]`
+- [x] Verify status `200` for `/soccer/players/[playerId]`
+  - Verified locally on 2026-02-14: `GET /soccer/players/00661683-b4e1-4767-8a4f-5bd31a44ec0e` -> `200`
 
 ## 4) Missing features vs `https://tenero.io` (`sports.fun`)
 - [ ] Add route `/sportsfun` (sports.fun hub page)

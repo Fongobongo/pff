@@ -1,6 +1,11 @@
 import Link from "next/link";
 import SoccerPageShell from "../_components/SoccerPageShell";
 import { getSportfunMarketSnapshot, toUsdNumber } from "@/lib/sportfunMarket";
+import {
+  buildSoccerPlayerIdIndexByName,
+  fetchSoccerDirectoryPlayers,
+  normalizeSoccerPlayerName,
+} from "@/lib/soccerPlayerDirectory";
 
 const PAGE_SIZE = 50;
 const SORT_OPTIONS = [
@@ -65,12 +70,16 @@ export default async function SoccerPlayersPage({
   const sort = SORT_OPTIONS.find((opt) => opt.key === params.sort)?.key ?? "price";
   const page = parseNumber(params.page, 1, 1, 9999);
 
-  const snapshot = await getSportfunMarketSnapshot({
-    sport: "soccer",
-    windowHours: 24,
-    trendDays: 30,
-    maxTokens: 500,
-  });
+  const [snapshot, directoryPlayers] = await Promise.all([
+    getSportfunMarketSnapshot({
+      sport: "soccer",
+      windowHours: 24,
+      trendDays: 30,
+      maxTokens: 500,
+    }),
+    fetchSoccerDirectoryPlayers(),
+  ]);
+  const playerIdByName = buildSoccerPlayerIdIndexByName(directoryPlayers);
 
   const filtered = snapshot.tokens.filter((token) => {
     if (!q) return true;
@@ -146,7 +155,16 @@ export default async function SoccerPlayersPage({
             <tbody>
               {pageRows.map((row) => (
                 <tr key={row.tokenIdDec} className="border-t border-black/10 dark:border-white/10">
-                  <td className="px-3 py-2 text-black dark:text-white">{row.name ?? `#${row.tokenIdDec}`}</td>
+                  <td className="px-3 py-2 text-black dark:text-white">
+                    <Link
+                      className="hover:underline"
+                      href={`/soccer/players/${encodeURIComponent(
+                        row.name ? (playerIdByName.get(normalizeSoccerPlayerName(row.name)) ?? row.tokenIdDec) : row.tokenIdDec
+                      )}`}
+                    >
+                      {row.name ?? `#${row.tokenIdDec}`}
+                    </Link>
+                  </td>
                   <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{row.tokenIdDec}</td>
                   <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{formatUsd(row.currentPriceUsdcRaw)}</td>
                   <td
