@@ -278,6 +278,18 @@ export type SportsfunWalletTradeRow = {
   recipient_name: string | null;
   base_token_address: string;
   quote_token_address: string;
+  base_token?: {
+    address: string;
+    symbol: string;
+    name: string;
+    image_url?: string;
+  };
+  quote_token?: {
+    address: string;
+    symbol: string;
+    name: string;
+    image_url?: string;
+  };
   base_token_amount: string;
   quote_token_amount: string;
   amount_usd: number;

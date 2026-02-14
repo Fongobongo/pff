@@ -42,23 +42,23 @@
   - Current blocker: Tenero auth flow exposes only `Continue with Google` (no temp-email signup flow detected)
 
 ## 6) Missing wallet analytics vs `https://tenero.io/sportsfun/wallet/[address]`
-- [ ] Add dedicated wallet route `/sportsfun/wallet/[address]`
+- [x] Add dedicated wallet route `/sportsfun/wallet/[address]`
   - Scope: wallet profile header (short address, editable label, tracked/not-tracked state, explorer link)
-- [ ] Add wallet overview cards parity
+- [x] Add wallet overview cards parity
   - Scope: `USDC balance`, `total value`, `token holdings`, native-vs-token split
-- [ ] Add wallet PnL distribution panel
+- [x] Add wallet PnL distribution panel
   - Scope: distribution buckets by performance ranges
-- [ ] Add wallet `PnL Calendar`
+- [x] Add wallet `PnL Calendar`
   - Scope: calendar/heatmap-style historical profitability view
-- [ ] Add wallet `Trade Stats` module with timeframe switcher
+- [x] Add wallet `Trade Stats` module with timeframe switcher
   - Scope: `1d/7d/30d/all`, buy/sell trades, trade volume net, add/remove liquidity, avg buy/sell/swap, traded tokens/pools/platforms
-- [ ] Add wallet `Funding` module
+- [x] Add wallet `Funding` module
   - Scope: funded-by source and funding transaction summary
-- [ ] Add wallet `Transactions sent` summary
+- [x] Add wallet `Transactions sent` summary
   - Scope: first/last activity timestamps
-- [ ] Add dedicated `Transfers` tab for wallet view
+- [x] Add dedicated `Transfers` tab for wallet view
   - Note: current grouped activity exists, but no standalone transfer-focused view
-- [ ] Extend wallet holdings table parity
+- [x] Extend wallet holdings table parity
   - Scope: combined columns for `Bought`, `Sold`, `Avg B/S`, `Realized PnL`, `Unrealized PnL`, `Total PnL`, `Active`
 
 ## 7) Tenero API integration TODO (`api.tenero.io`)
@@ -97,3 +97,5 @@
   - Verified locally on 2026-02-14 via `curl` against `next dev`
 - [x] Verify status `200` for `/sportsfun/search`, `/sportsfun/watchlist`, `/sportsfun/portfolio`, `/sportsfun/tracker`
   - Verified locally on 2026-02-14 via `curl` against `next dev`
+- [x] Verify status `200` for `/sportsfun/wallet/[address]` and `tab=transfers`
+  - Verified locally on 2026-02-14: `/sportsfun/wallet/0x82c117A68fD47A2d53b997049F4BE44714D57455` and `/sportsfun/wallet/0x82c117A68fD47A2d53b997049F4BE44714D57455?tab=transfers&timeframe=7d`
