@@ -14,7 +14,8 @@
     "test:stats": "tsx scripts/test_stats.ts",
     "test:nfl-smoke": "tsx scripts/test_nfl_smoke.ts",
     "test:nfl-mobile": "tsx scripts/test_nfl_mobile_regression.ts",
-    "report:nfl-health": "tsx scripts/report_nfl_health.ts"
+    "report:nfl-health": "tsx scripts/report_nfl_health.ts",
+    "sportfun:names": "tsx scripts/generate_sportfun_name_overrides.ts"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.90.20",

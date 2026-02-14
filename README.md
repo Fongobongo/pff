@@ -15,3 +15,5 @@ Fan site built with **React / Next.js** for the game **pro.football.fun**.
   - `CHANGELOG.md`
 - Free-tier data sources and limits:
   - `docs/FREE_TIER_SOURCES.md`
+- Sport.fun soccer name refresh runbook:
+  - `docs/SPORTFUN_SOCCER_NAMES_RUNBOOK.md`
