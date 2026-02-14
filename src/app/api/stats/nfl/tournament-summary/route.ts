@@ -5,6 +5,7 @@ import { scoreNfl } from "@/lib/stats/nfl";
 import { getCached, setCached } from "@/lib/stats/cache";
 import { completeJob, createJob, failJob, getJobByKey, updateJob } from "@/lib/stats/jobs";
 import { toCsv } from "@/lib/stats/csv";
+import { upsertSportfunTournamentTpRows } from "@/lib/sportfunTournamentTp";
 
 const querySchema = z.object({
   season: z.coerce.number().int().min(1999),
@@ -30,6 +31,7 @@ type SummaryPlayer = {
   average: number;
   bestWeek?: number;
   bestScore?: number;
+  rank?: number;
 };
 
 type TournamentSummary = {
@@ -50,6 +52,11 @@ type TournamentSummary = {
   sort?: string;
   dir?: "asc" | "desc";
   players: SummaryPlayer[];
+};
+
+type BuildSummaryResult = {
+  summary: TournamentSummary;
+  allPlayers: SummaryPlayer[];
 };
 
 function respondSummary(summary: TournamentSummary, format: "json" | "csv") {
@@ -175,7 +182,7 @@ function buildSummary(options: {
   sort: SummarySort;
   dir: "asc" | "desc";
   onProgress?: (processed: number, total: number) => void;
-}): TournamentSummary {
+}): BuildSummaryResult {
   const { season, seasonType, weekStart, weekEnd, weeks, rows, coverage, topCount, sort, dir, onProgress } = options;
 
   const playerTotals = new Map<string, Omit<SummaryPlayer, "average">>();
@@ -225,23 +232,75 @@ function buildSummary(options: {
     }))
     .slice();
 
-  const sorted = sortSummary(players, sort, dir).slice(0, topCount);
+  const rankedByTotal = sortSummary(players, "total", "desc").map((player, index) => ({
+    ...player,
+    rank: index + 1,
+  }));
+
+  const sorted = sortSummary(rankedByTotal, sort, dir).slice(0, topCount);
 
   return {
-    sport: "nfl",
-    source: "nflverse_data",
-    season,
-    seasonType,
-    weekStart,
-    weekEnd,
-    weeks,
-    playersTotal: playerTotals.size,
-    gamesTotal,
-    coverage,
-    sort,
-    dir,
-    players: sorted,
+    summary: {
+      sport: "nfl",
+      source: "nflverse_data",
+      season,
+      seasonType,
+      weekStart,
+      weekEnd,
+      weeks,
+      playersTotal: playerTotals.size,
+      gamesTotal,
+      coverage,
+      sort,
+      dir,
+      players: sorted,
+    },
+    allPlayers: rankedByTotal,
   };
+}
+
+async function persistNflTournamentTp(params: {
+  season: number;
+  seasonType?: string;
+  weekStart?: number;
+  weekEnd?: number;
+  weeks: number[];
+  gamesTotal: number;
+  players: SummaryPlayer[];
+}) {
+  if (!params.players.length) return;
+  const firstWeek = params.weekStart ?? params.weeks[0];
+  const lastWeek = params.weekEnd ?? params.weeks[params.weeks.length - 1];
+  const rangeKey = `${firstWeek ?? "all"}-${lastWeek ?? "all"}`;
+  const tournamentKey = `nfl:${params.season}:${params.seasonType ?? "ALL"}:${rangeKey}`;
+  const asOf = new Date().toISOString();
+
+  await upsertSportfunTournamentTpRows(
+    params.players.map((player) => ({
+      sport: "nfl",
+      tournamentKey,
+      seasonId: params.season,
+      seasonType: params.seasonType,
+      weekStart: firstWeek,
+      weekEnd: lastWeek,
+      athleteId: player.playerId,
+      athleteName: player.playerName,
+      team: player.team,
+      position: player.position,
+      games: player.games,
+      tpTotal: player.totalRounded,
+      tpTotalUnrounded: player.totalPoints,
+      tpAverage: player.average,
+      rank: player.rank,
+      source: "nflverse_data",
+      asOf,
+      providerPayload: {
+        gamesTotal: params.gamesTotal,
+        bestWeek: player.bestWeek ?? null,
+        bestScore: player.bestScore ?? null,
+      },
+    }))
+  );
 }
 
 async function runSummaryJob(options: {
@@ -257,11 +316,12 @@ async function runSummaryJob(options: {
   topCount: number;
   sort: SummarySort;
   dir: "asc" | "desc";
+  persistToSupabase?: boolean;
 }) {
   const { jobId, cacheKey, season, seasonType, weekStart, weekEnd, weeks, rows, coverage, topCount, sort, dir } = options;
   await updateJob(jobId, { status: "running", total: rows.length, processed: 0 });
   try {
-    const summary = buildSummary({
+    const result = buildSummary({
       season,
       seasonType,
       weekStart,
@@ -276,8 +336,19 @@ async function runSummaryJob(options: {
         void updateJob(jobId, { processed });
       },
     });
-    setCached(cacheKey, summary, 3600);
-    await completeJob(jobId, summary);
+    if (options.persistToSupabase) {
+      await persistNflTournamentTp({
+        season,
+        seasonType,
+        weekStart,
+        weekEnd,
+        weeks,
+        gamesTotal: result.summary.gamesTotal,
+        players: result.allPlayers,
+      });
+    }
+    setCached(cacheKey, result.summary, 3600);
+    await completeJob(jobId, result.summary);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
     await failJob(jobId, message);
@@ -357,6 +428,7 @@ export async function GET(request: Request) {
         topCount,
         sort,
         dir,
+        persistToSupabase: true,
       });
     }
 
@@ -388,7 +460,7 @@ export async function GET(request: Request) {
     });
   }
 
-  const summary = buildSummary({
+  const result = buildSummary({
     season: query.season,
     seasonType: query.season_type,
     weekStart,
@@ -401,9 +473,19 @@ export async function GET(request: Request) {
     dir,
   });
 
-  setCached(cacheKey, summary, 3600);
+  await persistNflTournamentTp({
+    season: query.season,
+    seasonType: query.season_type,
+    weekStart,
+    weekEnd,
+    weeks,
+    gamesTotal: result.summary.gamesTotal,
+    players: result.allPlayers,
+  });
+
+  setCached(cacheKey, result.summary, 3600);
   if (format === "json") {
-    return NextResponse.json(summary);
+    return NextResponse.json(result.summary);
   }
-  return respondSummary(summary, format);
+  return respondSummary(result.summary, format);
 }

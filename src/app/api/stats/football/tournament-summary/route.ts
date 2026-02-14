@@ -6,6 +6,7 @@ import { scoreFootball } from "@/lib/stats/football";
 import { getCached, setCached } from "@/lib/stats/cache";
 import { completeJob, createJob, failJob, getJobByKey, updateJob } from "@/lib/stats/jobs";
 import { toCsv } from "@/lib/stats/csv";
+import { upsertSportfunTournamentTpRows } from "@/lib/sportfunTournamentTp";
 import type { FootballCompetitionTier } from "@/lib/stats/types";
 
 const querySchema = z.object({
@@ -27,6 +28,7 @@ type TournamentSummaryPlayer = {
   totalPoints: number;
   totalRounded: number;
   average: number;
+  rank?: number;
 };
 
 type TournamentSummary = {
@@ -37,6 +39,11 @@ type TournamentSummary = {
   competitionTier?: FootballCompetitionTier;
   matchesProcessed: number;
   players: TournamentSummaryPlayer[];
+};
+
+type TournamentSummaryBuildResult = {
+  summary: TournamentSummary;
+  allPlayers: TournamentSummaryPlayer[];
 };
 
 async function mapWithConcurrency<T, R>(
@@ -68,7 +75,7 @@ async function buildTournamentSummary(options: {
   topCount: number;
   refresh?: boolean;
   onProgress?: (processed: number, total: number) => void;
-}): Promise<TournamentSummary> {
+}): Promise<TournamentSummaryBuildResult> {
   const { competitionId, seasonId, matches, competitionTier, topCount, refresh, onProgress } = options;
 
   const playerTotals = new Map<
@@ -128,22 +135,36 @@ async function buildTournamentSummary(options: {
     return match.match_id;
   });
 
-  const players = Array.from(playerTotals.values())
+  const allPlayers = Array.from(playerTotals.values())
     .map((player) => ({
       ...player,
       average: player.games > 0 ? player.totalPoints / player.games : 0,
     }))
-    .sort((a, b) => b.totalPoints - a.totalPoints)
-    .slice(0, topCount);
+    .sort((a, b) => {
+      const scoreDiff = b.totalRounded - a.totalRounded;
+      if (scoreDiff !== 0) return scoreDiff;
+      const totalDiff = b.totalPoints - a.totalPoints;
+      if (totalDiff !== 0) return totalDiff;
+      return a.playerName.localeCompare(b.playerName);
+    })
+    .map((player, index) => ({
+      ...player,
+      rank: index + 1,
+    }));
+
+  const players = allPlayers.slice(0, topCount);
 
   return {
-    sport: "football",
-    source: "statsbomb_open_data",
-    competitionId,
-    seasonId,
-    competitionTier,
-    matchesProcessed: matches.length,
-    players,
+    summary: {
+      sport: "football",
+      source: "statsbomb_open_data",
+      competitionId,
+      seasonId,
+      competitionTier,
+      matchesProcessed: matches.length,
+      players,
+    },
+    allPlayers,
   };
 }
 
@@ -186,6 +207,39 @@ function respondSummary(summary: TournamentSummary, format: "json" | "csv") {
   return NextResponse.json(summary);
 }
 
+async function persistFootballTournamentTp(params: {
+  competitionId: number;
+  seasonId: number;
+  competitionTier?: FootballCompetitionTier;
+  matchesProcessed: number;
+  players: TournamentSummaryPlayer[];
+}) {
+  const asOf = new Date().toISOString();
+  await upsertSportfunTournamentTpRows(
+    params.players.map((player) => ({
+      sport: "football",
+      tournamentKey: `football:${params.competitionId}:${params.seasonId}`,
+      competitionId: params.competitionId,
+      seasonId: params.seasonId,
+      athleteId: String(player.playerId),
+      athleteName: player.playerName,
+      team: player.teamName,
+      position: player.position,
+      games: player.games,
+      tpTotal: player.totalRounded,
+      tpTotalUnrounded: player.totalPoints,
+      tpAverage: player.average,
+      rank: player.rank,
+      source: "statsbomb_open_data",
+      asOf,
+      providerPayload: {
+        competitionTier: params.competitionTier ?? null,
+        matchesProcessed: params.matchesProcessed,
+      },
+    }))
+  );
+}
+
 async function runTournamentSummaryJob(options: {
   jobId: string;
   cacheKey: string;
@@ -195,11 +249,12 @@ async function runTournamentSummaryJob(options: {
   competitionTier?: FootballCompetitionTier;
   topCount: number;
   refresh?: boolean;
+  persistToSupabase?: boolean;
 }) {
   const { jobId, cacheKey, competitionId, seasonId, matches, competitionTier, topCount } = options;
   await updateJob(jobId, { status: "running", total: matches.length, processed: 0 });
   try {
-    const summary = await buildTournamentSummary({
+    const result = await buildTournamentSummary({
       competitionId,
       seasonId,
       matches,
@@ -210,8 +265,17 @@ async function runTournamentSummaryJob(options: {
         void updateJob(jobId, { processed });
       },
     });
-    setCached(cacheKey, summary, 3600);
-    await completeJob(jobId, summary);
+    if (options.persistToSupabase) {
+      await persistFootballTournamentTp({
+        competitionId,
+        seasonId,
+        competitionTier,
+        matchesProcessed: matches.length,
+        players: result.allPlayers,
+      });
+    }
+    setCached(cacheKey, result.summary, 3600);
+    await completeJob(jobId, result.summary);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
     await failJob(jobId, message);
@@ -252,6 +316,7 @@ export async function GET(request: Request) {
     const limited = query.limit ? ordered.slice(0, query.limit) : ordered;
     const topCount = query.top ?? 50;
     const wantsAsync = query.mode === "async" || (!query.limit && query.mode !== "sync");
+    const shouldPersist = !query.limit;
 
     if (wantsAsync && !query.limit) {
       const jobKeyBase = `statsbomb:tournament-summary-job:${query.competition_id}:${query.season_id}:${topCount}`;
@@ -274,6 +339,7 @@ export async function GET(request: Request) {
           competitionTier,
           topCount,
           refresh: query.refresh,
+          persistToSupabase: shouldPersist,
         });
       }
 
@@ -303,7 +369,7 @@ export async function GET(request: Request) {
       });
     }
 
-    const summary = await buildTournamentSummary({
+    const result = await buildTournamentSummary({
       competitionId: query.competition_id,
       seasonId: query.season_id,
       matches: limited,
@@ -311,8 +377,17 @@ export async function GET(request: Request) {
       topCount,
       refresh: query.refresh,
     });
-    setCached(cacheKey, summary, 3600);
-    return respondSummary(summary, format);
+    if (shouldPersist) {
+      await persistFootballTournamentTp({
+        competitionId: query.competition_id,
+        seasonId: query.season_id,
+        competitionTier,
+        matchesProcessed: limited.length,
+        players: result.allPlayers,
+      });
+    }
+    setCached(cacheKey, result.summary, 3600);
+    return respondSummary(result.summary, format);
   } catch (error) {
     return statsApiErrorResponse(error, "Failed to build tournament summary");
   }
