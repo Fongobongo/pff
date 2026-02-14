@@ -8,7 +8,7 @@
   - Expected file: `src/app/soccer/players/[playerId]/page.tsx`
 
 ## 2) Global shell/UI parity with prod is missing
-- [ ] Theme toggle (light/dark) in global layout
+- [x] Theme toggle (light/dark) in global layout
 - [ ] Top status bar with `Data updated: ...`
 - [ ] Shared footer with disclaimer
 - [ ] Landing page parity with prod hero/cards (root route `/`)
