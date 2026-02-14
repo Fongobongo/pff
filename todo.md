@@ -62,7 +62,7 @@
   - Scope: combined columns for `Bought`, `Sold`, `Avg B/S`, `Realized PnL`, `Unrealized PnL`, `Total PnL`, `Active`
 
 ## 7) Tenero API integration TODO (`api.tenero.io`)
-- [ ] Add `sportsfun` API client with typed wrappers for public wallet endpoints:
+- [x] Add `sportsfun` API client with typed wrappers for public wallet endpoints:
   - `GET /v1/sportsfun/wallets/{address}`
   - `GET /v1/sportsfun/wallets/{address}/trade_stats?timeframe=...`
   - `GET /v1/sportsfun/wallets/{address}/daily_trade_stats?timeframe=...`
@@ -70,7 +70,7 @@
   - `GET /v1/sportsfun/wallets/{address}/holdings_value`
   - `GET /v1/sportsfun/wallets/{address}/trades` (cursor pagination via `data.next`)
   - `GET /v1/sportsfun/wallets/{address}/transfers`
-- [ ] Add `sportsfun` market data endpoints to client:
+- [x] Add `sportsfun` market data endpoints to client:
   - `GET /v1/sportsfun/tokens`
   - `GET /v1/sportsfun/pools`
   - `GET /v1/sportsfun/market/top_gainers`
@@ -78,7 +78,7 @@
   - `GET /v1/sportsfun/market/top_outflows`
   - `GET /v1/sportsfun/market/whale_trades`
   - `GET /v1/sportsfun/market/hourly_netflow`
-- [ ] Implement resilience for unstable endpoints
+- [x] Implement resilience for unstable endpoints
   - Note: `GET /v1/sportsfun/wallets/{address}/pnl_distribution` can return `500` for some wallets; UI should degrade gracefully
 - [ ] Handle auth-gated Tenero features behind our own auth/proxy
   - `GET /v1/sportsfun/tracked_wallets` returns `401` without auth

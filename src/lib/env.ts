@@ -53,6 +53,9 @@ const envSchema = z.object({
   SPORTFUN_PRICE_SYNC_ENABLED: z.string().optional(),
   SPORTFUN_PRICE_REFRESH_MINUTES: z.coerce.number().int().min(5).max(60).optional(),
   SPORTFUN_EXTERNAL_PRICE_TOKENS: z.string().optional(),
+
+  // Optional Tenero API base URL override (defaults to public api.tenero.io).
+  TENERO_API_BASE_URL: z.string().url().optional(),
 });
 
 const parsed = envSchema.parse({
@@ -77,6 +80,7 @@ const parsed = envSchema.parse({
   SPORTFUN_PRICE_SYNC_ENABLED: process.env.SPORTFUN_PRICE_SYNC_ENABLED,
   SPORTFUN_PRICE_REFRESH_MINUTES: process.env.SPORTFUN_PRICE_REFRESH_MINUTES,
   SPORTFUN_EXTERNAL_PRICE_TOKENS: process.env.SPORTFUN_EXTERNAL_PRICE_TOKENS,
+  TENERO_API_BASE_URL: process.env.TENERO_API_BASE_URL,
 });
 
 function parseBoolean(value: string | undefined): boolean {
