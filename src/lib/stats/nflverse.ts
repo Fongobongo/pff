@@ -167,10 +167,10 @@ function toOptionalNumber(value: string | undefined): number | undefined {
   return Number.isFinite(num) ? num : undefined;
 }
 
-async function fetchJson<T>(url: string, revalidateSeconds: number): Promise<T> {
+async function fetchJson<T>(url: string): Promise<T> {
   const res = await fetch(url, {
     headers: { "User-Agent": "pff" },
-    next: { revalidate: revalidateSeconds },
+    cache: "no-store",
   });
   if (!res.ok) {
     throw new Error(`NFLverse request failed: ${res.status} ${res.statusText}`);
@@ -180,10 +180,7 @@ async function fetchJson<T>(url: string, revalidateSeconds: number): Promise<T> 
 
 async function getReleaseAssetsByTag(tag: string) {
   return withCache(`${NFLVERSE_REPO}/releases/tags/${tag}`, 86400, () =>
-    fetchJson<{ assets: { name: string; browser_download_url: string }[] }>(
-      `${NFLVERSE_REPO}/releases/tags/${tag}`,
-      86400
-    )
+    fetchJson<{ assets: { name: string; browser_download_url: string }[] }>(`${NFLVERSE_REPO}/releases/tags/${tag}`)
   );
 }
 
@@ -252,7 +249,7 @@ export async function fetchNflWeeklyStats(options: {
 
   const cacheKey = `nflverse:stats_player_week:${season}`;
   const csvText = await withCache(cacheKey, 3600, async () => {
-    const res = await fetch(sourceUrl, { next: { revalidate: 3600 } });
+    const res = await fetch(sourceUrl, { cache: "no-store" });
     if (!res.ok) {
       throw new Error(`NFLverse CSV fetch failed: ${res.status} ${res.statusText}`);
     }
@@ -342,7 +339,7 @@ export async function fetchNflWeeklyStats(options: {
 async function fetchCsvFromAsset(tag: string, assetName: string, cacheKey: string, ttlSeconds: number) {
   const sourceUrl = await getReleaseAssetUrl(tag, assetName);
   const csvText = await withCache(cacheKey, ttlSeconds, async () => {
-    const res = await fetch(sourceUrl, { next: { revalidate: ttlSeconds } });
+    const res = await fetch(sourceUrl, { cache: "no-store" });
     if (!res.ok) {
       throw new Error(`NFLverse CSV fetch failed: ${res.status} ${res.statusText}`);
     }

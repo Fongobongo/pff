@@ -192,7 +192,8 @@ export default async function NflOpportunitiesPage({
       ? fetch(`${baseUrl}/api/stats/nfl/score-week?${prevQuery.toString()}`, { next: { revalidate: 3600 } })
       : Promise.resolve(null),
     fetch(`${baseUrl}/api/stats/nfl/weekly?season=${season}&season_type=${seasonType}`, {
-      next: { revalidate: 3600 },
+      // Payload can exceed Next.js 2MB data-cache limit; skip cache to avoid runtime cache errors.
+      cache: "no-store",
     }),
   ]);
 
